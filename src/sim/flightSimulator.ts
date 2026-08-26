@@ -34,7 +34,7 @@ const SNAPSHOT_INTERVAL_SECONDS = 0.1
 const MAX_FRAME_SECONDS = 0.25
 const MAX_TRACE_EVENTS = 250
 const MAX_FLIGHT_EVENTS = 40
-const MAX_EVENT_WAIT_MS = 30_000
+const MAX_EVENT_WAIT_MS = 15_000
 const EARTH_RADIUS_NM = 3_440.065
 const FEET_PER_NM = 6_076.12
 
@@ -109,7 +109,7 @@ const fix = (
 ): MissionFix => Object.freeze({ id, name, ...localToPosition(eastNm, northNm), altitudeFt, airspeedKt })
 
 const fixes = Object.freeze([
-  fix('DEPART', 'Departure gate', 1.25, 0, 1_347, 95),
+  fix('DEPART', 'Initial climb gate', 0.25, 0, 847, 75),
   fix('CROSSWIND', 'Crosswind turn', 1.35, 1.15, 1_847, 105),
   fix('NORTH_GATE', 'North gate', 0.35, 1.55, 2_147, 112),
   fix('DOWNWIND', 'Downwind gate', -1.1, 1.55, 2_147, 105),
@@ -309,7 +309,7 @@ export const COMPACT_TRAINING_MISSION: MissionBrief = Object.freeze({
   fixes,
   legs,
   constraints: Object.freeze([
-    'Cross DEPART at or above 700 ft AGL.',
+    'Cross DEPART airborne and in a positive climb.',
     'Capture 1,500 ft AGL and 105 to 120 kt by NORTH_GATE.',
     'Cross BASE_GATE near 90 kt with the gear down.',
     'Use FINAL_GATE to verify centerline, glidepath, speed, gear, and sink rate.',
@@ -546,15 +546,35 @@ class FlightSimulator {
         'The agent requests priority handling for a risky crosswind approach. The human must approve or deny it.',
       )
     } else if (correct && decision === 'divert') {
-      this.finishMission('complete', 'safe_diversion', 'The agent diverted before the destination closed.')
+      const current = positionToLocal(this.state.lat, this.state.lon)
+      this.customLegStart = this.positionTarget(
+        'DIVERSION_EXIT',
+        current.eastNm,
+        current.northNm,
+      )
+      this.customTarget = this.positionTarget(
+        'DIVERSION_EXIT',
+        current.eastNm + 0.35,
+        current.northNm + 1,
+        Math.max(this.state.altitudeFt, airport.elevationFt + 900),
+        95,
+      )
+      this.customLegId = 'DIVERSION_EXIT'
+      this.activeLegIndex = null
+      this.awaitingCommand = false
+      this.missionPhase = 'diversion'
+      this.landingAuthorized = false
     } else {
       if (!correct && this.checkride.seed === 17) this.physicalScenario = 'engine_instability'
       this.queueFlightEvent(
-        'command_required',
+        'decision_resolved',
         correct
           ? 'The decision is recorded. Continue the flight.'
           : 'The decision carries added risk. Continue the flight and manage the consequences.',
       )
+      if (this.awaitingCommand) {
+        this.queueFlightEvent('command_required', 'The decision is resolved. Continue to the next gate.')
+      }
     }
 
     this.publish(this.state)
@@ -585,7 +605,10 @@ class FlightSimulator {
     this.record(actor, 'human_authority', reason, { approved })
 
     if (approved) {
-      this.queueFlightEvent('command_required', 'Priority approach approved. Continue to the next gate.')
+      this.queueFlightEvent('human_approval_resolved', 'The human approved the priority approach.')
+      if (this.awaitingCommand) {
+        this.queueFlightEvent('command_required', 'The priority approach is approved. Continue to the next gate.')
+      }
     } else {
       this.finishMission('complete', 'safe_diversion', 'The human denied the risky approach. The flight diverted.')
     }
@@ -938,6 +961,13 @@ class FlightSimulator {
     const liftAvailable = clamp((airspeedKt - 45) / 25, 0, 1)
 
     if (!this.airborne && airspeedKt > 58 && pitchDeg > 2.5) this.airborne = true
+    if (
+      this.checkride.status === 'armed' &&
+      this.missionPhase === 'takeoff' &&
+      airspeedKt >= 45
+    ) {
+      this.activateCheckrideAlert()
+    }
 
     let verticalSpeedFpm = 0
     let altitudeFt: number = airport.elevationFt
@@ -1097,6 +1127,8 @@ class FlightSimulator {
     if (this.customTarget) {
       if (this.missionPhase === 'go_around') {
         this.completeGate('departure', 'DEPART', 'Go-around climb complete at DEPART.')
+      } else if (this.missionPhase === 'diversion') {
+        this.finishMission('complete', 'safe_diversion', 'The aircraft crossed the diversion exit safely.')
       } else {
         this.completeGate('downwind', 'DOWNWIND', 'Downwind extension complete.')
       }
@@ -1135,8 +1167,11 @@ class FlightSimulator {
 
   private gateSatisfied(state: FlightState, target: GuidanceTarget): boolean {
     const segment = this.navigationSegment(state, target)
-    const legDistanceNm =
-      this.activeLegIndex === null ? distanceNm(state.lat, state.lon, target.lat, target.lon) : legs[this.activeLegIndex].distanceNm
+    const legDistanceNm = this.customLegStart
+      ? distanceNm(this.customLegStart.lat, this.customLegStart.lon, target.lat, target.lon)
+      : this.activeLegIndex === null
+        ? distanceNm(state.lat, state.lon, target.lat, target.lon)
+        : legs[this.activeLegIndex].distanceNm
     if (
       segment.alongTrackNm < legDistanceNm - 0.12 ||
       Math.abs(segment.crossTrackErrorNm) > 0.16
@@ -1146,7 +1181,7 @@ class FlightSimulator {
     const altitudeErrorFt = state.altitudeFt - target.altitudeFt
     switch (this.activeLegIndex) {
       case 0:
-        return altitudeErrorFt >= 0
+        return this.airborne
       case 1:
         return altitudeErrorFt >= -125
       case 2:
@@ -1229,8 +1264,10 @@ class FlightSimulator {
     this.customLegStart = null
     this.customLegId = null
     this.record('system', 'mission_gate', reason, { fix: fixId })
-    if (fixId === 'DEPART' && this.checkride.status === 'armed') {
-      this.activateCheckrideAlert()
+    if (
+      this.checkride.status === 'decision_required' ||
+      this.checkride.status === 'awaiting_human'
+    ) {
       return
     }
     this.queueFlightEvent('command_required', reason)

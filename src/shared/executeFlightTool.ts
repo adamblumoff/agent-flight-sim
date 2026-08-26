@@ -43,11 +43,11 @@ const receipt = <Details>(
 ) => ({ ok: true as const, summary, tone, details })
 
 const boundedTimeout = (value: unknown): number => {
-  if (value === undefined) return 30_000
+  if (value === undefined) return 12_000
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new TypeError('timeout_ms must be a finite number')
   }
-  return Math.min(30_000, Math.max(1_000, Math.floor(value)))
+  return Math.min(15_000, Math.max(1_000, Math.floor(value)))
 }
 
 const commandInput = (input: FlightToolArguments['command_flight']) => {

@@ -59,7 +59,9 @@ export interface CheckrideState {
 export type FlightEventType =
   | 'command_required'
   | 'system_alert'
+  | 'decision_resolved'
   | 'human_approval_required'
+  | 'human_approval_resolved'
   | 'touchdown'
   | 'mission_complete'
 
@@ -81,6 +83,7 @@ export type MissionFixId =
   | 'BASE_GATE'
   | 'FINAL_GATE'
   | 'TOUCHDOWN'
+  | 'DIVERSION_EXIT'
 
 export type MissionPhase =
   | 'preflight'

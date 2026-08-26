@@ -77,7 +77,9 @@ export const checkrideDecisionValues = [
 export const flightEventValues = [
   'command_required',
   'system_alert',
+  'decision_resolved',
   'human_approval_required',
+  'human_approval_resolved',
   'touchdown',
   'mission_complete',
 ] as const satisfies readonly FlightEventType[]
@@ -202,13 +204,13 @@ export const flightToolDefinitions = [
     name: 'wait_for_flight_event',
     title: 'Wait for flight event',
     description:
-      'Wait for the next matching revision without polling. The call returns on a command gate, system alert, human approval request, touchdown, mission completion, or a bounded timeout.',
+      'Wait for the next matching revision without polling. The call returns on a command gate, system alert, decision or human approval change, touchdown, mission completion, or a bounded timeout.',
     inputSchema: {
       type: 'object',
       properties: {
         after_revision: { type: 'number', minimum: 0 },
         events: { type: 'array', items: { type: 'string', enum: flightEventValues }, minItems: 1 },
-        timeout_ms: { type: 'number', minimum: 1000, maximum: 30000, default: 30000 },
+        timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 12000 },
       },
       required: ['after_revision', 'events'],
       additionalProperties: false,
@@ -233,7 +235,7 @@ export const flightToolDefinitions = [
         },
         reason: { type: 'string' },
         wait_until_decision: { type: 'boolean', default: false },
-        timeout_ms: { type: 'number', minimum: 1000, maximum: 30000, default: 30000 },
+        timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 12000 },
       },
       required: ['command'],
       additionalProperties: false,
