@@ -314,7 +314,9 @@ export function FlightWorld({
     let disposed = false
     const loadWorldTimer = window.setTimeout(() => {
       if (disposed) return
-      void createGooglePhotorealistic3DTileset()
+      void createGooglePhotorealistic3DTileset({
+        onlyUsingWithGoogleGeocoder: true,
+      })
         .then((tileset) => {
           if (disposed || viewer.isDestroyed()) {
             tileset.destroy()
