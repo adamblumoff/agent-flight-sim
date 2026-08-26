@@ -684,6 +684,15 @@ class FlightSimulator {
 
   setThrottle = (value: number, actor: TraceActor = 'human', reason = 'Set throttle'): void => {
     const throttle = clamp(Number.isFinite(value) ? value : 0, 0, 1)
+    if (
+      actor === 'human' &&
+      this.state.controlOwner === 'human' &&
+      this.missionPhase === 'preflight' &&
+      throttle > 0
+    ) {
+      this.activateLeg(0, 'takeoff')
+      this.missionOutcome = 'in_progress'
+    }
     this.record(actor, 'set_throttle', reason, { from: this.state.throttle, to: throttle })
     this.publish({ ...this.state, throttle })
   }

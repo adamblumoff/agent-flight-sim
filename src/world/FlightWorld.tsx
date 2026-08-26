@@ -33,7 +33,7 @@ import {
 
 const FEET_TO_METERS = 0.3048
 const AIRCRAFT_CLEARANCE_METERS = 2.3
-const RUNWAY_SURFACE_SAMPLE_COUNT = 9
+const RUNWAY_SURFACE_SAMPLE_COUNT = 3
 const CHASE_OFFSET = new Cartesian3(-185, 0, 52)
 const COCKPIT_OFFSET = new Cartesian3(7.5, 0, 2.4)
 const AIRCRAFT_MODEL_URI = '/models/cesium-air.glb'
@@ -439,9 +439,6 @@ export function FlightWorld({
     viewer.scene.preRender.addEventListener(updateCamera)
 
     let disposed = false
-    let removeFirstTileLoaded: (() => void) | undefined
-    let finishWorldTimer: number | undefined
-    let worldReady = false
     const loadWorldTimer = window.setTimeout(() => {
       if (disposed) return
       void createGooglePhotorealistic3DTileset({
@@ -457,35 +454,38 @@ export function FlightWorld({
             return
           }
           viewer.scene.primitives.add(tileset)
-          const finishWorldLoading = () => {
-            if (disposed || viewer.isDestroyed() || worldReady) return
-            const heights = Array.from({ length: RUNWAY_SURFACE_SAMPLE_COUNT }, (_, index) => {
-              const sample = runwaySamplePosition(index)
-              const position = Cartographic.fromDegrees(sample.lon, sample.lat)
-              const height = viewer.scene.sampleHeightSupported
-                ? viewer.scene.sampleHeight(position, [aircraftEntity], 5)
-                : undefined
-              return typeof height === 'number' && Number.isFinite(height)
-                ? height
-                : runwaySurfaceHeightsMeters[index]
-            })
-            runwaySurfaceHeightsMeters = Object.freeze(heights)
-            addMission(viewer, runwaySurfaceHeightsMeters)
-            worldReady = true
-            setStatus({
-              kind: 'ready',
-              message: 'KPWK photorealistic scenery is ready.',
-            })
+          if (!viewer.scene.sampleHeightSupported) {
+            throw new Error('This browser cannot sample the runway surface height.')
           }
-
-          removeFirstTileLoaded = tileset.tileLoad.addEventListener(() => {
-            removeFirstTileLoaded?.()
-            removeFirstTileLoaded = undefined
-            window.clearTimeout(finishWorldTimer)
-            finishWorldTimer = window.setTimeout(finishWorldLoading, 0)
-          })
-          finishWorldTimer = window.setTimeout(finishWorldLoading, 8_000)
           viewer.scene.requestRender()
+          const runwayPositions = Array.from(
+            { length: RUNWAY_SURFACE_SAMPLE_COUNT },
+            (_, index) => {
+              const sample = runwaySamplePosition(index)
+              return Cartographic.fromDegrees(sample.lon, sample.lat)
+            },
+          )
+          return viewer.scene.sampleHeightMostDetailed(
+            runwayPositions,
+            [aircraftEntity],
+            5,
+          )
+        })
+        .then((runwayPositions) => {
+          if (!runwayPositions || disposed || viewer.isDestroyed()) return
+          const heights = runwayPositions.map((position) => {
+            const height = position?.height
+            if (typeof height !== 'number' || !Number.isFinite(height)) {
+              throw new Error('Cesium could not resolve the KPWK runway surface.')
+            }
+            return height
+          })
+          runwaySurfaceHeightsMeters = Object.freeze(heights)
+          addMission(viewer, runwaySurfaceHeightsMeters)
+          setStatus({
+            kind: 'ready',
+            message: 'KPWK photorealistic scenery is ready.',
+          })
         })
         .catch((error: unknown) => {
           if (disposed) return
@@ -496,8 +496,7 @@ export function FlightWorld({
           )
           setStatus({
             kind: 'error',
-            message:
-              'Cesium could not load the 3D world. Check VITE_CESIUM_ION_TOKEN and reload.',
+            message: 'Cesium could not resolve the KPWK 3D world. Reload the page to try again.',
           })
         })
     }, 0)
@@ -505,8 +504,6 @@ export function FlightWorld({
     return () => {
       disposed = true
       window.clearTimeout(loadWorldTimer)
-      window.clearTimeout(finishWorldTimer)
-      removeFirstTileLoaded?.()
       stopRequestingRenders()
       viewer.scene.preRender.removeEventListener(updateCamera)
       if (viewerRef.current === viewer) viewerRef.current = null
