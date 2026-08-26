@@ -2,52 +2,55 @@
 
 An in-browser flight simulator where a human pilot and an AI copilot operate the same aircraft through WebMCP.
 
-The agent does not drive the physics loop. It observes structured flight state and issues high-level commands—configure the aircraft, run a checklist, hold a heading, or take control—while a deterministic local controller flies the aircraft in real time.
+The simulator runs its flight model and controller locally at 60 Hz. React renders cockpit state at 10 Hz, and Cesium reads the live aircraft position without routing frame updates through React. The AI issues discrete commands such as setting the flight director, configuring the aircraft, or transferring control.
 
-## Initial scope
+## Run it
 
-- One light aircraft
-- One polished A-to-B flight
-- Browser-rendered terrain and cockpit instruments
-- Explicit human/agent control handoffs
-- A small set of high-value WebMCP tools
-- A semantic flight recorder for replay and post-flight review
-
-## Architecture
-
-```text
-Human pilot ───────────────┐
-                           v
-                    Flight simulation <─── Local controller @ 60 Hz
-                           ^
-                           │
-AI copilot ── WebMCP tools ┘
+```bash
+npm install
+npm run dev
 ```
 
-The WebMCP surface should expose intent rather than frame-level controls. Likely tools include:
+The app works without external configuration by using Cesium's packaged Natural Earth imagery. To enable Cesium World Terrain and Google Photorealistic 3D Tiles, copy `.env.example` to `.env.local` and add a restricted Cesium ion token:
+
+```text
+VITE_CESIUM_ION_TOKEN=your_public_browser_token
+```
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| `W` / `S` | Pitch up or down |
+| `A` / `D` | Bank left or right |
+| `↑` / `↓` | Increase or decrease throttle |
+| `F` | Cycle flaps |
+| `G` | Toggle landing gear |
+| `T` | Transfer flight control |
+
+The current route runs from Chicago Executive Airport to Chicago Midway. The cockpit includes an engine-instability scenario and a semantic recorder that attributes each command to the human, agent, or simulator.
+
+## WebMCP tools
+
+The app registers these native `document.modelContext` tools when the browser supports WebMCP:
 
 ```text
 get_flight_state
-get_checklist_state
+get_flight_recorder
+set_throttle
 configure_aircraft
 set_flight_director
 transfer_control
 trigger_training_scenario
 ```
 
-## First demo
+WebMCP remains experimental. The simulator continues to work when `document.modelContext` is unavailable.
 
-1. The human hand-flies takeoff while the agent handles the checklist and aircraft configuration.
-2. The human transfers control for cruise.
-3. The agent responds to an abnormal event with visible, logged actions.
-4. The agent returns control and talks the human through the approach and landing.
-5. A post-flight timeline shows what each participant did and why.
+## Stack
 
-## Non-goals
+- React 19, TypeScript, and Vite
+- CesiumJS with the official static-asset configuration
+- Native WebMCP imperative API with `webmcp-types`
+- A renderer-independent TypeScript simulation and flight controller
 
-- FAA-certified training
-- Airliner-level systems fidelity
-- An LLM directly controlling pitch and roll every frame
-- A general-purpose world simulator in the first release
-
-The project is currently in the design and prototyping stage.
+This is a procedural simulation prototype, not a certified aviation training tool.
