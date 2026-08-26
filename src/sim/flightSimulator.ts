@@ -1016,8 +1016,8 @@ class FlightSimulator {
     if (!this.airborne && airspeedKt > 58 && pitchDeg > 2.5) this.airborne = true
     if (
       this.checkride.status === 'armed' &&
-      this.missionPhase === 'takeoff' &&
-      airspeedKt >= 45
+      this.airborne &&
+      state.altitudeFt >= airport.elevationFt + 80
     ) {
       this.activateCheckrideAlert()
     }
