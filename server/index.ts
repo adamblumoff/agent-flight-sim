@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { openai } from '@ai-sdk/openai'
+import { config } from 'dotenv'
 import { Hono } from 'hono'
 import {
   convertToModelMessages,
@@ -11,8 +12,9 @@ import {
   tool,
   type UIMessage,
 } from 'ai'
-import { pathToFileURL } from 'node:url'
 import { flightToolDefinitions } from '../src/shared/flightTools'
+
+config({ path: ['.env.local', '.env'], quiet: true })
 
 interface FlightContext {
   readonly state?: Readonly<Record<string, unknown>>
@@ -83,7 +85,7 @@ app.post('/api/chat', async (context) => {
   }
 
   const result = streamText({
-    model: openai(process.env.OPENAI_MODEL ?? 'gpt-5.4-mini'),
+    model: openai(process.env.OPENAI_MODEL ?? 'gpt-5.6-luna'),
     system: `${COPILOT_INSTRUCTIONS}\n\n<browser_flight_context>\n${serializeFlightContext(body.flightContext)}\n</browser_flight_context>`,
     messages: await convertToModelMessages(body.messages),
     tools: browserFlightTools,
@@ -102,11 +104,7 @@ app.use('/cesiumStatic/*', serveStatic({ root: './dist' }))
 app.use('/models/*', serveStatic({ root: './dist' }))
 app.get('*', serveStatic({ root: './dist', path: 'index.html' }))
 
-const isEntryPoint = process.argv[1]
-  ? import.meta.url === pathToFileURL(process.argv[1]).href
-  : false
-
-if (isEntryPoint) {
+if (process.env.NODE_ENV !== 'test') {
   const port = Number.parseInt(process.env.PORT ?? '8787', 10)
   serve({ fetch: app.fetch, port })
   console.log(`Flightdeck server listening on http://localhost:${port}`)

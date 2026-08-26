@@ -9,6 +9,7 @@ import {
   HeadingPitchRoll,
   HorizontalOrigin,
   Ion,
+  IonGeocodeProviderType,
   JulianDate,
   LabelStyle,
   Math as CesiumMath,
@@ -179,7 +180,7 @@ export function FlightWorld({
       baseLayer: false,
       baseLayerPicker: false,
       fullscreenButton: false,
-      geocoder: false,
+      geocoder: IonGeocodeProviderType.GOOGLE,
       globe: false,
       homeButton: false,
       infoBox: false,
@@ -311,30 +312,39 @@ export function FlightWorld({
     viewer.scene.preRender.addEventListener(updateCamera)
 
     let disposed = false
-    void createGooglePhotorealistic3DTileset()
-      .then((tileset) => {
-        if (disposed || viewer.isDestroyed()) {
-          tileset.destroy()
-          return
-        }
-        tileset.shadows = ShadowMode.ENABLED
-        viewer.scene.primitives.add(tileset)
-        setStatus({
-          kind: 'ready',
-          message: 'Chicago photorealistic scenery is ready.',
+    const loadWorldTimer = window.setTimeout(() => {
+      if (disposed) return
+      void createGooglePhotorealistic3DTileset()
+        .then((tileset) => {
+          if (disposed || viewer.isDestroyed()) {
+            tileset.destroy()
+            return
+          }
+          tileset.shadows = ShadowMode.ENABLED
+          viewer.scene.primitives.add(tileset)
+          setStatus({
+            kind: 'ready',
+            message: 'Chicago photorealistic scenery is ready.',
+          })
         })
-      })
-      .catch(() => {
-        if (disposed) return
-        setStatus({
-          kind: 'error',
-          message:
-            'Cesium could not load the 3D world. Check VITE_CESIUM_ION_TOKEN and reload.',
+        .catch((error: unknown) => {
+          if (disposed) return
+          const failure = error as { readonly message?: string }
+          console.error(
+            'Photorealistic world failed to initialize',
+            failure.message ?? 'Unknown Cesium error',
+          )
+          setStatus({
+            kind: 'error',
+            message:
+              'Cesium could not load the 3D world. Check VITE_CESIUM_ION_TOKEN and reload.',
+          })
         })
-      })
+    }, 0)
 
     return () => {
       disposed = true
+      window.clearTimeout(loadWorldTimer)
       viewer.scene.preRender.removeEventListener(updateCamera)
       viewer.destroy()
     }
