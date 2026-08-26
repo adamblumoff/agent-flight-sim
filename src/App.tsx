@@ -17,7 +17,7 @@ import {
   ShieldAlert,
   UserRound,
 } from 'lucide-react'
-import { AgentConversation } from './components/agent-conversation'
+import { WebMcpActivityPanel } from './components/webmcp-activity'
 import { Badge } from './components/ui/badge'
 import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
@@ -74,7 +74,7 @@ export default function App() {
     flightSimulator.getSnapshot,
     flightSimulator.getSnapshot,
   )
-  const webMcpStatus = useWebMcp()
+  const { status: webMcpStatus, activities: webMcpActivities } = useWebMcp()
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
@@ -113,20 +113,23 @@ export default function App() {
       }
 
       if (key === 't') {
-        const owner = current.controlOwner === 'human' ? 'agent' : 'human'
-        flightSimulator.transferControl(owner, 'human', owner === 'agent' ? 'Your controls' : 'My controls')
+        if (current.controlOwner === 'agent') {
+          flightSimulator.transferControl('human', 'human', 'My controls')
+        } else if (webMcpStatus === 'ready') {
+          flightSimulator.transferControl('agent', 'human', 'Your controls')
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [webMcpStatus])
 
   const webMcp = {
     registering: { label: 'Connecting tools', tone: 'waiting' as const, icon: LoaderCircle },
-    ready: { label: 'Tools connected', tone: 'ready' as const, icon: CheckCircle2 },
-    unsupported: { label: 'Local tools only', tone: 'waiting' as const, icon: ShieldAlert },
-    error: { label: 'Tool error', tone: 'failed' as const, icon: AlertTriangle },
+    ready: { label: 'WebMCP ready', tone: 'ready' as const, icon: CheckCircle2 },
+    unsupported: { label: 'WebMCP unavailable', tone: 'waiting' as const, icon: ShieldAlert },
+    error: { label: 'WebMCP error', tone: 'failed' as const, icon: AlertTriangle },
   }[webMcpStatus]
   const worldTone = worldStatus.kind === 'ready' ? 'ready' : worldStatus.kind === 'error' ? 'failed' : 'waiting'
   const WorldIcon = worldStatus.kind === 'ready' ? CheckCircle2 : worldStatus.kind === 'error' ? AlertTriangle : LoaderCircle
@@ -185,7 +188,7 @@ export default function App() {
 
         <div className="owner-control">
           {state.controlOwner === 'agent' ? (
-            <StatusBadge tone="agent" icon={Bot}>Copilot flying</StatusBadge>
+            <StatusBadge tone="agent" icon={Bot}>Agent flying</StatusBadge>
           ) : (
             <StatusBadge tone="neutral" icon={UserRound}>You are flying</StatusBadge>
           )}
@@ -247,12 +250,17 @@ export default function App() {
         </section>
 
         <aside className="right-rail">
-          <AgentConversation />
+          <WebMcpActivityPanel
+            status={webMcpStatus}
+            activities={webMcpActivities}
+            controlOwner={state.controlOwner}
+          />
 
           <div className="right-rail-actions">
             <Button
               variant={state.controlOwner === 'human' ? 'default' : 'outline'}
               className={state.controlOwner === 'agent' ? 'take-controls' : ''}
+              disabled={state.controlOwner === 'human' && webMcpStatus !== 'ready'}
               onClick={() =>
                 flightSimulator.transferControl(
                   state.controlOwner === 'human' ? 'agent' : 'human',
@@ -261,8 +269,16 @@ export default function App() {
                 )
               }
             >
-              {state.controlOwner === 'human' ? <Bot data-icon="inline-start" /> : <CircleStop data-icon="inline-start" />}
-              {state.controlOwner === 'human' ? 'Give copilot controls' : 'My controls'}
+              {state.controlOwner === 'human' ? (
+                webMcpStatus === 'ready' ? <Bot data-icon="inline-start" /> : <ShieldAlert data-icon="inline-start" />
+              ) : (
+                <CircleStop data-icon="inline-start" />
+              )}
+              {state.controlOwner === 'human'
+                ? webMcpStatus === 'ready'
+                  ? 'Give agent controls'
+                  : 'WebMCP required'
+                : 'My controls'}
             </Button>
             <Tooltip>
               <TooltipTrigger
@@ -322,7 +338,7 @@ export default function App() {
           <span><kbd>W</kbd><kbd>S</kbd> pitch</span>
           <span><kbd>A</kbd><kbd>D</kbd> bank</span>
           <span><kbd>↑</kbd><kbd>↓</kbd> power</span>
-          <span><kbd>T</kbd> handoff</span>
+          {webMcpStatus === 'ready' ? <span><kbd>T</kbd> handoff</span> : null}
         </div>
       </main>
     </TooltipProvider>

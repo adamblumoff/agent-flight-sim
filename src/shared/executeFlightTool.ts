@@ -20,7 +20,7 @@ const reasonInput = (input: UnknownInput): string => {
   const reason = input.reason
   return typeof reason === 'string' && reason.trim()
     ? reason.trim()
-    : 'Requested by the AI copilot'
+    : 'Requested by the browser agent'
 }
 
 const receipt = <Details extends Readonly<Record<string, unknown>>>(
@@ -104,7 +104,7 @@ const executors: {
     flightSimulator.transferControl(input.owner, 'agent', reasonInput(input))
     const controlOwner = flightSimulator.getState().controlOwner
     return receipt(
-      controlOwner === 'agent' ? 'Copilot has the controls' : 'Pilot has the controls; agent control stopped',
+      controlOwner === 'agent' ? 'Agent has the controls' : 'Pilot has the controls; agent control stopped',
       controlOwner === 'agent' ? 'automation' : 'success',
       { controlOwner },
     )

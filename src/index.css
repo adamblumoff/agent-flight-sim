@@ -316,232 +316,264 @@ textarea:focus-visible {
   backdrop-filter: blur(26px) saturate(120%);
 }
 
-.conversation-panel {
+.webmcp-activity {
   min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 
-.conversation-header {
-  min-height: 70px;
+.webmcp-activity-header {
+  min-height: 68px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px 16px 12px;
+  padding: 15px 16px 13px;
   border-bottom: 1px solid rgb(255 255 255 / 9%);
 }
 
-.conversation-header h1 {
+.webmcp-activity-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.webmcp-activity-title svg {
+  width: 15px;
+  height: 15px;
+  color: rgb(255 255 255 / 58%);
+}
+
+.webmcp-activity-title h1 {
   margin: 0;
   font-size: 14px;
   font-weight: 640;
   letter-spacing: -0.03em;
 }
 
-.conversation-header p {
-  margin: 5px 0 0;
-  overflow: hidden;
-  color: rgb(255 255 255 / 42%);
-  font-size: 10px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-status {
+.webmcp-status {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
+  gap: 5px;
   border: 1px solid rgb(255 255 255 / 12%);
   border-radius: 999px;
-  padding: 3px 6px;
+  padding: 4px 7px;
   font: 600 8px/1 "Kode Mono Variable", monospace;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-.agent-status-ready { color: #67df9a; border-color: rgb(103 223 154 / 26%); }
-.agent-status-waiting { color: #f0b95c; border-color: rgb(240 185 92 / 26%); }
-.agent-status-failed { color: #ff7070; border-color: rgb(255 112 112 / 28%); }
-
-.agent-error {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  margin: 10px 14px 0;
-  padding: 9px 10px;
-  border: 1px solid rgb(255 112 112 / 25%);
-  border-radius: 8px;
-  color: #ff9b9b;
-  background: rgb(77 10 10 / 32%);
-  font-size: 10px;
-  line-height: 1.45;
+.webmcp-status svg {
+  width: 10px;
+  height: 10px;
 }
 
-.conversation-thread {
+.webmcp-status-ready {
+  border-color: rgb(103 223 154 / 26%);
+  color: #67df9a;
+}
+
+.webmcp-status-registering,
+.webmcp-status-unsupported {
+  border-color: rgb(240 185 92 / 26%);
+  color: #f0b95c;
+}
+
+.webmcp-status-error {
+  border-color: rgb(255 112 112 / 28%);
+  color: #ff7070;
+}
+
+.webmcp-explainer,
+.webmcp-status-description {
+  margin: 0;
+  padding-inline: 16px;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.webmcp-explainer {
+  padding-top: 13px;
+  color: rgb(255 255 255 / 70%);
+}
+
+.webmcp-status-description {
+  padding-top: 5px;
+  padding-bottom: 13px;
+  color: rgb(255 255 255 / 38%);
+}
+
+.webmcp-control-owner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-inline: 16px;
+  padding: 10px 0;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+  color: rgb(255 255 255 / 42%);
+  font: 600 8px/1 "Kode Mono Variable", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.webmcp-control-owner strong {
+  color: rgb(255 255 255 / 78%);
+  font-weight: 600;
+}
+
+.webmcp-receipts {
   min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+  border-bottom: 1px solid rgb(255 255 255 / 9%);
 }
 
-.conversation-viewport {
+.webmcp-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 16px 9px;
+}
+
+.webmcp-section-heading h2,
+.webmcp-prompts h2 {
+  margin: 0;
+  color: rgb(255 255 255 / 44%);
+  font: 600 8px/1 "Kode Mono Variable", monospace;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.webmcp-section-heading span {
+  min-width: 18px;
+  padding: 3px 5px;
+  border-radius: 999px;
+  color: rgb(255 255 255 / 55%);
+  background: rgb(255 255 255 / 6%);
+  font: 600 8px/1 "Kode Mono Variable", monospace;
+  text-align: center;
+}
+
+.webmcp-receipt-list {
   min-height: 0;
-  flex: 1;
+  margin: 0;
+  padding: 0 14px 12px;
   overflow-y: auto;
+  list-style: none;
   overscroll-behavior: contain;
-  padding: 16px;
   scrollbar-color: rgb(255 255 255 / 20%) transparent;
   scrollbar-width: thin;
 }
 
-.conversation-empty {
+.webmcp-receipt {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr);
   gap: 9px;
-  align-content: center;
-  padding: 16px;
+  padding: 10px 0;
+  border-top: 1px solid rgb(255 255 255 / 7%);
 }
 
-.conversation-empty p {
-  margin: 1px 0 0;
-  color: rgb(255 255 255 / 66%);
-  font-size: 11px;
-  line-height: 1.55;
+.webmcp-receipt:first-child {
+  border-top: 0;
 }
 
-.conversation-empty button {
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 7px;
-  padding: 5px 7px;
-  color: rgb(255 255 255 / 62%);
-  background: rgb(255 255 255 / 4%);
-  font-size: 9px;
-  cursor: pointer;
-}
-
-.conversation-empty button:hover {
-  color: white;
-  background: rgb(255 255 255 / 9%);
-}
-
-.message-avatar {
+.webmcp-receipt-icon {
   display: grid;
   width: 26px;
   height: 26px;
   place-items: center;
-  border: 1px solid rgb(255 255 255 / 15%);
-  border-radius: 8px;
-  color: black;
-  background: white;
+  border: 1px solid rgb(103 223 154 / 22%);
+  border-radius: 7px;
+  color: #67df9a;
+  background: rgb(103 223 154 / 6%);
 }
 
-.message-avatar svg {
-  width: 13px;
-  height: 13px;
+.webmcp-receipt-failed .webmcp-receipt-icon {
+  border-color: rgb(255 112 112 / 24%);
+  color: #ff7070;
+  background: rgb(255 112 112 / 6%);
 }
 
-.message-avatar-user {
-  color: rgb(255 255 255 / 72%);
-  background: rgb(255 255 255 / 7%);
+.webmcp-receipt-icon svg {
+  width: 12px;
+  height: 12px;
 }
 
-.message-author {
+.webmcp-receipt-body {
+  min-width: 0;
+}
+
+.webmcp-receipt-heading {
   display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 5px;
-  font: 600 8px/1 "Kode Mono Variable", monospace;
-  letter-spacing: 0.09em;
-  color: rgb(255 255 255 / 36%);
-  text-transform: uppercase;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.flight-message {
-  width: 100%;
-  max-width: 100%;
-  gap: 2px;
+.webmcp-receipt-heading strong {
+  overflow: hidden;
+  color: rgb(255 255 255 / 78%);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.flight-message.is-user .message-author {
-  justify-content: flex-end;
+.webmcp-receipt-heading time {
+  flex-shrink: 0;
+  color: rgb(255 255 255 / 28%);
+  font: 500 7px/1 "Kode Mono Variable", monospace;
 }
 
-.flight-message-content {
-  width: 100%;
-  color: rgb(255 255 255 / 75%);
-  font-size: 11px;
-  line-height: 1.6;
+.webmcp-receipt-body p {
+  margin: 4px 0 6px;
+  color: rgb(255 255 255 / 48%);
+  font-size: 9px;
+  line-height: 1.45;
 }
 
-.flight-message.is-user .flight-message-content {
-  width: fit-content;
-  max-width: 88%;
-  padding: 8px 10px;
-  background: rgb(255 255 255 / 8%);
+.webmcp-receipt-tool {
+  color: rgb(255 255 255 / 32%);
+  font: 500 7px/1 "Kode Mono Variable", monospace;
 }
 
-.flight-message-content p {
-  margin: 0;
+.webmcp-empty-receipts {
+  margin: auto;
+  padding: 24px 16px;
+  color: rgb(255 255 255 / 30%);
+  font-size: 10px;
 }
 
-.flight-tool {
-  margin: 8px 0 0;
-  border: 1px solid rgb(255 255 255 / 11%);
-  border-radius: 8px;
-  color: rgb(255 255 255 / 64%);
+.webmcp-prompts {
+  padding: 12px 16px 14px;
+}
+
+.webmcp-prompts ul {
+  display: grid;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.webmcp-prompts li {
+  padding: 7px 8px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 7px;
+  color: rgb(255 255 255 / 57%);
   background: rgb(255 255 255 / 3%);
+  font-size: 9px;
+  line-height: 1.4;
 }
 
-.flight-tool [data-slot="collapsible-trigger"] {
-  min-height: 42px;
-  padding: 8px 10px;
-}
-
-.flight-tool [data-slot="collapsible-content"] {
-  padding: 0 10px 10px;
-}
-
-.conversation-composer {
-  margin: 0 14px 10px;
-}
-
-.conversation-composer > [data-slot="input-group"] {
-  border-color: rgb(255 255 255 / 14%);
-  border-radius: 11px;
-  background: rgb(255 255 255 / 4%);
-}
-
-.conversation-composer > [data-slot="input-group"]:focus-within {
-  border-color: rgb(255 255 255 / 38%);
-  box-shadow: 0 0 0 3px rgb(255 255 255 / 6%);
-}
-
-.conversation-input {
-  width: 100%;
-  max-height: 110px;
-  resize: none;
-  border: 0;
-  outline: 0 !important;
-  color: white;
-  background: transparent;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.conversation-input::placeholder {
-  color: rgb(255 255 255 / 31%);
-}
-
-.conversation-note {
-  margin: 0;
-  color: rgb(255 255 255 / 29%);
-  font: 500 8px/1.4 "Kode Mono Variable", monospace;
-}
-
-.conversation-footer [data-slot="button"] {
-  margin-left: auto;
+.webmcp-prompts code {
+  font: inherit;
 }
 
 .right-rail-actions {
@@ -630,26 +662,18 @@ kbd {
     left: 12px;
   }
 
-  .conversation-header {
+  .webmcp-activity-header {
     min-height: 58px;
     padding-block: 12px 9px;
   }
 
-  .conversation-header p,
-  .conversation-note {
+  .webmcp-explainer,
+  .webmcp-prompts {
     display: none;
   }
 
-  .conversation-viewport {
-    padding-block: 12px;
-  }
-
-  .conversation-message {
-    margin-top: 12px;
-  }
-
-  .conversation-composer {
-    margin-bottom: 10px;
+  .webmcp-status-description {
+    padding-top: 10px;
   }
 }
 
@@ -723,8 +747,11 @@ kbd {
     display: none;
   }
 
-  .conversation-header .take-controls {
-    display: none;
+  .webmcp-status {
+    max-width: 145px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -733,8 +760,8 @@ kbd {
   .instrument-deck { bottom: 10px; min-height: 82px; padding-block: 10px; }
   .owner-control { bottom: 104px; }
   .control-hints { display: none; }
-  .conversation-header p,
-  .conversation-note { display: none; }
+  .webmcp-explainer,
+  .webmcp-prompts { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
