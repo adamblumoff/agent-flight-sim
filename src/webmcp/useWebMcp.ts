@@ -25,9 +25,9 @@ function createFlightTools(recordActivity: RecordActivity): WebMCP.ModelContextT
     description: definition.description,
     inputSchema: definition.inputSchema,
     annotations: { readOnlyHint: definition.readOnly },
-    execute: (input: Record<string, unknown>) => {
+    execute: async (input: Record<string, unknown>) => {
       try {
-        const result = executeFlightToolFromUnknown(definition.name, input)
+        const result = await executeFlightToolFromUnknown(definition.name, input)
         recordActivity({
           tool: definition.name,
           title: definition.title,

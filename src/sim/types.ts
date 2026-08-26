@@ -4,6 +4,75 @@ export type TraceActor = ControlOwner | 'system'
 
 export type FlightScenario = 'clear' | 'engine_instability'
 
+export type CheckrideSeed = 17 | 42 | 81
+
+export type CheckrideEvidenceSource = 'weather' | 'cockpit' | 'traffic' | 'passenger'
+
+export type CheckrideDecision =
+  | 'divert'
+  | 'request_priority'
+  | 'declare_minimum_fuel'
+  | 'continue'
+  | 'hold'
+
+export type CheckrideStatus =
+  | 'armed'
+  | 'decision_required'
+  | 'awaiting_human'
+  | 'resolved'
+  | 'complete'
+
+export type HumanApproval = 'not_required' | 'pending' | 'approved' | 'denied'
+
+export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
+
+export interface CheckrideEvidence {
+  readonly source: CheckrideEvidenceSource
+  readonly headline: string
+  readonly detail: string
+  readonly reliability: EvidenceReliability
+}
+
+export interface CheckrideScore {
+  readonly total: number
+  readonly safety: number
+  readonly judgment: number
+  readonly fuel: number
+  readonly interventions: number
+  readonly recognitionSeconds: number | null
+}
+
+export interface CheckrideState {
+  readonly seed: CheckrideSeed
+  readonly status: CheckrideStatus
+  readonly objective: string
+  readonly deadlineSeconds: number
+  readonly fuelMinutesRemaining: number
+  readonly alert: string | null
+  readonly allowedDecisions: readonly CheckrideDecision[]
+  readonly decision: CheckrideDecision | null
+  readonly humanApproval: HumanApproval
+  readonly inspectedSources: readonly CheckrideEvidenceSource[]
+  readonly score: CheckrideScore
+}
+
+export type FlightEventType =
+  | 'command_required'
+  | 'system_alert'
+  | 'human_approval_required'
+  | 'touchdown'
+  | 'mission_complete'
+
+export interface FlightEvent {
+  readonly revision: number
+  readonly type: FlightEventType
+  readonly elapsedSeconds: number
+  readonly message: string
+  readonly phase: MissionPhase
+  readonly allowedCommands: readonly FlightCommand[]
+  readonly allowedDecisions: readonly CheckrideDecision[]
+}
+
 export type MissionFixId =
   | 'DEPART'
   | 'CROSSWIND'
@@ -24,15 +93,18 @@ export type MissionPhase =
   | 'flare'
   | 'rollout'
   | 'go_around'
+  | 'diversion'
   | 'complete'
   | 'failed'
 
 export type MissionOutcome =
   | 'in_progress'
   | 'landed'
+  | 'safe_diversion'
   | 'go_around'
   | 'unsafe_touchdown'
   | 'runway_excursion'
+  | 'unsafe_decision'
 
 export type FlightCommand =
   | 'takeoff'
@@ -64,6 +136,7 @@ export interface MissionNavigationState {
   readonly stableApproach: boolean
   readonly awaitingCommand: boolean
   readonly allowedCommands: readonly FlightCommand[]
+  readonly eventRevision: number
 }
 
 export interface FlightState {
@@ -82,6 +155,7 @@ export interface FlightState {
   readonly flightDirector: FlightDirectorState
   readonly scenario: FlightScenario
   readonly mission: MissionNavigationState
+  readonly checkride: CheckrideState
 }
 
 export interface PilotInput {
@@ -153,6 +227,7 @@ export interface MissionBrief {
   readonly constraints: readonly string[]
   readonly successConditions: readonly string[]
   readonly startingCommands: readonly FlightCommand[]
+  readonly evidenceSources: readonly CheckrideEvidenceSource[]
 }
 
 export interface FlightCommandInput {
@@ -172,6 +247,33 @@ export interface FlightCommandReceipt {
     readonly flapsDeg: number
   }
   readonly allowedCommands: readonly FlightCommand[]
+  readonly eventRevision: number
+  readonly state: FlightState
+}
+
+export interface CheckrideDecisionReceipt {
+  readonly accepted: boolean
+  readonly summary: string
+  readonly decision: CheckrideDecision
+  readonly humanApproval: HumanApproval
+  readonly score: CheckrideScore
+  readonly eventRevision: number
+  readonly state: FlightState
+}
+
+export interface FlightEventWaitInput {
+  readonly afterRevision: number
+  readonly events: readonly FlightEventType[]
+  readonly timeoutMs: number
+}
+
+export interface FlightEventWaitResult {
+  readonly revision: number
+  readonly event: FlightEventType | 'timeout'
+  readonly message: string
+  readonly phase: MissionPhase
+  readonly allowedCommands: readonly FlightCommand[]
+  readonly allowedDecisions: readonly CheckrideDecision[]
   readonly state: FlightState
 }
 

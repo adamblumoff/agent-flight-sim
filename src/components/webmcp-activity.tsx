@@ -3,19 +3,21 @@ import {
   Bot,
   CheckCircle2,
   LoaderCircle,
+  ShieldCheck,
 } from 'lucide-react'
-import type { ControlOwner } from '../sim/types'
+import { Button } from './ui/button'
+import type { CheckrideState, ControlOwner } from '../sim/types'
 import type { WebMcpActivity as WebMcpActivityItem, WebMcpStatus } from '../webmcp/useWebMcp'
 
 export interface WebMcpActivityProps {
   readonly status: WebMcpStatus
   readonly controlOwner: ControlOwner
   readonly activities: readonly WebMcpActivityItem[]
+  readonly checkride: CheckrideState
+  readonly onResolveHumanApproval: (approved: boolean) => void
   readonly mission: {
     readonly phase: string
-    readonly nextFix: string | null
-    readonly stableApproach: boolean
-    readonly outcome: string | null
+    readonly eventRevision: number
   }
 }
 
@@ -43,9 +45,9 @@ const statusDetails = {
 } as const
 
 const promptExamples = [
-  'Call get_mission_brief and tell me the first legal command.',
-  'Take the controls and fly the full pattern using phase-level commands.',
-  'Read the flight state. Land if stable; go around if not.',
+  'Start checkride seed 42, brief it, and take the controls.',
+  'Use wait_for_flight_event instead of polling for the next decision.',
+  'Inspect the evidence, explain your risk call, and finish the mission.',
 ] as const
 
 const formatMissionLabel = (value: string) =>
@@ -79,7 +81,14 @@ function ActivityReceipt({ activity }: { readonly activity: WebMcpActivityItem }
   )
 }
 
-export function WebMcpActivityPanel({ status, controlOwner, activities, mission }: WebMcpActivityProps) {
+export function WebMcpActivityPanel({
+  status,
+  controlOwner,
+  activities,
+  checkride,
+  mission,
+  onResolveHumanApproval,
+}: WebMcpActivityProps) {
   const currentStatus = statusDetails[status]
   const StatusIcon = currentStatus.icon
   const recentActivities = activities.slice(-5).reverse()
@@ -118,22 +127,46 @@ export function WebMcpActivityPanel({ status, controlOwner, activities, mission 
           <dd>{formatMissionLabel(mission.phase)}</dd>
         </div>
         <div>
-          <dt>Next gate</dt>
-          <dd>{mission.nextFix ? formatMissionLabel(mission.nextFix) : 'Runway stop'}</dd>
+          <dt>Event revision</dt>
+          <dd>{mission.eventRevision}</dd>
         </div>
         <div>
-          <dt>Approach</dt>
-          <dd className={mission.stableApproach ? 'evidence-good' : undefined}>
-            {mission.stableApproach ? 'Stable' : 'Not established'}
-          </dd>
+          <dt>Fuel endurance</dt>
+          <dd>{checkride.fuelMinutesRemaining.toFixed(1)} min</dd>
         </div>
         <div>
-          <dt>Result</dt>
-          <dd className={mission.outcome === 'landed' ? 'evidence-good' : undefined}>
-            {mission.outcome ? formatMissionLabel(mission.outcome) : 'In progress'}
+          <dt>Score</dt>
+          <dd className={checkride.score.total >= 80 ? 'evidence-good' : undefined}>
+            {checkride.score.total} / 100
           </dd>
         </div>
       </dl>
+
+      {checkride.alert ? (
+        <section className="checkride-alert" aria-live="polite">
+          <div className="checkride-alert-heading">
+            <span>Seed {checkride.seed}</span>
+            <strong>{formatMissionLabel(checkride.status)}</strong>
+          </div>
+          <p>{checkride.alert}</p>
+          <div className="checkride-alert-meta">
+            <span>{checkride.inspectedSources.length}/4 sources checked</span>
+            {checkride.decision ? <span>Decision: {formatMissionLabel(checkride.decision)}</span> : null}
+          </div>
+          {checkride.humanApproval === 'pending' ? (
+            <div className="human-approval" aria-label="Human authority decision">
+              <div>
+                <ShieldCheck aria-hidden="true" />
+                <span>The agent requests a risky priority approach.</span>
+              </div>
+              <div>
+                <Button size="sm" onClick={() => onResolveHumanApproval(true)}>Approve</Button>
+                <Button variant="outline" size="sm" onClick={() => onResolveHumanApproval(false)}>Deny</Button>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="webmcp-receipts">
         <div className="webmcp-section-heading">

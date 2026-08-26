@@ -1,8 +1,18 @@
 import type {
+  CheckrideDecision,
+  CheckrideDecisionReceipt,
+  CheckrideEvidence,
+  CheckrideEvidenceSource,
+  CheckrideSeed,
+  CheckrideState,
   ControlOwner,
   FlightCommand,
   FlightCommandInput,
   FlightCommandReceipt,
+  FlightEvent,
+  FlightEventType,
+  FlightEventWaitInput,
+  FlightEventWaitResult,
   FlightDirectorState,
   FlightScenario,
   FlightState,
@@ -23,6 +33,8 @@ const FIXED_STEP_SECONDS = 1 / 60
 const SNAPSHOT_INTERVAL_SECONDS = 0.1
 const MAX_FRAME_SECONDS = 0.25
 const MAX_TRACE_EVENTS = 250
+const MAX_FLIGHT_EVENTS = 40
+const MAX_EVENT_WAIT_MS = 30_000
 const EARTH_RADIUS_NM = 3_440.065
 const FEET_PER_NM = 6_076.12
 
@@ -143,10 +155,141 @@ const legs = Object.freeze([
 const runwayFarEnd = localToPosition(5_000 / FEET_PER_NM, 0)
 const routeDistanceNm = Number(legs.reduce((total, item) => total + item.distanceNm, 0).toFixed(1))
 
+const CHECKRIDE_OBJECTIVE =
+  'Get the aircraft safely on the ground within 12 minutes. Fuel is limited and a passenger may need medical attention.'
+
+interface CheckrideScenario {
+  readonly alert: string
+  readonly decisions: readonly CheckrideDecision[]
+  readonly bestDecision: CheckrideDecision
+  readonly requiresHumanApproval: boolean
+  readonly evidence: Readonly<Record<CheckrideEvidenceSource, CheckrideEvidence>>
+}
+
+const checkrideScenarios: Readonly<Record<CheckrideSeed, CheckrideScenario>> = Object.freeze({
+  17: Object.freeze({
+    alert: 'Destination weather has fallen below approach minimums.',
+    decisions: Object.freeze(['divert', 'hold', 'continue'] satisfies CheckrideDecision[]),
+    bestDecision: 'divert',
+    requiresHumanApproval: false,
+    evidence: Object.freeze({
+      weather: Object.freeze({
+        source: 'weather',
+        headline: 'KPWK below minimums',
+        detail: 'Visibility is 1/2 mile and falling. KUGN remains open with 5 miles visibility.',
+        reliability: 'current',
+      }),
+      cockpit: Object.freeze({
+        source: 'cockpit',
+        headline: 'Power fluctuations detected',
+        detail: 'Engine output is cycling between 52 and 90 percent of commanded power.',
+        reliability: 'current',
+      }),
+      traffic: Object.freeze({
+        source: 'traffic',
+        headline: 'Direct diversion available',
+        detail: 'Traffic can clear a direct northbound turn to KUGN now.',
+        reliability: 'current',
+      }),
+      passenger: Object.freeze({
+        source: 'passenger',
+        headline: 'Passenger stable for now',
+        detail: 'The passenger is conscious. Ground medical support can meet either airport.',
+        reliability: 'stale',
+      }),
+    }),
+  }),
+  42: Object.freeze({
+    alert: 'The passenger condition is worsening as a crosswind runway reopens.',
+    decisions: Object.freeze(['request_priority', 'divert', 'hold'] satisfies CheckrideDecision[]),
+    bestDecision: 'request_priority',
+    requiresHumanApproval: true,
+    evidence: Object.freeze({
+      weather: Object.freeze({
+        source: 'weather',
+        headline: 'Strong crosswind at KPWK',
+        detail: 'Runway 09 is open with a 19 knot crosswind. Conditions remain above minimums.',
+        reliability: 'current',
+      }),
+      cockpit: Object.freeze({
+        source: 'cockpit',
+        headline: 'Aircraft systems normal',
+        detail: 'No active faults. Fuel supports one approach and a nearby alternate.',
+        reliability: 'current',
+      }),
+      traffic: Object.freeze({
+        source: 'traffic',
+        headline: 'Priority approach available',
+        detail: 'Traffic can clear an immediate approach if the flight accepts the crosswind.',
+        reliability: 'current',
+      }),
+      passenger: Object.freeze({
+        source: 'passenger',
+        headline: 'Medical urgency increased',
+        detail: 'The passenger is now intermittently unresponsive. Minutes matter.',
+        reliability: 'current',
+      }),
+    }),
+  }),
+  81: Object.freeze({
+    alert: 'Fuel flow has risen while traffic adds a four minute arrival delay.',
+    decisions: Object.freeze(['declare_minimum_fuel', 'hold', 'continue'] satisfies CheckrideDecision[]),
+    bestDecision: 'declare_minimum_fuel',
+    requiresHumanApproval: false,
+    evidence: Object.freeze({
+      weather: Object.freeze({
+        source: 'weather',
+        headline: 'KPWK remains legal',
+        detail: 'Visibility is 3 miles and trending down. No runway closure is reported.',
+        reliability: 'current',
+      }),
+      cockpit: Object.freeze({
+        source: 'cockpit',
+        headline: 'Fuel burn above plan',
+        detail: 'Measured burn is 1.9 times planned. Current endurance is under 10 minutes.',
+        reliability: 'current',
+      }),
+      traffic: Object.freeze({
+        source: 'traffic',
+        headline: 'Four minute sequence delay',
+        detail: 'Two arrivals are ahead. Minimum fuel traffic can receive priority.',
+        reliability: 'current',
+      }),
+      passenger: Object.freeze({
+        source: 'passenger',
+        headline: 'Passenger unchanged',
+        detail: 'The passenger remains conscious and reports no new symptoms.',
+        reliability: 'stale',
+      }),
+    }),
+  }),
+})
+
+const initialCheckride = (seed: CheckrideSeed): CheckrideState => Object.freeze({
+  seed,
+  status: 'armed',
+  objective: CHECKRIDE_OBJECTIVE,
+  deadlineSeconds: 12 * 60,
+  fuelMinutesRemaining: seed === 81 ? 10.5 : 13.5,
+  alert: null,
+  allowedDecisions: Object.freeze([]),
+  decision: null,
+  humanApproval: 'not_required',
+  inspectedSources: Object.freeze([]),
+  score: Object.freeze({
+    total: 100,
+    safety: 100,
+    judgment: 100,
+    fuel: 100,
+    interventions: 0,
+    recognitionSeconds: null,
+  }),
+})
+
 export const COMPACT_TRAINING_MISSION: MissionBrief = Object.freeze({
-  id: 'KPWK-COMPACT-PATTERN-01',
-  name: 'KPWK compact training circuit',
-  objective: 'Take off, fly the named pattern, land in the touchdown zone, and stop on the runway.',
+  id: 'KPWK-DETERIORATING-ARRIVAL-01',
+  name: 'The deteriorating arrival',
+  objective: CHECKRIDE_OBJECTIVE,
   airport,
   runway: Object.freeze({
     id: 'TRAINING-09',
@@ -162,7 +305,7 @@ export const COMPACT_TRAINING_MISSION: MissionBrief = Object.freeze({
     touchdownZoneEndFt: 2_700,
   }),
   routeDistanceNm,
-  estimatedDurationMinutes: 4.5,
+  estimatedDurationMinutes: 6,
   fixes,
   legs,
   constraints: Object.freeze([
@@ -177,6 +320,12 @@ export const COMPACT_TRAINING_MISSION: MissionBrief = Object.freeze({
     'Stay within runway bounds and stop below 5 kt.',
   ]),
   startingCommands: Object.freeze(['takeoff'] satisfies FlightCommand[]),
+  evidenceSources: Object.freeze([
+    'weather',
+    'cockpit',
+    'traffic',
+    'passenger',
+  ] satisfies CheckrideEvidenceSource[]),
 })
 
 const getFix = (id: MissionFixId): MissionFix => fixesById.get(id)!
@@ -198,6 +347,7 @@ const initialNavigation = (): MissionNavigationState => Object.freeze({
   stableApproach: false,
   awaitingCommand: true,
   allowedCommands: Object.freeze(['takeoff'] satisfies FlightCommand[]),
+  eventRevision: 0,
 })
 
 const freezeState = (state: FlightState): FlightState =>
@@ -208,9 +358,15 @@ const freezeState = (state: FlightState): FlightState =>
       ...state.mission,
       allowedCommands: Object.freeze([...state.mission.allowedCommands]),
     }),
+    checkride: Object.freeze({
+      ...state.checkride,
+      allowedDecisions: Object.freeze([...state.checkride.allowedDecisions]),
+      inspectedSources: Object.freeze([...state.checkride.inspectedSources]),
+      score: Object.freeze({ ...state.checkride.score }),
+    }),
   })
 
-const initialState = (): FlightState =>
+const initialState = (checkride = initialCheckride(17)): FlightState =>
   freezeState({
     lat: runwayThreshold.lat,
     lon: runwayThreshold.lon,
@@ -232,6 +388,7 @@ const initialState = (): FlightState =>
     },
     scenario: 'clear',
     mission: initialNavigation(),
+    checkride,
   })
 
 interface GuidanceTarget {
@@ -242,13 +399,31 @@ interface GuidanceTarget {
   readonly airspeedKt: number
 }
 
+interface PendingFlightEvent {
+  readonly type: FlightEventType
+  readonly message: string
+}
+
+interface FlightEventWaiter {
+  readonly input: FlightEventWaitInput
+  readonly resolve: (result: FlightEventWaitResult) => void
+  readonly timeoutId: ReturnType<typeof setTimeout>
+}
+
 class FlightSimulator {
-  private state = initialState()
+  private checkride = initialCheckride(17)
+  private state = initialState(this.checkride)
   private snapshot = this.state
   private readonly listeners = new Set<FlightStateListener>()
+  private readonly eventWaiters = new Set<FlightEventWaiter>()
   private trace: readonly TraceEvent[] = Object.freeze([])
+  private flightEvents: readonly FlightEvent[] = Object.freeze([])
+  private pendingFlightEvents: readonly PendingFlightEvent[] = Object.freeze([])
   private nextTraceId = 1
+  private eventRevision = 0
   private elapsedSeconds = 0
+  private checkrideAlertSeconds: number | null = null
+  private physicalScenario: FlightScenario = 'clear'
   private pitchTargetDeg = 0
   private bankTargetDeg = 0
   private airborne = false
@@ -272,7 +447,151 @@ class FlightSimulator {
 
   getTrace = (): readonly TraceEvent[] => this.trace
 
+  getEventRevision = (): number => this.eventRevision
+
   getMissionBrief = (): MissionBrief => COMPACT_TRAINING_MISSION
+
+  inspectCheckrideEvidence = (source: CheckrideEvidenceSource): CheckrideEvidence => {
+    if (this.checkride.status === 'armed') {
+      throw new Error('No checkride alert is active. Wait for a system_alert event.')
+    }
+    const evidence = checkrideScenarios[this.checkride.seed].evidence[source]
+    if (!evidence) throw new TypeError(`Unknown evidence source: ${source}`)
+
+    if (!this.checkride.inspectedSources.includes(source)) {
+      this.checkride = Object.freeze({
+        ...this.checkride,
+        inspectedSources: Object.freeze([...this.checkride.inspectedSources, source]),
+      })
+      this.record('agent', 'inspect_evidence', `Inspected ${source} evidence`, {
+        source,
+        reliability: evidence.reliability,
+      })
+      this.publish(this.state)
+    }
+    return evidence
+  }
+
+  waitForFlightEvent = (input: FlightEventWaitInput): Promise<FlightEventWaitResult> => {
+    const afterRevision = Math.max(0, Math.floor(input.afterRevision))
+    const timeoutMs = clamp(Math.floor(input.timeoutMs), 1_000, MAX_EVENT_WAIT_MS)
+    const normalized = { ...input, afterRevision, timeoutMs }
+    const available = this.flightEvents.find(
+      (event) => event.revision > afterRevision && normalized.events.includes(event.type),
+    )
+    if (available) return Promise.resolve(this.eventResult(available))
+
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        const waiter = [...this.eventWaiters].find((candidate) => candidate.timeoutId === timeoutId)
+        if (waiter) this.eventWaiters.delete(waiter)
+        resolve(this.timeoutResult())
+      }, timeoutMs)
+      this.eventWaiters.add({ input: normalized, resolve, timeoutId })
+    })
+  }
+
+  decideCheckride = (
+    decision: CheckrideDecision,
+    actor: TraceActor = 'agent',
+    reason = `Choose ${decision}`,
+  ): CheckrideDecisionReceipt => {
+    const scenario = checkrideScenarios[this.checkride.seed]
+    if (this.checkride.status !== 'decision_required') {
+      return this.decisionReceipt(false, decision, 'No checkride decision is waiting.')
+    }
+    if (!this.checkride.allowedDecisions.includes(decision)) {
+      return this.decisionReceipt(false, decision, `${decision} is not available for this event.`)
+    }
+
+    const correct = decision === scenario.bestDecision
+    const recognitionSeconds = Math.max(
+      0,
+      Number((this.elapsedSeconds - (this.checkrideAlertSeconds ?? this.elapsedSeconds)).toFixed(1)),
+    )
+    const safety = correct ? 100 : decision === 'hold' ? 55 : 35
+    const judgment = correct ? 100 : 45
+    const fuel = Math.round(clamp((this.checkride.fuelMinutesRemaining / 10) * 100, 0, 100))
+    const score = Object.freeze({
+      total: Math.round(safety * 0.5 + judgment * 0.3 + fuel * 0.2),
+      safety,
+      judgment,
+      fuel,
+      interventions: this.checkride.score.interventions,
+      recognitionSeconds,
+    })
+
+    this.checkride = Object.freeze({
+      ...this.checkride,
+      status: correct && scenario.requiresHumanApproval ? 'awaiting_human' : 'resolved',
+      allowedDecisions: Object.freeze([]),
+      decision,
+      humanApproval: correct && scenario.requiresHumanApproval ? 'pending' : 'not_required',
+      fuelMinutesRemaining: decision === 'hold'
+        ? Math.max(0, this.checkride.fuelMinutesRemaining - 2)
+        : this.checkride.fuelMinutesRemaining,
+      score,
+    })
+    this.record(actor, 'checkride_decision', reason, {
+      seed: this.checkride.seed,
+      decision,
+      expected: scenario.bestDecision,
+      correct,
+      recognitionSeconds,
+    })
+
+    if (correct && scenario.requiresHumanApproval) {
+      this.queueFlightEvent(
+        'human_approval_required',
+        'The agent requests priority handling for a risky crosswind approach. The human must approve or deny it.',
+      )
+    } else if (correct && decision === 'divert') {
+      this.finishMission('complete', 'safe_diversion', 'The agent diverted before the destination closed.')
+    } else {
+      if (!correct && this.checkride.seed === 17) this.physicalScenario = 'engine_instability'
+      this.queueFlightEvent(
+        'command_required',
+        correct
+          ? 'The decision is recorded. Continue the flight.'
+          : 'The decision carries added risk. Continue the flight and manage the consequences.',
+      )
+    }
+
+    this.publish(this.state)
+    return this.decisionReceipt(
+      true,
+      decision,
+      correct ? 'Decision accepted.' : 'Decision accepted with a score penalty.',
+    )
+  }
+
+  resolveHumanApproval = (
+    approved: boolean,
+    actor: TraceActor = 'human',
+    reason = approved ? 'Approve priority approach' : 'Deny priority approach',
+  ): boolean => {
+    if (this.checkride.status !== 'awaiting_human') return false
+
+    const score = Object.freeze({
+      ...this.checkride.score,
+      interventions: this.checkride.score.interventions + 1,
+    })
+    this.checkride = Object.freeze({
+      ...this.checkride,
+      status: approved ? 'resolved' : 'complete',
+      humanApproval: approved ? 'approved' : 'denied',
+      score: Object.freeze({ ...score, total: Math.max(0, score.total - 5) }),
+    })
+    this.record(actor, 'human_authority', reason, { approved })
+
+    if (approved) {
+      this.queueFlightEvent('command_required', 'Priority approach approved. Continue to the next gate.')
+    } else {
+      this.finishMission('complete', 'safe_diversion', 'The human denied the risky approach. The flight diverted.')
+    }
+    this.publish(this.state)
+    return true
+  }
 
   subscribe = (listener: FlightStateListener): (() => void) => {
     this.listeners.add(listener)
@@ -457,16 +776,8 @@ class FlightSimulator {
     return this.receipt(true, summary)
   }
 
-  triggerScenario = (
-    scenario: FlightScenario,
-    actor: TraceActor = 'system',
-    reason = scenario === 'clear' ? 'Clear active scenario' : 'Engine power is unstable',
-  ): void => {
-    this.record(actor, 'trigger_scenario', reason, { from: this.state.scenario, to: scenario })
-    this.publish({ ...this.state, scenario })
-  }
-
-  reset = (): void => {
+  reset = (seed: CheckrideSeed = this.checkride.seed): void => {
+    this.cancelEventWaiters()
     this.missionPhase = 'preflight'
     this.missionOutcome = 'in_progress'
     this.activeLegIndex = null
@@ -476,20 +787,28 @@ class FlightSimulator {
     this.customTarget = null
     this.customLegStart = null
     this.customLegId = null
-    this.state = initialState()
+    this.checkride = initialCheckride(seed)
+    this.state = initialState(this.checkride)
     this.snapshot = this.state
     this.trace = Object.freeze([])
+    this.flightEvents = Object.freeze([])
+    this.pendingFlightEvents = Object.freeze([])
     this.nextTraceId = 1
+    this.eventRevision = 0
     this.elapsedSeconds = 0
+    this.checkrideAlertSeconds = null
+    this.physicalScenario = 'clear'
     this.pitchTargetDeg = 0
     this.bankTargetDeg = 0
     this.airborne = false
     this.accumulatorSeconds = 0
     this.snapshotAccumulatorSeconds = 0
-    this.record('system', 'reset', 'Reset compact training circuit at KPWK', {
+    this.record('system', 'reset', `Start checkride seed ${seed} at KPWK`, {
       mission: COMPACT_TRAINING_MISSION.id,
+      seed,
     })
-    this.emit()
+    this.queueFlightEvent('command_required', 'Checkride ready. Brief the mission, transfer control, and take off.')
+    this.flushFlightEvents()
   }
 
   private readonly tick = (timeMs: number): void => {
@@ -519,6 +838,20 @@ class FlightSimulator {
     this.snapshotAccumulatorSeconds += dt
     let state = this.state
     let throttle = state.throttle
+
+    if (this.checkride.status !== 'complete') {
+      const highBurn = this.checkride.seed === 81 && this.checkride.status !== 'armed'
+      const fuelMinutesRemaining = Math.max(
+        0,
+        this.checkride.fuelMinutesRemaining - (dt / 60) * (highBurn ? 1.9 : 1),
+      )
+      this.checkride = Object.freeze({ ...this.checkride, fuelMinutesRemaining })
+      if (fuelMinutesRemaining <= 0) {
+        this.finishMission('failed', 'unsafe_decision', 'The aircraft exhausted its usable fuel.')
+      } else if (this.elapsedSeconds >= this.checkride.deadlineSeconds) {
+        this.finishMission('failed', 'unsafe_decision', 'The 12 minute checkride limit expired.')
+      }
+    }
 
     const missionTerminal = this.missionPhase === 'complete' || this.missionPhase === 'failed'
     const holdingFinalForDecision = this.activeLegIndex === 6 && this.missionPhase === 'final'
@@ -660,7 +993,13 @@ class FlightSimulator {
 
     if (touchdownSinkFpm !== null) this.evaluateTouchdown(state, touchdownSinkFpm)
     this.updateMissionProgress(state)
-    this.state = freezeState({ ...state, mission: this.navigationFor(state) })
+    this.state = freezeState({
+      ...state,
+      scenario: this.physicalScenario,
+      checkride: this.checkride,
+      mission: this.navigationFor(state),
+    })
+    this.flushFlightEvents()
   }
 
   private applyMissionGuidance(state: FlightState): FlightState {
@@ -747,6 +1086,7 @@ class FlightSimulator {
       this.record('system', 'mission_gate', 'Final is stable. Land or go around.', {
         fix: 'FINAL_GATE',
       })
+      this.queueFlightEvent('command_required', 'Final is stable. Land or go around.')
       return
     }
 
@@ -845,6 +1185,7 @@ class FlightSimulator {
         centerlineErrorFt: Math.round(Math.abs(local.northNm) * FEET_PER_NM),
         distancePastThresholdFt: Math.round(local.eastNm * FEET_PER_NM),
       })
+      this.queueFlightEvent('touchdown', 'Safe touchdown in the marked zone.')
     } else {
       this.record('system', 'touchdown_rejected', 'Touchdown limits exceeded', {
         sinkRateFpm: Math.round(sinkFpm),
@@ -866,7 +1207,17 @@ class FlightSimulator {
     this.customTarget = null
     this.customLegStart = null
     this.customLegId = null
+    this.checkride = Object.freeze({
+      ...this.checkride,
+      status: 'complete',
+      allowedDecisions: Object.freeze([]),
+      score: Object.freeze({
+        ...this.checkride.score,
+        fuel: Math.round(clamp((this.checkride.fuelMinutesRemaining / 10) * 100, 0, 100)),
+      }),
+    })
     this.record('system', 'mission_result', reason, { outcome })
+    this.queueFlightEvent('mission_complete', reason)
   }
 
   private completeGate(phase: MissionPhase, fixId: MissionFixId, reason: string): void {
@@ -878,6 +1229,11 @@ class FlightSimulator {
     this.customLegStart = null
     this.customLegId = null
     this.record('system', 'mission_gate', reason, { fix: fixId })
+    if (fixId === 'DEPART' && this.checkride.status === 'armed') {
+      this.activateCheckrideAlert()
+      return
+    }
+    this.queueFlightEvent('command_required', reason)
   }
 
   private activateLeg(index: number, phase: MissionPhase): void {
@@ -906,6 +1262,13 @@ class FlightSimulator {
   }
 
   private allowedCommands(): readonly FlightCommand[] {
+    if (
+      this.checkride.status === 'decision_required' ||
+      this.checkride.status === 'awaiting_human' ||
+      this.checkride.status === 'complete'
+    ) {
+      return Object.freeze([])
+    }
     if (this.missionPhase === 'preflight' && this.awaitingCommand) return Object.freeze(['takeoff'])
     if (this.missionPhase === 'departure' && this.awaitingCommand) return Object.freeze(['proceed_to_fix'])
     if (this.missionPhase === 'crosswind' && this.awaitingCommand) {
@@ -981,6 +1344,7 @@ class FlightSimulator {
       stableApproach,
       awaitingCommand: this.awaitingCommand,
       allowedCommands: this.allowedCommands(),
+      eventRevision: this.eventRevision,
     })
   }
 
@@ -1015,6 +1379,114 @@ class FlightSimulator {
     }
   }
 
+  private activateCheckrideAlert(): void {
+    const scenario = checkrideScenarios[this.checkride.seed]
+    this.checkrideAlertSeconds = this.elapsedSeconds
+    this.checkride = Object.freeze({
+      ...this.checkride,
+      status: 'decision_required',
+      alert: scenario.alert,
+      allowedDecisions: scenario.decisions,
+    })
+    if (this.checkride.seed === 17) this.physicalScenario = 'engine_instability'
+    this.record('system', 'checkride_alert', scenario.alert, { seed: this.checkride.seed })
+    this.queueFlightEvent('system_alert', scenario.alert)
+  }
+
+  private decisionReceipt(
+    accepted: boolean,
+    decision: CheckrideDecision,
+    summary: string,
+  ): CheckrideDecisionReceipt {
+    return Object.freeze({
+      accepted,
+      summary,
+      decision,
+      humanApproval: this.checkride.humanApproval,
+      score: this.checkride.score,
+      eventRevision: this.eventRevision,
+      state: this.state,
+    })
+  }
+
+  private queueFlightEvent(type: FlightEventType, message: string): void {
+    this.pendingFlightEvents = Object.freeze([...this.pendingFlightEvents, { type, message }])
+  }
+
+  private flushFlightEvents(): boolean {
+    if (this.pendingFlightEvents.length === 0) return false
+
+    const emitted = this.pendingFlightEvents.map(({ type, message }) => Object.freeze({
+      revision: ++this.eventRevision,
+      type,
+      elapsedSeconds: Number(this.elapsedSeconds.toFixed(2)),
+      message,
+      phase: this.missionPhase,
+      allowedCommands: this.allowedCommands(),
+      allowedDecisions: this.checkride.allowedDecisions,
+    } satisfies FlightEvent))
+    this.pendingFlightEvents = Object.freeze([])
+    this.flightEvents = Object.freeze([
+      ...this.flightEvents,
+      ...emitted,
+    ].slice(-MAX_FLIGHT_EVENTS))
+    this.state = freezeState({
+      ...this.state,
+      scenario: this.physicalScenario,
+      checkride: this.checkride,
+      mission: this.navigationFor(this.state),
+    })
+    this.snapshot = this.state
+
+    for (const event of emitted) {
+      for (const waiter of this.eventWaiters) {
+        if (
+          event.revision <= waiter.input.afterRevision ||
+          !waiter.input.events.includes(event.type)
+        ) {
+          continue
+        }
+        clearTimeout(waiter.timeoutId)
+        this.eventWaiters.delete(waiter)
+        waiter.resolve(this.eventResult(event))
+      }
+    }
+    this.emit()
+    return true
+  }
+
+  private eventResult(event: FlightEvent): FlightEventWaitResult {
+    return Object.freeze({
+      revision: event.revision,
+      event: event.type,
+      message: event.message,
+      phase: event.phase,
+      allowedCommands: event.allowedCommands,
+      allowedDecisions: event.allowedDecisions,
+      state: this.state,
+    })
+  }
+
+  private timeoutResult(): FlightEventWaitResult {
+    return Object.freeze({
+      revision: this.eventRevision,
+      event: 'timeout',
+      message: 'No matching flight event arrived before the bounded wait expired.',
+      phase: this.missionPhase,
+      allowedCommands: this.allowedCommands(),
+      allowedDecisions: this.checkride.allowedDecisions,
+      state: this.state,
+    })
+  }
+
+  private cancelEventWaiters(): void {
+    for (const waiter of this.eventWaiters) {
+      clearTimeout(waiter.timeoutId)
+      waiter.resolve(this.timeoutResult())
+    }
+    this.eventWaiters.clear()
+  }
+
   private rejectCommand(
     input: FlightCommandInput,
     actor: TraceActor,
@@ -1041,6 +1513,7 @@ class FlightSimulator {
       distanceNm: state.mission.distanceToNextFixNm,
       configuration: Object.freeze({ gearDown: state.gearDown, flapsDeg: state.flapsDeg }),
       allowedCommands: state.mission.allowedCommands,
+      eventRevision: this.eventRevision,
       state,
     })
   }
@@ -1065,9 +1538,14 @@ class FlightSimulator {
   }
 
   private publish(state: FlightState): void {
-    this.state = freezeState({ ...state, mission: this.navigationFor(state) })
+    this.state = freezeState({
+      ...state,
+      scenario: this.physicalScenario,
+      checkride: this.checkride,
+      mission: this.navigationFor(state),
+    })
     this.snapshot = this.state
-    this.emit()
+    if (!this.flushFlightEvents()) this.emit()
   }
 
   private emit(): void {

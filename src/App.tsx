@@ -81,7 +81,7 @@ export default function App() {
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
-    message: 'Loading the KPWK training circuit.',
+    message: 'Loading the KPWK checkride.',
   })
 
   useEffect(() => {
@@ -91,6 +91,14 @@ export default function App() {
 
   const takeControls = useCallback(() => {
     flightSimulator.transferControl('human', 'human', 'My controls')
+  }, [])
+
+  const resolveHumanApproval = useCallback((approved: boolean) => {
+    flightSimulator.resolveHumanApproval(
+      approved,
+      'human',
+      approved ? 'Human approved the priority approach' : 'Human denied the priority approach',
+    )
   }, [])
 
   useEffect(() => {
@@ -152,7 +160,7 @@ export default function App() {
             </span>
             <div className="min-w-0">
               <strong className="block truncate text-[13px] font-semibold tracking-[-0.02em]">Flightdeck</strong>
-              <span className="block truncate font-mono text-[8px] tracking-[0.16em] text-white/38 uppercase">KPWK compact circuit · N417FS</span>
+              <span className="block truncate font-mono text-[8px] tracking-[0.16em] text-white/38 uppercase">KPWK AI checkride · seed {state.checkride.seed} · N417FS</span>
             </div>
           </div>
 
@@ -168,7 +176,11 @@ export default function App() {
               {state.mission.nextFix ? formatMissionLabel(state.mission.nextFix) : 'Full stop'}
             </strong>
             <small>
-              {state.mission.nextFix && state.mission.distanceToNextFixNm !== null
+              {state.checkride.status === 'decision_required'
+                ? 'Decision required'
+                : state.checkride.status === 'awaiting_human'
+                  ? 'Human approval'
+                  : state.mission.nextFix && state.mission.distanceToNextFixNm !== null
                 ? `${state.mission.distanceToNextFixNm.toFixed(1)} NM`
                 : state.mission.outcome !== 'in_progress'
                   ? formatMissionLabel(state.mission.outcome)
@@ -273,7 +285,9 @@ export default function App() {
             status={webMcpStatus}
             activities={webMcpActivities}
             controlOwner={state.controlOwner}
+            checkride={state.checkride}
             mission={state.mission}
+            onResolveHumanApproval={resolveHumanApproval}
           />
 
           <div className="right-rail-actions">
@@ -327,28 +341,26 @@ export default function App() {
                   <Button
                     variant="outline"
                     size="icon"
-                    aria-label={state.scenario === 'clear' ? 'Inject engine instability' : 'Clear engine instability'}
-                    onClick={() =>
-                      flightSimulator.triggerScenario(
-                        state.scenario === 'clear' ? 'engine_instability' : 'clear',
-                        'human',
-                        state.scenario === 'clear' ? 'Start abnormal training event' : 'Clear training event',
-                      )
-                    }
+                    aria-label="Start the next checkride seed"
+                    onClick={() => {
+                      const seeds = [17, 42, 81] as const
+                      const currentIndex = seeds.indexOf(state.checkride.seed)
+                      flightSimulator.reset(seeds[(currentIndex + 1) % seeds.length])
+                    }}
                   />
                 }
               >
-                <AlertTriangle className={state.scenario === 'clear' ? '' : 'text-amber-400'} />
+                <AlertTriangle className={state.checkride.alert ? 'text-amber-400' : ''} />
               </TooltipTrigger>
-              <TooltipContent>{state.scenario === 'clear' ? 'Inject engine instability' : 'Clear active scenario'}</TooltipContent>
+              <TooltipContent>Start next seed</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
-                render={<Button variant="outline" size="icon" aria-label="Reset flight" onClick={() => flightSimulator.reset()} />}
+                render={<Button variant="outline" size="icon" aria-label="Reset checkride" onClick={() => flightSimulator.reset()} />}
               >
                 <RefreshCw />
               </TooltipTrigger>
-              <TooltipContent>Reset at KPWK</TooltipContent>
+              <TooltipContent>Reset seed {state.checkride.seed}</TooltipContent>
             </Tooltip>
           </div>
         </aside>

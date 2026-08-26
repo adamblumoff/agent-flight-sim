@@ -1,8 +1,8 @@
 # Agent Flight Sim
 
-An in-browser shared cockpit where a human pilot and a browser agent operate the same aircraft through WebMCP. The page registers four client-side flight tools. Every browser-agent call runs in the local simulator and leaves a visible receipt.
+An in-browser AI checkride where a human pilot and a browser agent operate the same aircraft through WebMCP. Every browser-agent call runs in the local simulator and leaves a visible receipt.
 
-The flight model and controller run locally at 60 Hz. React renders cockpit state at 10 Hz, and Cesium reads the live aircraft position without routing frame updates through React. A WebMCP-capable browser agent reads the mission, issues phase-level commands, and transfers control. The browser handles continuous aircraft control between calls.
+The flight model and controller run locally at 60 Hz. React renders cockpit state at 10 Hz, and Cesium reads the live aircraft position without routing frame updates through React. A seeded scenario director introduces weather, traffic, fuel, aircraft, and passenger problems. The browser agent inspects separate evidence sources, makes a scored decision, and waits for the next meaningful event without polling.
 
 ## Run it
 
@@ -32,22 +32,28 @@ Open the app in ChatGPT's in-app browser, which supports WebMCP, or enable `chro
 | `G` | Toggle landing gear |
 | `T` | Transfer flight control |
 
-The mission is a compact traffic pattern at Chicago Executive Airport. It includes takeoff, climb, crosswind, downwind, base, final, landing, and rollout. Choose chase, cockpit, or free camera modes. The semantic recorder attributes each command to the human, agent, or simulator.
+The mission is a short deteriorating arrival at Chicago Executive Airport. Seeds 17, 42, and 81 preserve the same objective but change the safest response. Choose chase, cockpit, or free camera modes. The semantic recorder attributes each command to the human, agent, or simulator.
 
-Ask the browser agent to brief the mission, take control, and fly the pattern. The agent discovers the registered tools and calls them directly in the page. Each command returns the resulting mission state and legal next commands, so the agent does not need a separate state read after every write. Use **My controls** at any time to stop agent control immediately.
+Ask the browser agent to start a seed, brief the mission, take control, and fly. When the scenario changes, the agent can inspect weather, cockpit, traffic, and passenger reports before choosing a response. Seed 42 requires a human to approve or deny the risky priority approach. Use **My controls** at any time to stop agent control immediately.
 
 ## WebMCP tools
 
 The app registers these native `document.modelContext` tools:
 
 ```text
+start_checkride
 get_mission_brief
 get_flight_state
+inspect_flight_evidence
+wait_for_flight_event
 command_flight
+decide_checkride
 transfer_control
 ```
 
-`get_mission_brief` describes the runway, named fixes, leg constraints, success rules, and legal first commands. `get_flight_state` reports the aircraft and mission navigation state. `command_flight` accepts bounded commands such as `takeoff`, `proceed_to_fix`, `begin_approach`, `land`, and `go_around`. `transfer_control` moves authority between the pilot and agent.
+`start_checkride` resets a reproducible seed. `get_mission_brief` describes the objective, runway, constraints, evidence sources, and legal first command. `inspect_flight_evidence` reads one source after an alert. `command_flight` accepts bounded commands such as `takeoff`, `proceed_to_fix`, `begin_approach`, `land`, and `go_around`. `decide_checkride` records the agent's risk decision. `transfer_control` moves authority between the pilot and agent.
+
+`wait_for_flight_event` is a bounded asynchronous request. Its Promise resolves when the local simulator emits a matching revision such as `system_alert`, `command_required`, `touchdown`, or `mission_complete`. `command_flight` also accepts `wait_until_decision: true`. The simulator does not need a webhook because the page already owns these events.
 
 The WebMCP panel reports registration state and records every external tool invocation, including read-only calls. The browser agent supplies the model and calls the tools. Browsers without `document.modelContext` keep the manual cockpit but do not register agent controls.
 
