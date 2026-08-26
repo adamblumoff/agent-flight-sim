@@ -1,5 +1,4 @@
 import { useChat } from '@ai-sdk/react'
-import { useAISDKRuntime } from '@assistant-ui/ai-sdk'
 import {
   DefaultChatTransport,
   lastAssistantMessageIsCompleteWithToolCalls,
@@ -68,8 +67,6 @@ export function useFlightAgent() {
       }
     },
   })
-  const runtime = useAISDKRuntime(chat)
-
   return useMemo(
     () => ({
       messages: chat.messages,
@@ -82,9 +79,8 @@ export function useFlightAgent() {
       },
       stop: chat.stop,
       isReady: chat.status === 'ready',
-      runtime,
     }),
-    [chat.error, chat.messages, chat.sendMessage, chat.status, chat.stop, runtime],
+    [chat.error, chat.messages, chat.sendMessage, chat.status, chat.stop],
   )
 }
 

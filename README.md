@@ -54,7 +54,7 @@ WebMCP remains experimental. The simulator continues to work when `document.mode
 ## Stack
 
 - React 19, TypeScript, Vite, Tailwind 4, and shadcn Base/Nova primitives
-- assistant-ui with AI SDK 7, OpenAI, and a Hono streaming server
+- Vercel AI Elements with AI SDK 7, OpenAI, and a Hono streaming server
 - CesiumJS with Google Photorealistic 3D Tiles and a GLB aircraft
 - Native WebMCP imperative API backed by the shared tool registry
 - A renderer-independent TypeScript simulation and flight controller
