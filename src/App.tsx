@@ -29,6 +29,9 @@ import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
 const flapSettings = [0, 10, 20, 30]
 
+const formatMissionLabel = (value: string) =>
+  value.replaceAll('_', ' ').replace(/^\w/, (letter) => letter.toUpperCase())
+
 const cameraOptions: ReadonlyArray<{
   mode: FlightCameraMode
   label: string
@@ -78,7 +81,7 @@ export default function App() {
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
-    message: 'Loading the Chicago flight corridor.',
+    message: 'Loading the KPWK training circuit.',
   })
 
   useEffect(() => {
@@ -149,14 +152,30 @@ export default function App() {
             </span>
             <div className="min-w-0">
               <strong className="block truncate text-[13px] font-semibold tracking-[-0.02em]">Flightdeck</strong>
-              <span className="block truncate font-mono text-[8px] tracking-[0.16em] text-white/38 uppercase">KPWK to KMDW · N417FS</span>
+              <span className="block truncate font-mono text-[8px] tracking-[0.16em] text-white/38 uppercase">KPWK compact circuit · N417FS</span>
             </div>
           </div>
 
-          <div className="route-progress" aria-label={`${Math.round(state.routeProgress * 100)}% route progress`}>
-            <span>PWK</span>
-            <div><i style={{ width: `${Math.max(2, state.routeProgress * 100)}%` }} /></div>
-            <span>MDW</span>
+          <div
+            className="mission-progress"
+            aria-label={`Mission phase ${formatMissionLabel(state.mission.phase)}`}
+          >
+            <span>Phase</span>
+            <strong>{formatMissionLabel(state.mission.phase)}</strong>
+            <i aria-hidden="true" />
+            <span>Next</span>
+            <strong>
+              {state.mission.nextFix ? formatMissionLabel(state.mission.nextFix) : 'Full stop'}
+            </strong>
+            <small>
+              {state.mission.nextFix && state.mission.distanceToNextFixNm !== null
+                ? `${state.mission.distanceToNextFixNm.toFixed(1)} NM`
+                : state.mission.outcome !== 'in_progress'
+                  ? formatMissionLabel(state.mission.outcome)
+                  : state.mission.awaitingCommand
+                    ? 'Awaiting command'
+                    : 'En route'}
+            </small>
           </div>
 
           <div className="flex items-center justify-end gap-1.5">
@@ -254,6 +273,7 @@ export default function App() {
             status={webMcpStatus}
             activities={webMcpActivities}
             controlOwner={state.controlOwner}
+            mission={state.mission}
           />
 
           <div className="right-rail-actions">

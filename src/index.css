@@ -145,27 +145,41 @@ textarea:focus-visible {
   backdrop-filter: blur(22px) saturate(120%);
 }
 
-.route-progress {
+.mission-progress {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto auto 1px auto auto auto;
   align-items: center;
-  gap: 12px;
-  font: 600 9px/1 "Kode Mono Variable", monospace;
-  letter-spacing: 0.14em;
-  color: rgb(255 255 255 / 72%);
+  justify-content: center;
+  gap: 9px;
+  font: 600 8px/1 "Kode Mono Variable", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.route-progress > div {
-  height: 2px;
+.mission-progress span {
+  color: rgb(255 255 255 / 34%);
+}
+
+.mission-progress strong {
   overflow: hidden;
-  background: rgb(255 255 255 / 18%);
+  max-width: 110px;
+  color: rgb(255 255 255 / 78%);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.route-progress i {
-  display: block;
-  height: 100%;
-  background: white;
-  box-shadow: 0 0 8px rgb(255 255 255 / 40%);
+.mission-progress i {
+  width: 1px;
+  height: 18px;
+  margin-inline: 3px;
+  background: rgb(255 255 255 / 14%);
+}
+
+.mission-progress small {
+  color: #f0b95c;
+  font: inherit;
+  letter-spacing: 0;
 }
 
 .status-badge {
@@ -425,6 +439,48 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+.mission-evidence {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 0 16px 12px;
+}
+
+.mission-evidence > div {
+  min-width: 0;
+  padding: 9px 0;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+}
+
+.mission-evidence > div:nth-child(odd) {
+  padding-right: 12px;
+  border-right: 1px solid rgb(255 255 255 / 9%);
+}
+
+.mission-evidence > div:nth-child(even) {
+  padding-left: 12px;
+}
+
+.mission-evidence dt {
+  color: rgb(255 255 255 / 35%);
+  font: 600 7px/1 "Kode Mono Variable", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mission-evidence dd {
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: rgb(255 255 255 / 76%);
+  font: 600 9px/1.25 "Kode Mono Variable", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mission-evidence .evidence-good {
+  color: #67df9a;
+}
+
 .webmcp-receipts {
   min-height: 0;
   flex: 1;
@@ -628,7 +684,7 @@ kbd {
     grid-template-columns: 1fr auto;
   }
 
-  .route-progress,
+  .mission-progress,
   .topbar .status-badge:first-child,
   .control-hints {
     display: none;

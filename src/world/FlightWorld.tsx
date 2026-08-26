@@ -15,6 +15,7 @@ import {
   Math as CesiumMath,
   Matrix4,
   NearFarScalar,
+  PolylineDashMaterialProperty,
   PolylineGlowMaterialProperty,
   Quaternion,
   ShadowMode,
@@ -25,7 +26,7 @@ import {
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import {
-  KPWK_TO_KMDW_ROUTE,
+  COMPACT_TRAINING_MISSION,
   flightSimulator,
 } from '../sim/flightSimulator'
 
@@ -57,7 +58,7 @@ const setupStatus: FlightWorldStatus = {
 
 const loadingStatus: FlightWorldStatus = {
   kind: 'loading',
-  message: 'Loading the Chicago flight corridor.',
+  message: 'Loading the KPWK training circuit.',
 }
 
 function aircraftPosition(state: FlightState, result?: Cartesian3) {
@@ -86,17 +87,55 @@ function solarNoonAtLongitude(longitude: number) {
   )
 }
 
-function addRoute(viewer: Viewer) {
-  const { departure, arrival } = KPWK_TO_KMDW_ROUTE
-  const routeHeightMeters = 22
-  const routePositions = Cartesian3.fromDegreesArrayHeights([
-    departure.lon,
-    departure.lat,
-    departure.elevationFt * FEET_TO_METERS + routeHeightMeters,
-    arrival.lon,
-    arrival.lat,
-    arrival.elevationFt * FEET_TO_METERS + routeHeightMeters,
+function addMission(viewer: Viewer) {
+  const { airport, fixes, legs, runway } = COMPACT_TRAINING_MISSION
+  const fixesById = new Map(fixes.map((fix) => [fix.id, fix]))
+  const routeCoordinates = [
+    runway.thresholdLon,
+    runway.thresholdLat,
+    runway.elevationFt * FEET_TO_METERS + 5,
+  ]
+
+  for (const leg of legs) {
+    const fix = fixesById.get(leg.to)
+    if (!fix) continue
+    routeCoordinates.push(
+      fix.lon,
+      fix.lat,
+      Math.max(fix.altitudeFt, runway.elevationFt) * FEET_TO_METERS + 5,
+    )
+  }
+
+  const routePositions = Cartesian3.fromDegreesArrayHeights(routeCoordinates)
+  const runwayPositions = Cartesian3.fromDegreesArrayHeights([
+    runway.thresholdLon,
+    runway.thresholdLat,
+    runway.elevationFt * FEET_TO_METERS + 1.5,
+    runway.farEndLon,
+    runway.farEndLat,
+    runway.elevationFt * FEET_TO_METERS + 1.5,
   ])
+
+  viewer.entities.add({
+    id: 'mission-runway',
+    corridor: {
+      positions: runwayPositions,
+      width: runway.widthFt * FEET_TO_METERS,
+      material: Color.fromCssColorString('#151515').withAlpha(0.68),
+      outline: false,
+    },
+  })
+  viewer.entities.add({
+    id: 'mission-runway-centerline',
+    polyline: {
+      positions: runwayPositions,
+      width: 2,
+      material: new PolylineDashMaterialProperty({
+        color: Color.WHITE.withAlpha(0.9),
+        dashLength: 18,
+      }),
+    },
+  })
 
   viewer.entities.add({
     id: 'planned-route-outline',
@@ -119,38 +158,61 @@ function addRoute(viewer: Viewer) {
     },
   })
 
-  for (const airport of [departure, arrival]) {
+  for (const fix of fixes) {
     viewer.entities.add({
-      id: `airport-${airport.code}`,
+      id: `mission-fix-${fix.id}`,
       position: Cartesian3.fromDegrees(
-        airport.lon,
-        airport.lat,
-        airport.elevationFt * FEET_TO_METERS + 35,
+        fix.lon,
+        fix.lat,
+        Math.max(fix.altitudeFt, runway.elevationFt) * FEET_TO_METERS + 8,
       ),
       point: {
-        color: Color.WHITE,
+        color: fix.id.includes('GATE') ? Color.fromCssColorString('#f0b95c') : Color.WHITE,
         outlineColor: Color.BLACK,
         outlineWidth: 3,
-        pixelSize: 10,
-        scaleByDistance: new NearFarScalar(500, 1.35, 80_000, 0.75),
+        pixelSize: 8,
+        scaleByDistance: new NearFarScalar(500, 1.3, 30_000, 0.72),
       },
       label: {
         backgroundColor: Color.BLACK.withAlpha(0.82),
         fillColor: Color.WHITE,
-        font: '700 14px "Kode Mono", monospace',
+        font: '700 12px "Kode Mono", monospace',
         horizontalOrigin: HorizontalOrigin.CENTER,
         outlineColor: Color.BLACK,
         outlineWidth: 4,
-        pixelOffset: new Cartesian2(0, -24),
-        scaleByDistance: new NearFarScalar(500, 1.15, 90_000, 0.72),
+        pixelOffset: new Cartesian2(0, -20),
+        scaleByDistance: new NearFarScalar(500, 1.1, 35_000, 0.68),
         showBackground: true,
         style: LabelStyle.FILL_AND_OUTLINE,
-        text: `${airport.code}  ${airport.name}`,
-        translucencyByDistance: new NearFarScalar(5_000, 1, 140_000, 0.12),
+        text: `${fix.name}  ${fix.altitudeFt.toLocaleString()} FT / ${fix.airspeedKt} KT`,
+        translucencyByDistance: new NearFarScalar(3_000, 1, 45_000, 0.08),
         verticalOrigin: VerticalOrigin.BOTTOM,
       },
     })
   }
+
+  viewer.entities.add({
+    id: `airport-${airport.code}`,
+    position: Cartesian3.fromDegrees(
+      runway.farEndLon,
+      runway.farEndLat,
+      runway.elevationFt * FEET_TO_METERS + 18,
+    ),
+    label: {
+      backgroundColor: Color.BLACK.withAlpha(0.88),
+      fillColor: Color.WHITE,
+      font: '700 13px "Kode Mono", monospace',
+      horizontalOrigin: HorizontalOrigin.CENTER,
+      outlineColor: Color.BLACK,
+      outlineWidth: 4,
+      pixelOffset: new Cartesian2(0, -18),
+      scaleByDistance: new NearFarScalar(500, 1.15, 35_000, 0.7),
+      showBackground: true,
+      style: LabelStyle.FILL_AND_OUTLINE,
+      text: `${airport.code}  RWY ${runway.id.replace('TRAINING-', '')}`,
+      verticalOrigin: VerticalOrigin.BOTTOM,
+    },
+  })
 }
 
 export function FlightWorld({
@@ -195,7 +257,7 @@ export function FlightWorld({
     viewer.resolutionScale = Math.min(window.devicePixelRatio, 1.5)
     viewer.clock.currentTime = JulianDate.fromDate(
       solarNoonAtLongitude(
-        (KPWK_TO_KMDW_ROUTE.departure.lon + KPWK_TO_KMDW_ROUTE.arrival.lon) / 2,
+        COMPACT_TRAINING_MISSION.airport.lon,
       ),
     )
     viewer.clock.shouldAnimate = false
@@ -203,7 +265,7 @@ export function FlightWorld({
     viewer.scene.postProcessStages.fxaa.enabled = true
     viewer.shadows = true
 
-    addRoute(viewer)
+    addMission(viewer)
 
     const position = new CallbackPositionProperty(
       (_time, result?: Cartesian3) =>
@@ -326,7 +388,7 @@ export function FlightWorld({
           viewer.scene.primitives.add(tileset)
           setStatus({
             kind: 'ready',
-            message: 'Chicago photorealistic scenery is ready.',
+            message: 'KPWK photorealistic scenery is ready.',
           })
         })
         .catch((error: unknown) => {

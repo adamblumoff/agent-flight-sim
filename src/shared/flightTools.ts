@@ -1,9 +1,10 @@
 import type {
   ControlOwner,
-  FlightDirectorState,
-  FlightScenario,
+  FlightCommand,
+  FlightCommandReceipt,
   FlightState,
-  TraceEvent,
+  MissionBrief,
+  MissionFixId,
 } from '../sim/types'
 
 export type JsonSchema = Readonly<{
@@ -22,48 +23,48 @@ export interface FlightToolReceipt<TDetails = Readonly<Record<string, unknown>>>
   readonly details: TDetails
 }
 
+export type CommandFlightToolReceipt = FlightCommandReceipt & Readonly<{
+  ok: boolean
+  tone: ToolReceiptTone
+}>
+
+export const flightCommandValues = [
+  'takeoff',
+  'proceed_to_fix',
+  'enter_downwind',
+  'extend_downwind',
+  'begin_approach',
+  'land',
+  'go_around',
+] as const satisfies readonly FlightCommand[]
+
+export const proceedToFixTargets = [
+  'CROSSWIND',
+  'NORTH_GATE',
+] as const satisfies readonly MissionFixId[]
+
 export interface FlightToolArguments {
+  get_mission_brief: Record<string, never>
   get_flight_state: Record<string, never>
-  get_flight_recorder: Record<string, never>
-  set_throttle: { readonly value: number; readonly reason?: string }
-  configure_aircraft: {
-    readonly flaps_degrees?: 0 | 10 | 20 | 30
-    readonly gear_down?: boolean
-    readonly reason?: string
-  }
-  set_flight_director: {
-    readonly enabled?: boolean
-    readonly heading_degrees?: number
-    readonly altitude_feet?: number
-    readonly airspeed_knots?: number
+  command_flight: {
+    readonly command: FlightCommand
+    readonly target?: MissionFixId
     readonly reason?: string
   }
   transfer_control: {
     readonly owner: ControlOwner
     readonly reason?: string
   }
-  trigger_training_scenario: {
-    readonly scenario: FlightScenario
-    readonly reason?: string
-  }
 }
 
 export interface FlightToolResults {
+  get_mission_brief: FlightToolReceipt<{ readonly brief: MissionBrief }>
   get_flight_state: FlightToolReceipt<{
     readonly state: FlightState
     readonly units: Readonly<Record<string, string>>
   }>
-  get_flight_recorder: FlightToolReceipt<{ readonly events: readonly TraceEvent[] }>
-  set_throttle: FlightToolReceipt<{ readonly throttle: number }>
-  configure_aircraft: FlightToolReceipt<{
-    readonly flapsDegrees: number
-    readonly gearDown: boolean
-  }>
-  set_flight_director: FlightToolReceipt<{
-    readonly flightDirector: FlightDirectorState
-  }>
+  command_flight: CommandFlightToolReceipt
   transfer_control: FlightToolReceipt<{ readonly controlOwner: ControlOwner }>
-  trigger_training_scenario: FlightToolReceipt<{ readonly scenario: FlightScenario }>
 }
 
 export type FlightToolName = keyof FlightToolArguments
@@ -84,64 +85,40 @@ const emptySchema = {
 
 export const flightToolDefinitions = [
   {
+    name: 'get_mission_brief',
+    title: 'Read mission brief',
+    description:
+      'Read the runway, route, named fixes, flight constraints, success criteria, and legal first commands. Call this before flying the mission. Never changes the flight.',
+    inputSchema: emptySchema,
+    readOnly: true,
+  },
+  {
     name: 'get_flight_state',
     title: 'Read flight state',
     description:
-      'Read the live aircraft position, attitude, speed, configuration, control owner, and flight-director targets. Never changes the flight.',
+      'Read the live aircraft state and mission navigation, including the active leg, next fix, navigation errors, approach stability, and allowed commands. Never changes the flight.',
     inputSchema: emptySchema,
     readOnly: true,
   },
   {
-    name: 'get_flight_recorder',
-    title: 'Read flight recorder',
-    description: 'Read the 20 most recent human, agent, and system actions. Never changes the flight.',
-    inputSchema: emptySchema,
-    readOnly: true,
-  },
-  {
-    name: 'set_throttle',
-    title: 'Set throttle',
-    description: 'Set engine throttle from zero to one. Use smooth, deliberate changes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        value: { type: 'number', minimum: 0, maximum: 1 },
-        reason: { type: 'string' },
-      },
-      required: ['value'],
-      additionalProperties: false,
-    },
-    readOnly: false,
-  },
-  {
-    name: 'configure_aircraft',
-    title: 'Configure aircraft',
-    description: 'Set flap angle, landing-gear position, or both for the current phase of flight.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        flaps_degrees: { type: 'number', enum: [0, 10, 20, 30] },
-        gear_down: { type: 'boolean' },
-        reason: { type: 'string' },
-      },
-      additionalProperties: false,
-    },
-    readOnly: false,
-  },
-  {
-    name: 'set_flight_director',
-    title: 'Set flight director',
+    name: 'command_flight',
+    title: 'Command the flight',
     description:
-      'Set or disable heading, altitude, and airspeed targets. The browser runs the real-time control loop only while the agent owns the controls.',
+      'Issue one phase-level mission command while the agent has control. Use startingCommands from the brief or allowedCommands from the latest state or command receipt. proceed_to_fix also requires a target. The receipt includes the resulting state and legal next commands, so do not read state again unless the aircraft has had time to move.',
     inputSchema: {
       type: 'object',
       properties: {
-        enabled: { type: 'boolean' },
-        heading_degrees: { type: 'number', minimum: 0, maximum: 359 },
-        altitude_feet: { type: 'number', minimum: 500, maximum: 12000 },
-        airspeed_knots: { type: 'number', minimum: 60, maximum: 180 },
+        command: {
+          type: 'string',
+          enum: flightCommandValues,
+        },
+        target: {
+          type: 'string',
+          enum: proceedToFixTargets,
+        },
         reason: { type: 'string' },
       },
+      required: ['command'],
       additionalProperties: false,
     },
     readOnly: false,
@@ -150,7 +127,7 @@ export const flightToolDefinitions = [
     name: 'transfer_control',
     title: 'Transfer flight control',
     description:
-      'Transfer primary flight control to the human or the agent. Use only after an explicit verbal handoff. Returning control to the human immediately stops agent control.',
+      'Transfer primary flight control to the pilot or agent after an explicit handoff. Returning control to the pilot stops agent mission guidance immediately.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -158,21 +135,6 @@ export const flightToolDefinitions = [
         reason: { type: 'string' },
       },
       required: ['owner'],
-      additionalProperties: false,
-    },
-    readOnly: false,
-  },
-  {
-    name: 'trigger_training_scenario',
-    title: 'Set training scenario',
-    description: 'Start or clear a moderate engine-instability training event.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        scenario: { type: 'string', enum: ['engine_instability', 'clear'] },
-        reason: { type: 'string' },
-      },
-      required: ['scenario'],
       additionalProperties: false,
     },
     readOnly: false,

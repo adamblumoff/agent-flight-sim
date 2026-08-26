@@ -11,6 +11,12 @@ export interface WebMcpActivityProps {
   readonly status: WebMcpStatus
   readonly controlOwner: ControlOwner
   readonly activities: readonly WebMcpActivityItem[]
+  readonly mission: {
+    readonly phase: string
+    readonly nextFix: string | null
+    readonly stableApproach: boolean
+    readonly outcome: string | null
+  }
 }
 
 const statusDetails = {
@@ -37,10 +43,13 @@ const statusDetails = {
 } as const
 
 const promptExamples = [
-  'Read the aircraft and brief me.',
-  'You have the controls. Fly heading 180 at 3,000 feet and 115 knots.',
-  'Start an engine-instability training scenario.',
+  'Call get_mission_brief and tell me the first legal command.',
+  'Take the controls and fly the full pattern using phase-level commands.',
+  'Read the flight state. Land if stable; go around if not.',
 ] as const
+
+const formatMissionLabel = (value: string) =>
+  value.replaceAll('_', ' ').replace(/^\w/, (letter) => letter.toUpperCase())
 
 function ActivityReceipt({ activity }: { readonly activity: WebMcpActivityItem }) {
   const completed = activity.status === 'completed'
@@ -70,7 +79,7 @@ function ActivityReceipt({ activity }: { readonly activity: WebMcpActivityItem }
   )
 }
 
-export function WebMcpActivityPanel({ status, controlOwner, activities }: WebMcpActivityProps) {
+export function WebMcpActivityPanel({ status, controlOwner, activities, mission }: WebMcpActivityProps) {
   const currentStatus = statusDetails[status]
   const StatusIcon = currentStatus.icon
   const recentActivities = activities.slice(-5).reverse()
@@ -102,6 +111,29 @@ export function WebMcpActivityPanel({ status, controlOwner, activities }: WebMcp
         <span>Flight control</span>
         <strong>{controlOwner === 'agent' ? 'Browser agent' : 'Human pilot'}</strong>
       </div>
+
+      <dl className="mission-evidence" aria-label="Mission status">
+        <div>
+          <dt>Phase</dt>
+          <dd>{formatMissionLabel(mission.phase)}</dd>
+        </div>
+        <div>
+          <dt>Next gate</dt>
+          <dd>{mission.nextFix ? formatMissionLabel(mission.nextFix) : 'Runway stop'}</dd>
+        </div>
+        <div>
+          <dt>Approach</dt>
+          <dd className={mission.stableApproach ? 'evidence-good' : undefined}>
+            {mission.stableApproach ? 'Stable' : 'Not established'}
+          </dd>
+        </div>
+        <div>
+          <dt>Result</dt>
+          <dd className={mission.outcome === 'landed' ? 'evidence-good' : undefined}>
+            {mission.outcome ? formatMissionLabel(mission.outcome) : 'In progress'}
+          </dd>
+        </div>
+      </dl>
 
       <section className="webmcp-receipts">
         <div className="webmcp-section-heading">

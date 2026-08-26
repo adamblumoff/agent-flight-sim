@@ -31,7 +31,7 @@ function createFlightTools(recordActivity: RecordActivity): WebMCP.ModelContextT
         recordActivity({
           tool: definition.name,
           title: definition.title,
-          status: 'completed',
+          status: result.ok ? 'completed' : 'failed',
           summary: result.summary,
         })
         return result
