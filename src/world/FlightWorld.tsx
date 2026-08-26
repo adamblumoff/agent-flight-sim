@@ -256,6 +256,9 @@ export function FlightWorld({
     const cameraPosition = new Cartesian3()
     const cameraAttitude = new HeadingPitchRoll()
     const cameraTransform = new Matrix4()
+    const cockpitPosition = new Cartesian3()
+    const cockpitDirection = new Cartesian3()
+    const cockpitUp = new Cartesian3()
     let previousCameraMode: FlightCameraMode | null = null
     const updateCamera = () => {
       const mode = cameraModeRef.current
@@ -282,9 +285,23 @@ export function FlightWorld({
       )
 
       if (mode === 'cockpit') {
-        viewer.camera.lookAtTransform(transform, COCKPIT_OFFSET)
-        viewer.camera.lookRight(Math.PI)
-        viewer.camera.lookDown(CesiumMath.toRadians(3))
+        Matrix4.multiplyByPoint(transform, COCKPIT_OFFSET, cockpitPosition)
+        Matrix4.multiplyByPointAsVector(
+          transform,
+          Cartesian3.UNIT_X,
+          cockpitDirection,
+        )
+        Matrix4.multiplyByPointAsVector(transform, Cartesian3.UNIT_Z, cockpitUp)
+        Cartesian3.normalize(cockpitDirection, cockpitDirection)
+        Cartesian3.normalize(cockpitUp, cockpitUp)
+        viewer.camera.lookAtTransform(Matrix4.IDENTITY)
+        viewer.camera.setView({
+          destination: cockpitPosition,
+          orientation: {
+            direction: cockpitDirection,
+            up: cockpitUp,
+          },
+        })
       } else {
         viewer.camera.lookAtTransform(transform, CHASE_OFFSET)
       }
