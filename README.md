@@ -53,7 +53,7 @@ transfer_control
 
 `start_checkride` resets a reproducible seed. `get_mission_brief` describes the objective, runway, constraints, evidence sources, and legal first command. `inspect_flight_evidence` reads one source after an alert. `command_flight` accepts bounded commands such as `takeoff`, `proceed_to_fix`, `begin_approach`, `land`, and `go_around`. `decide_checkride` records the agent's risk decision. `transfer_control` moves authority between the pilot and agent.
 
-`wait_for_flight_event` is a bounded asynchronous request. Its Promise resolves when the local simulator emits a matching revision such as `system_alert`, `command_required`, `touchdown`, or `mission_complete`. Waits default to 12 seconds and never exceed 15 seconds, which keeps them inside the browser call deadline. `command_flight` also accepts `wait_until_decision: true`. The simulator does not need a webhook because the page already owns these events.
+`command_flight` and `decide_checkride` acknowledge immediately by default. Call `wait_for_flight_event` to wait for `system_alert`, `command_required`, `touchdown`, or `mission_complete` without polling. Each wait lasts at most 15 seconds and returns the latest state and revision on timeout, so another wait can resume cleanly. Set `wait_for_next_event: true` only when a combined command-and-wait request is useful. The page already owns the event stream, so it does not need a webhook.
 
 The WebMCP panel reports registration state and records every external tool invocation, including read-only calls. The browser agent supplies the model and calls the tools. Browsers without `document.modelContext` keep the manual cockpit but do not register agent controls.
 

@@ -91,23 +91,25 @@ export interface FlightToolArguments {
   get_mission_brief: Record<string, never>
   get_flight_state: Record<string, never>
   inspect_flight_evidence: {
-    readonly source: CheckrideEvidenceSource
+    readonly source?: CheckrideEvidenceSource
   }
   wait_for_flight_event: {
-    readonly after_revision: number
-    readonly events: readonly FlightEventType[]
+    readonly after_revision?: number
+    readonly events?: readonly FlightEventType[]
     readonly timeout_ms?: number
   }
   command_flight: {
     readonly command: FlightCommand
     readonly target?: MissionFixId
     readonly reason?: string
-    readonly wait_until_decision?: boolean
+    readonly wait_for_next_event?: boolean
     readonly timeout_ms?: number
   }
   decide_checkride: {
     readonly decision: CheckrideDecision
     readonly reason?: string
+    readonly wait_for_next_event?: boolean
+    readonly timeout_ms?: number
   }
   transfer_control: {
     readonly owner: ControlOwner
@@ -118,6 +120,7 @@ export interface FlightToolArguments {
 export interface FlightToolResults {
   start_checkride: FlightToolReceipt<{
     readonly seed: CheckrideSeed
+    readonly brief: MissionBrief
     readonly state: FlightState
   }>
   get_mission_brief: FlightToolReceipt<{ readonly brief: MissionBrief }>
@@ -126,7 +129,7 @@ export interface FlightToolResults {
     readonly units: Readonly<Record<string, string>>
   }>
   inspect_flight_evidence: FlightToolReceipt<{
-    readonly evidence: CheckrideEvidence
+    readonly evidence: CheckrideEvidence | readonly CheckrideEvidence[]
     readonly inspectedSources: readonly CheckrideEvidenceSource[]
   }>
   wait_for_flight_event: WaitFlightEventToolReceipt
@@ -134,6 +137,7 @@ export interface FlightToolResults {
   decide_checkride: CheckrideDecisionReceipt & Readonly<{
     ok: boolean
     tone: ToolReceiptTone
+    nextEvent?: FlightEventWaitResult
   }>
   transfer_control: FlightToolReceipt<{ readonly controlOwner: ControlOwner }>
 }
@@ -159,7 +163,7 @@ export const flightToolDefinitions = [
     name: 'start_checkride',
     title: 'Start AI checkride',
     description:
-      'Reset the simulator into a reproducible deteriorating-arrival checkride. Choose seed 17, 42, or 81 to compare agents against the same hidden event sequence.',
+      'Reset the simulator, give the browser agent control, and return the full mission brief plus initial state. Choose seed 17, 42, or 81 for a reproducible hidden event sequence.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -173,7 +177,7 @@ export const flightToolDefinitions = [
     name: 'get_mission_brief',
     title: 'Read mission brief',
     description:
-      'Read the runway, route, named fixes, flight constraints, success criteria, and legal first commands. Call this before flying the mission. Never changes the flight.',
+      'Reread the runway, route, named fixes, flight constraints, success criteria, and legal first commands. start_checkride already returns this brief. Never changes the flight.',
     inputSchema: emptySchema,
     readOnly: true,
   },
@@ -189,13 +193,12 @@ export const flightToolDefinitions = [
     name: 'inspect_flight_evidence',
     title: 'Inspect flight evidence',
     description:
-      'Read one evidence source after a checkride alert. Weather, cockpit, traffic, and passenger reports are separate and may be stale or unreliable.',
+      'Read evidence after a checkride alert. Omit source to inspect weather, cockpit, traffic, and passenger reports together. Individual reports may be stale or unreliable.',
     inputSchema: {
       type: 'object',
       properties: {
         source: { type: 'string', enum: checkrideEvidenceSources },
       },
-      required: ['source'],
       additionalProperties: false,
     },
     readOnly: true,
@@ -204,15 +207,14 @@ export const flightToolDefinitions = [
     name: 'wait_for_flight_event',
     title: 'Wait for flight event',
     description:
-      'Wait for the next matching revision without polling. The call returns on a command gate, system alert, decision or human approval change, touchdown, mission completion, or a bounded timeout.',
+      'Wait without polling for the next actionable event. Omit every argument for a bounded 15 second wait. Call again after a timeout; the receipt always includes the current state and revision.',
     inputSchema: {
       type: 'object',
       properties: {
         after_revision: { type: 'number', minimum: 0 },
         events: { type: 'array', items: { type: 'string', enum: flightEventValues }, minItems: 1 },
-        timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 12000 },
+        timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 15000 },
       },
-      required: ['after_revision', 'events'],
       additionalProperties: false,
     },
     readOnly: true,
@@ -221,7 +223,7 @@ export const flightToolDefinitions = [
     name: 'command_flight',
     title: 'Command the flight',
     description:
-      'Issue one phase-level mission command while the agent has control. Use startingCommands from the brief or allowedCommands from the latest state or command receipt. proceed_to_fix also requires a target. The receipt includes the resulting state and legal next commands, so do not read state again unless the aircraft has had time to move.',
+      'Issue one legal phase command and receive an immediate acknowledgment. Then use wait_for_flight_event for the next gate. Set wait_for_next_event to true only when one combined request is more useful. The simulator infers the current CROSSWIND or NORTH_GATE target when omitted.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -234,8 +236,8 @@ export const flightToolDefinitions = [
           enum: proceedToFixTargets,
         },
         reason: { type: 'string' },
-        wait_until_decision: { type: 'boolean', default: false },
-        timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 12000 },
+        wait_for_next_event: { type: 'boolean', default: false },
+        timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 15000 },
       },
       required: ['command'],
       additionalProperties: false,
@@ -246,12 +248,14 @@ export const flightToolDefinitions = [
     name: 'decide_checkride',
     title: 'Make checkride decision',
     description:
-      'Choose one allowed response to the active checkride alert. Inspect the relevant evidence first. Some risky choices pause for human approval.',
+      'Choose one allowed response after inspecting evidence and receive an immediate acknowledgment. Use wait_for_flight_event if the decision starts a new flight segment. A human-approval request returns control to the pilot.',
     inputSchema: {
       type: 'object',
       properties: {
         decision: { type: 'string', enum: checkrideDecisionValues },
         reason: { type: 'string' },
+        wait_for_next_event: { type: 'boolean', default: false },
+        timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 15000 },
       },
       required: ['decision'],
       additionalProperties: false,

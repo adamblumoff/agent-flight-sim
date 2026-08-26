@@ -35,11 +35,15 @@ const MAX_FRAME_SECONDS = 0.25
 const MAX_TRACE_EVENTS = 250
 const MAX_FLIGHT_EVENTS = 40
 const MAX_EVENT_WAIT_MS = 15_000
+const AGENT_FLIGHT_TIME_SCALE = 4
 const EARTH_RADIUS_NM = 3_440.065
 const FEET_PER_NM = 6_076.12
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
+
+const totalScore = (safety: number, judgment: number, fuel: number) =>
+  Math.round(safety * 0.5 + judgment * 0.3 + fuel * 0.2)
 
 const approach = (value: number, target: number, maxChange: number) =>
   value < target
@@ -52,6 +56,9 @@ const headingError = (target: number, current: number) =>
   ((target - current + 540) % 360) - 180
 
 const degreesToRadians = (degrees: number) => (degrees * Math.PI) / 180
+
+const wallClockNowMs = () =>
+  typeof performance === 'undefined' ? Date.now() : performance.now()
 
 const distanceNm = (fromLat: number, fromLon: number, toLat: number, toLon: number) => {
   const latDelta = degreesToRadians(toLat - fromLat)
@@ -80,41 +87,58 @@ const bearingDeg = (fromLat: number, fromLon: number, toLat: number, toLon: numb
 const airport = Object.freeze({
   code: 'KPWK',
   name: 'Chicago Executive Airport',
-  lat: 42.1143,
-  lon: -87.9015,
-  elevationFt: 647,
+  lat: 42.11255,
+  lon: -87.89998,
+  elevationFt: 645,
 })
 
-const runwayThreshold = Object.freeze({ lat: 42.1143, lon: -87.91 })
+const runwayHeadingDeg = 159
+const runwayHeadingRad = degreesToRadians(runwayHeadingDeg)
+const runwayThreshold = Object.freeze({
+  lat: 42.12332888888889,
+  lon: -87.90712641666667,
+})
 const referenceLatRad = degreesToRadians(runwayThreshold.lat)
 
-const localToPosition = (eastNm: number, northNm: number) =>
-  Object.freeze({
-    lat: runwayThreshold.lat + northNm / 60,
-    lon: runwayThreshold.lon + eastNm / (60 * Math.cos(referenceLatRad)),
+const localToPosition = (alongNm: number, crossNm: number) => {
+  const worldEastNm =
+    alongNm * Math.sin(runwayHeadingRad) - crossNm * Math.cos(runwayHeadingRad)
+  const worldNorthNm =
+    alongNm * Math.cos(runwayHeadingRad) + crossNm * Math.sin(runwayHeadingRad)
+  return Object.freeze({
+    lat: runwayThreshold.lat + worldNorthNm / 60,
+    lon: runwayThreshold.lon + worldEastNm / (60 * Math.cos(referenceLatRad)),
   })
+}
 
-const positionToLocal = (lat: number, lon: number) => ({
-  eastNm: (lon - runwayThreshold.lon) * 60 * Math.cos(referenceLatRad),
-  northNm: (lat - runwayThreshold.lat) * 60,
-})
+const positionToLocal = (lat: number, lon: number) => {
+  const worldEastNm = (lon - runwayThreshold.lon) * 60 * Math.cos(referenceLatRad)
+  const worldNorthNm = (lat - runwayThreshold.lat) * 60
+  return {
+    alongNm:
+      worldEastNm * Math.sin(runwayHeadingRad) + worldNorthNm * Math.cos(runwayHeadingRad),
+    crossNm:
+      -worldEastNm * Math.cos(runwayHeadingRad) + worldNorthNm * Math.sin(runwayHeadingRad),
+  }
+}
 
 const fix = (
   id: MissionFixId,
   name: string,
-  eastNm: number,
-  northNm: number,
+  alongNm: number,
+  crossNm: number,
   altitudeFt: number,
   airspeedKt: number,
-): MissionFix => Object.freeze({ id, name, ...localToPosition(eastNm, northNm), altitudeFt, airspeedKt })
+): MissionFix =>
+  Object.freeze({ id, name, ...localToPosition(alongNm, crossNm), altitudeFt, airspeedKt })
 
 const fixes = Object.freeze([
-  fix('DEPART', 'Initial climb gate', 0.25, 0, 847, 75),
-  fix('CROSSWIND', 'Crosswind turn', 1.35, 1.15, 1_847, 105),
-  fix('NORTH_GATE', 'North gate', 0.35, 1.55, 2_147, 112),
-  fix('DOWNWIND', 'Downwind gate', -1.1, 1.55, 2_147, 105),
-  fix('BASE_GATE', 'Base gate', -1.35, 0.65, 1_497, 90),
-  fix('FINAL_GATE', 'Final gate', -0.9, 0, 981, 82),
+  fix('DEPART', 'Initial climb gate', 0.08, 0, 845, 75),
+  fix('CROSSWIND', 'Crosswind turn', 0.22, 0.17, 900, 105),
+  fix('NORTH_GATE', 'North gate', 0.08, 0.25, 950, 112),
+  fix('DOWNWIND', 'Downwind gate', -0.4, 0.25, 950, 105),
+  fix('BASE_GATE', 'Base gate', -0.32, 0.08, 850, 90),
+  fix('FINAL_GATE', 'Final gate', -0.25, 0, 759, 82),
   fix('TOUCHDOWN', 'Touchdown aim point', 0.16, 0, airport.elevationFt, 72),
 ] satisfies readonly MissionFix[])
 
@@ -152,7 +176,10 @@ const legs = Object.freeze([
   leg('FINAL_TO_TOUCHDOWN', 'FINAL_GATE', 'TOUCHDOWN', 'final'),
 ] satisfies readonly MissionLeg[])
 
-const runwayFarEnd = localToPosition(5_000 / FEET_PER_NM, 0)
+const runwayFarEnd = Object.freeze({
+  lat: 42.11055175,
+  lon: -87.90040494444445,
+})
 const routeDistanceNm = Number(legs.reduce((total, item) => total + item.distanceNm, 0).toFixed(1))
 
 const CHECKRIDE_OBJECTIVE =
@@ -292,25 +319,25 @@ export const COMPACT_TRAINING_MISSION: MissionBrief = Object.freeze({
   objective: CHECKRIDE_OBJECTIVE,
   airport,
   runway: Object.freeze({
-    id: 'TRAINING-09',
+    id: 'TRAINING-16',
     thresholdLat: runwayThreshold.lat,
     thresholdLon: runwayThreshold.lon,
     farEndLat: runwayFarEnd.lat,
     farEndLon: runwayFarEnd.lon,
-    headingDeg: 90,
-    lengthFt: 5_000,
-    widthFt: 250,
+    headingDeg: runwayHeadingDeg,
+    lengthFt: 5_001,
+    widthFt: 150,
     elevationFt: airport.elevationFt,
     touchdownZoneStartFt: 650,
     touchdownZoneEndFt: 2_700,
   }),
   routeDistanceNm,
-  estimatedDurationMinutes: 6,
+  estimatedDurationMinutes: 2,
   fixes,
   legs,
   constraints: Object.freeze([
     'Cross DEPART airborne and in a positive climb.',
-    'Capture 1,500 ft AGL and 105 to 120 kt by NORTH_GATE.',
+    'Capture 300 ft AGL and 105 to 120 kt by NORTH_GATE.',
     'Cross BASE_GATE near 90 kt with the gear down.',
     'Use FINAL_GATE to verify centerline, glidepath, speed, gear, and sink rate.',
   ]),
@@ -422,7 +449,8 @@ class FlightSimulator {
   private nextTraceId = 1
   private eventRevision = 0
   private elapsedSeconds = 0
-  private checkrideAlertSeconds: number | null = null
+  private checkrideFlightSeconds = 0
+  private checkrideAlertWallTimeMs: number | null = null
   private physicalScenario: FlightScenario = 'clear'
   private pitchTargetDeg = 0
   private bankTargetDeg = 0
@@ -505,15 +533,15 @@ class FlightSimulator {
     }
 
     const correct = decision === scenario.bestDecision
-    const recognitionSeconds = Math.max(
-      0,
-      Number((this.elapsedSeconds - (this.checkrideAlertSeconds ?? this.elapsedSeconds)).toFixed(1)),
-    )
+    const alertWallTimeMs = this.checkrideAlertWallTimeMs ?? wallClockNowMs()
+    const recognitionSeconds = Math.max(0, Number((
+      (wallClockNowMs() - alertWallTimeMs) / 1_000
+    ).toFixed(1)))
     const safety = correct ? 100 : decision === 'hold' ? 55 : 35
     const judgment = correct ? 100 : 45
     const fuel = Math.round(clamp((this.checkride.fuelMinutesRemaining / 10) * 100, 0, 100))
     const score = Object.freeze({
-      total: Math.round(safety * 0.5 + judgment * 0.3 + fuel * 0.2),
+      total: totalScore(safety, judgment, fuel),
       safety,
       judgment,
       fuel,
@@ -549,13 +577,13 @@ class FlightSimulator {
       const current = positionToLocal(this.state.lat, this.state.lon)
       this.customLegStart = this.positionTarget(
         'DIVERSION_EXIT',
-        current.eastNm,
-        current.northNm,
+        current.alongNm,
+        current.crossNm,
       )
       this.customTarget = this.positionTarget(
         'DIVERSION_EXIT',
-        current.eastNm + 0.35,
-        current.northNm + 1,
+        current.alongNm + 0.35,
+        current.crossNm + 1,
         Math.max(this.state.altitudeFt, airport.elevationFt + 900),
         95,
       )
@@ -758,8 +786,14 @@ class FlightSimulator {
         break
       case 'extend_downwind': {
         const current = positionToLocal(this.state.lat, this.state.lon)
-        this.customLegStart = this.positionTarget('DOWNWIND', current.eastNm, current.northNm)
-        this.customTarget = this.positionTarget('DOWNWIND', current.eastNm - 0.55, 1.55, 2_147, 105)
+        this.customLegStart = this.positionTarget('DOWNWIND', current.alongNm, current.crossNm)
+        this.customTarget = this.positionTarget(
+          'DOWNWIND',
+          current.alongNm - 0.55,
+          1.55,
+          airport.elevationFt + 1_500,
+          105,
+        )
         this.customLegId = 'DOWNWIND_EXTENSION'
         this.activeLegIndex = null
         this.awaitingCommand = false
@@ -780,8 +814,14 @@ class FlightSimulator {
         break
       case 'go_around': {
         const current = positionToLocal(this.state.lat, this.state.lon)
-        this.customLegStart = this.positionTarget('DEPART', current.eastNm, current.northNm)
-        this.customTarget = this.positionTarget('DEPART', 1.25, 0, 1_647, 95)
+        this.customLegStart = this.positionTarget('DEPART', current.alongNm, current.crossNm)
+        this.customTarget = this.positionTarget(
+          'DEPART',
+          1.25,
+          0,
+          airport.elevationFt + 1_000,
+          95,
+        )
         this.customLegId = 'GO_AROUND_TO_DEPART'
         this.activeLegIndex = null
         this.awaitingCommand = false
@@ -819,7 +859,8 @@ class FlightSimulator {
     this.nextTraceId = 1
     this.eventRevision = 0
     this.elapsedSeconds = 0
-    this.checkrideAlertSeconds = null
+    this.checkrideFlightSeconds = 0
+    this.checkrideAlertWallTimeMs = null
     this.physicalScenario = 'clear'
     this.pitchTargetDeg = 0
     this.bankTargetDeg = 0
@@ -843,7 +884,10 @@ class FlightSimulator {
 
     let advanced = false
     while (this.accumulatorSeconds >= FIXED_STEP_SECONDS) {
-      this.advance(FIXED_STEP_SECONDS)
+      const timeScale = this.state.controlOwner === 'agent' && !this.awaitingCommand
+        ? AGENT_FLIGHT_TIME_SCALE
+        : 1
+      this.advance(FIXED_STEP_SECONDS * timeScale)
       this.accumulatorSeconds -= FIXED_STEP_SECONDS
       advanced = true
     }
@@ -857,12 +901,18 @@ class FlightSimulator {
   }
 
   private advance(dt: number): void {
+    if (this.shouldPauseForAgent()) return
+    const missionTerminal = this.missionPhase === 'complete' || this.missionPhase === 'failed'
+    if (missionTerminal) return
+
     this.elapsedSeconds += dt
     this.snapshotAccumulatorSeconds += dt
+    const agentIsThinking = this.agentIsThinking()
+    if (!agentIsThinking) this.checkrideFlightSeconds += dt
     let state = this.state
     let throttle = state.throttle
 
-    if (this.checkride.status !== 'complete') {
+    if (this.checkride.status !== 'complete' && !agentIsThinking) {
       const highBurn = this.checkride.seed === 81 && this.checkride.status !== 'armed'
       const fuelMinutesRemaining = Math.max(
         0,
@@ -871,15 +921,13 @@ class FlightSimulator {
       this.checkride = Object.freeze({ ...this.checkride, fuelMinutesRemaining })
       if (fuelMinutesRemaining <= 0) {
         this.finishMission('failed', 'unsafe_decision', 'The aircraft exhausted its usable fuel.')
-      } else if (this.elapsedSeconds >= this.checkride.deadlineSeconds) {
+      } else if (this.checkrideFlightSeconds >= this.checkride.deadlineSeconds) {
         this.finishMission('failed', 'unsafe_decision', 'The 12 minute checkride limit expired.')
       }
     }
 
-    const missionTerminal = this.missionPhase === 'complete' || this.missionPhase === 'failed'
     const holdingFinalForDecision = this.activeLegIndex === 6 && this.missionPhase === 'final'
     if (
-      !missionTerminal &&
       state.controlOwner === 'agent' &&
       state.flightDirector.enabled &&
       (!this.awaitingCommand || holdingFinalForDecision)
@@ -888,7 +936,7 @@ class FlightSimulator {
     }
 
     const director = state.flightDirector
-    if (!missionTerminal && state.controlOwner === 'agent' && director.enabled) {
+    if (state.controlOwner === 'agent' && director.enabled) {
       const altitudeError = director.altitudeFt - state.altitudeFt
       this.pitchTargetDeg = clamp(altitudeError / 70, -8, 11)
       this.bankTargetDeg = clamp(headingError(director.headingDeg, state.headingDeg) * 0.65, -28, 28)
@@ -921,17 +969,13 @@ class FlightSimulator {
     }
     if (this.missionPhase === 'rollout') {
       this.pitchTargetDeg = 0
-      const centerlineErrorNm = positionToLocal(state.lat, state.lon).northNm
-      const rolloutHeadingDeg = normalizeHeading(90 + clamp(centerlineErrorNm * 400, -8, 8))
+      const centerlineErrorNm = positionToLocal(state.lat, state.lon).crossNm
+      const rolloutHeadingDeg = normalizeHeading(
+        runwayHeadingDeg + clamp(centerlineErrorNm * 400, -8, 8),
+      )
       this.bankTargetDeg = clamp(headingError(rolloutHeadingDeg, state.headingDeg) * 0.65, -8, 8)
       throttle = 0
     }
-    if (missionTerminal) {
-      this.pitchTargetDeg = 0
-      this.bankTargetDeg = 0
-      throttle = 0
-    }
-
     const instability =
       state.scenario === 'engine_instability'
         ? clamp(0.52 + Math.sin(this.elapsedSeconds * 2.7) * 0.38, 0.08, 0.9)
@@ -1051,10 +1095,12 @@ class FlightSimulator {
     } else if (this.activeLegIndex === 6) {
       const local = positionToLocal(state.lat, state.lon)
       const touchdownAimNm = COMPACT_TRAINING_MISSION.runway.touchdownZoneStartFt / FEET_PER_NM
-      const glideDistanceNm = Math.max(0, touchdownAimNm - local.eastNm)
+      const glideDistanceNm = Math.max(0, touchdownAimNm - local.alongNm)
       altitudeFt = airport.elevationFt + glideDistanceNm * FEET_PER_NM * Math.tan(degreesToRadians(3))
       airspeedKt = this.missionPhase === 'flare' ? 68 : 76
-      headingDeg = normalizeHeading(90 + clamp(local.northNm * 55, -25, 25))
+      headingDeg = normalizeHeading(
+        runwayHeadingDeg + clamp(local.crossNm * 400, -25, 25),
+      )
       gearDown = true
       flapsDeg = 30
     } else if (this.missionPhase === 'go_around') {
@@ -1092,7 +1138,7 @@ class FlightSimulator {
       const local = positionToLocal(state.lat, state.lon)
       const runwayLengthNm = COMPACT_TRAINING_MISSION.runway.lengthFt / FEET_PER_NM
       const halfWidthNm = COMPACT_TRAINING_MISSION.runway.widthFt / FEET_PER_NM / 2
-      if (local.eastNm > runwayLengthNm || Math.abs(local.northNm) > halfWidthNm) {
+      if (local.alongNm > runwayLengthNm || Math.abs(local.crossNm) > halfWidthNm) {
         this.finishMission('failed', 'runway_excursion', 'Aircraft left the runway during rollout.')
       } else if (state.airspeedKt < 5) {
         this.finishMission('complete', 'landed', 'Aircraft stopped on the runway.')
@@ -1103,7 +1149,7 @@ class FlightSimulator {
     if (this.activeLegIndex === 6 && this.landingAuthorized && this.airborne) {
       const local = positionToLocal(state.lat, state.lon)
       const aglFt = state.altitudeFt - airport.elevationFt
-      if (local.eastNm > -0.12 && aglFt < 60) this.missionPhase = 'flare'
+      if (local.alongNm > -0.12 && aglFt < 60) this.missionPhase = 'flare'
     }
 
     if (
@@ -1158,9 +1204,11 @@ class FlightSimulator {
         this.activeLegIndex = 6
         this.missionPhase = 'final'
         this.lastReachedFix = 'FINAL_GATE'
-        this.record('system', 'mission_gate', 'FINAL_GATE reached. Stabilizing on final.', {
+        this.awaitingCommand = true
+        this.record('system', 'mission_gate', 'FINAL_GATE reached. Land or go around.', {
           nextFix: 'TOUCHDOWN',
         })
+        this.queueFlightEvent('command_required', 'FINAL_GATE reached. Land or go around.')
         break
     }
   }
@@ -1183,7 +1231,7 @@ class FlightSimulator {
       case 0:
         return this.airborne
       case 1:
-        return altitudeErrorFt >= -125
+        return altitudeErrorFt >= -175
       case 2:
       case 3:
         return Math.abs(altitudeErrorFt) <= 175
@@ -1203,9 +1251,9 @@ class FlightSimulator {
     const zoneStartNm = runway.touchdownZoneStartFt / FEET_PER_NM
     const zoneEndNm = runway.touchdownZoneEndFt / FEET_PER_NM
     const safe =
-      local.eastNm >= zoneStartNm &&
-      local.eastNm <= zoneEndNm &&
-      Math.abs(local.northNm) <= halfWidthNm &&
+      local.alongNm >= zoneStartNm &&
+      local.alongNm <= zoneEndNm &&
+      Math.abs(local.crossNm) <= halfWidthNm &&
       state.gearDown &&
       Math.abs(state.bankDeg) <= 7 &&
       sinkFpm >= -500
@@ -1217,16 +1265,16 @@ class FlightSimulator {
       this.missionPhase = 'rollout'
       this.record('system', 'touchdown', 'Safe touchdown in the marked zone', {
         sinkRateFpm: Math.round(sinkFpm),
-        centerlineErrorFt: Math.round(Math.abs(local.northNm) * FEET_PER_NM),
-        distancePastThresholdFt: Math.round(local.eastNm * FEET_PER_NM),
+        centerlineErrorFt: Math.round(Math.abs(local.crossNm) * FEET_PER_NM),
+        distancePastThresholdFt: Math.round(local.alongNm * FEET_PER_NM),
       })
       this.queueFlightEvent('touchdown', 'Safe touchdown in the marked zone.')
     } else {
       this.record('system', 'touchdown_rejected', 'Touchdown limits exceeded', {
         sinkRateFpm: Math.round(sinkFpm),
         bankDeg: Number(state.bankDeg.toFixed(1)),
-        centerlineErrorFt: Math.round(Math.abs(local.northNm) * FEET_PER_NM),
-        distancePastThresholdFt: Math.round(local.eastNm * FEET_PER_NM),
+        centerlineErrorFt: Math.round(Math.abs(local.crossNm) * FEET_PER_NM),
+        distancePastThresholdFt: Math.round(local.alongNm * FEET_PER_NM),
         gearDown: state.gearDown,
       })
       this.finishMission('failed', 'unsafe_touchdown', 'Touchdown did not meet the landing limits.')
@@ -1242,13 +1290,19 @@ class FlightSimulator {
     this.customTarget = null
     this.customLegStart = null
     this.customLegId = null
+    const fuel = Math.round(clamp((this.checkride.fuelMinutesRemaining / 10) * 100, 0, 100))
     this.checkride = Object.freeze({
       ...this.checkride,
       status: 'complete',
       allowedDecisions: Object.freeze([]),
       score: Object.freeze({
         ...this.checkride.score,
-        fuel: Math.round(clamp((this.checkride.fuelMinutesRemaining / 10) * 100, 0, 100)),
+        fuel,
+        total: totalScore(
+          this.checkride.score.safety,
+          this.checkride.score.judgment,
+          fuel,
+        ),
       }),
     })
     this.record('system', 'mission_result', reason, { outcome })
@@ -1290,12 +1344,12 @@ class FlightSimulator {
 
   private positionTarget(
     id: MissionFixId,
-    eastNm: number,
-    northNm: number,
+    alongNm: number,
+    crossNm: number,
     altitudeFt = this.state.altitudeFt,
     airspeedKt = this.state.airspeedKt,
   ): GuidanceTarget {
-    return { id, ...localToPosition(eastNm, northNm), altitudeFt, airspeedKt }
+    return { id, ...localToPosition(alongNm, crossNm), altitudeFt, airspeedKt }
   }
 
   private allowedCommands(): readonly FlightCommand[] {
@@ -1347,23 +1401,24 @@ class FlightSimulator {
       runwayThreshold.lon,
     )
     const touchdownAimNm = COMPACT_TRAINING_MISSION.runway.touchdownZoneStartFt / FEET_PER_NM
-    const glideDistanceNm = Math.max(0, touchdownAimNm - local.eastNm)
+    const glideDistanceNm = Math.max(0, touchdownAimNm - local.alongNm)
     const glidepathAltitudeFt =
       airport.elevationFt + glideDistanceNm * FEET_PER_NM * Math.tan(degreesToRadians(3))
     const glidepathErrorFt = state.altitudeFt - glidepathAltitudeFt
+    const runwayHalfWidthNm = COMPACT_TRAINING_MISSION.runway.widthFt / FEET_PER_NM / 2
     const stableApproach =
       (this.missionPhase === 'final' || this.missionPhase === 'flare') &&
       state.gearDown &&
       state.flapsDeg >= 20 &&
-      Math.abs(local.northNm) <= 0.06 &&
+      Math.abs(local.crossNm) <= runwayHalfWidthNm &&
       Math.abs(glidepathErrorFt) <= 140 &&
-      Math.abs(headingError(90, state.headingDeg)) <= 15 &&
+      Math.abs(headingError(runwayHeadingDeg, state.headingDeg)) <= 15 &&
       Math.abs(state.bankDeg) <= 12 &&
       state.airspeedKt >= 65 &&
       state.airspeedKt <= 100 &&
       state.verticalSpeedFpm >= -700 &&
       state.verticalSpeedFpm <= 250 &&
-      (local.eastNm < -0.2 || (this.missionPhase === 'final' && this.awaitingCommand))
+      (local.alongNm < -0.08 || (this.missionPhase === 'final' && this.awaitingCommand))
 
     return Object.freeze({
       phase: this.missionPhase,
@@ -1376,7 +1431,7 @@ class FlightSimulator {
       alongTrackNm: Number(segment.alongTrackNm.toFixed(2)),
       crossTrackErrorNm: Number(segment.crossTrackErrorNm.toFixed(3)),
       distanceToThresholdNm: Number(thresholdDistanceNm.toFixed(2)),
-      centerlineErrorNm: Number(local.northNm.toFixed(3)),
+      centerlineErrorNm: Number(local.crossNm.toFixed(3)),
       glidepathErrorFt: Math.round(glidepathErrorFt),
       stableApproach,
       awaitingCommand: this.awaitingCommand,
@@ -1418,7 +1473,7 @@ class FlightSimulator {
 
   private activateCheckrideAlert(): void {
     const scenario = checkrideScenarios[this.checkride.seed]
-    this.checkrideAlertSeconds = this.elapsedSeconds
+    this.checkrideAlertWallTimeMs = wallClockNowMs()
     this.checkride = Object.freeze({
       ...this.checkride,
       status: 'decision_required',
@@ -1428,6 +1483,18 @@ class FlightSimulator {
     if (this.checkride.seed === 17) this.physicalScenario = 'engine_instability'
     this.record('system', 'checkride_alert', scenario.alert, { seed: this.checkride.seed })
     this.queueFlightEvent('system_alert', scenario.alert)
+  }
+
+  private shouldPauseForAgent(): boolean {
+    if (this.missionPhase === 'preflight') return true
+    if (this.missionPhase === 'complete' || this.missionPhase === 'failed') return false
+    return this.state.controlOwner === 'agent' && this.awaitingCommand
+  }
+
+  private agentIsThinking(): boolean {
+    if (this.state.controlOwner !== 'agent') return false
+    return this.checkride.status === 'decision_required' ||
+      this.checkride.status === 'awaiting_human'
   }
 
   private decisionReceipt(

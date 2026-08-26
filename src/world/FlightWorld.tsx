@@ -4,6 +4,7 @@ import {
   CallbackProperty,
   Cartesian2,
   Cartesian3,
+  Cartographic,
   Color,
   DistanceDisplayCondition,
   HeadingPitchRoll,
@@ -31,7 +32,8 @@ import {
 } from '../sim/flightSimulator'
 
 const FEET_TO_METERS = 0.3048
-const AIRCRAFT_CLEARANCE_METERS = 4
+const AIRCRAFT_CLEARANCE_METERS = 2.3
+const RUNWAY_SURFACE_SAMPLE_COUNT = 9
 const CHASE_OFFSET = new Cartesian3(-185, 0, 52)
 const COCKPIT_OFFSET = new Cartesian3(7.5, 0, 2.4)
 const AIRCRAFT_MODEL_URI = '/models/cesium-air.glb'
@@ -61,11 +63,59 @@ const loadingStatus: FlightWorldStatus = {
   message: 'Loading the KPWK training circuit.',
 }
 
-function aircraftPosition(state: FlightState, result?: Cartesian3) {
+function worldHeightForAltitude(altitudeFt: number, runwaySurfaceHeightMeters: number) {
+  const airportElevationFt = COMPACT_TRAINING_MISSION.airport.elevationFt
+  return runwaySurfaceHeightMeters + Math.max(0, altitudeFt - airportElevationFt) * FEET_TO_METERS
+}
+
+function runwaySamplePosition(index: number) {
+  const { runway } = COMPACT_TRAINING_MISSION
+  const fraction = index / (RUNWAY_SURFACE_SAMPLE_COUNT - 1)
+  return {
+    lat: runway.thresholdLat + (runway.farEndLat - runway.thresholdLat) * fraction,
+    lon: runway.thresholdLon + (runway.farEndLon - runway.thresholdLon) * fraction,
+  }
+}
+
+function runwaySurfaceHeightAt(
+  lat: number,
+  lon: number,
+  surfaceHeightsMeters: readonly number[],
+) {
+  const { runway } = COMPACT_TRAINING_MISSION
+  const longitudeScale = Math.cos(CesiumMath.toRadians(runway.thresholdLat))
+  const runwayX = (runway.farEndLon - runway.thresholdLon) * longitudeScale
+  const runwayY = runway.farEndLat - runway.thresholdLat
+  const positionX = (lon - runway.thresholdLon) * longitudeScale
+  const positionY = lat - runway.thresholdLat
+  const runwayLengthSquared = runwayX * runwayX + runwayY * runwayY
+  const fraction = Math.min(1, Math.max(
+    0,
+    (positionX * runwayX + positionY * runwayY) / runwayLengthSquared,
+  ))
+  const samplePosition = fraction * (surfaceHeightsMeters.length - 1)
+  const lowerIndex = Math.floor(samplePosition)
+  const upperIndex = Math.min(surfaceHeightsMeters.length - 1, lowerIndex + 1)
+  const interpolation = samplePosition - lowerIndex
+  return surfaceHeightsMeters[lowerIndex] +
+    (surfaceHeightsMeters[upperIndex] - surfaceHeightsMeters[lowerIndex]) * interpolation
+}
+
+function aircraftPosition(
+  state: FlightState,
+  runwaySurfaceHeightsMeters: readonly number[],
+  result?: Cartesian3,
+) {
+  const runwaySurfaceHeightMeters = runwaySurfaceHeightAt(
+    state.lat,
+    state.lon,
+    runwaySurfaceHeightsMeters,
+  )
   return Cartesian3.fromDegrees(
     state.lon,
     state.lat,
-    state.altitudeFt * FEET_TO_METERS + AIRCRAFT_CLEARANCE_METERS,
+    worldHeightForAltitude(state.altitudeFt, runwaySurfaceHeightMeters) +
+      AIRCRAFT_CLEARANCE_METERS,
     undefined,
     result,
   )
@@ -87,13 +137,14 @@ function solarNoonAtLongitude(longitude: number) {
   )
 }
 
-function addMission(viewer: Viewer) {
+function addMission(viewer: Viewer, runwaySurfaceHeightsMeters: readonly number[]) {
   const { airport, fixes, legs, runway } = COMPACT_TRAINING_MISSION
+  const runwaySurfaceHeightMeters = runwaySurfaceHeightsMeters[0]
   const fixesById = new Map(fixes.map((fix) => [fix.id, fix]))
   const routeCoordinates = [
     runway.thresholdLon,
     runway.thresholdLat,
-    runway.elevationFt * FEET_TO_METERS + 5,
+    runwaySurfaceHeightMeters + 5,
   ]
 
   for (const leg of legs) {
@@ -102,19 +153,16 @@ function addMission(viewer: Viewer) {
     routeCoordinates.push(
       fix.lon,
       fix.lat,
-      Math.max(fix.altitudeFt, runway.elevationFt) * FEET_TO_METERS + 5,
+      worldHeightForAltitude(fix.altitudeFt, runwaySurfaceHeightMeters) + 5,
     )
   }
 
   const routePositions = Cartesian3.fromDegreesArrayHeights(routeCoordinates)
-  const runwayPositions = Cartesian3.fromDegreesArrayHeights([
-    runway.thresholdLon,
-    runway.thresholdLat,
-    runway.elevationFt * FEET_TO_METERS + 1.5,
-    runway.farEndLon,
-    runway.farEndLat,
-    runway.elevationFt * FEET_TO_METERS + 1.5,
-  ])
+  const runwayCoordinates = runwaySurfaceHeightsMeters.flatMap((height, index) => {
+    const sample = runwaySamplePosition(index)
+    return [sample.lon, sample.lat, height + 0.25]
+  })
+  const runwayPositions = Cartesian3.fromDegreesArrayHeights(runwayCoordinates)
 
   viewer.entities.add({
     id: 'mission-runway',
@@ -164,7 +212,7 @@ function addMission(viewer: Viewer) {
       position: Cartesian3.fromDegrees(
         fix.lon,
         fix.lat,
-        Math.max(fix.altitudeFt, runway.elevationFt) * FEET_TO_METERS + 8,
+        worldHeightForAltitude(fix.altitudeFt, runwaySurfaceHeightMeters) + 8,
       ),
       point: {
         color: fix.id.includes('GATE') ? Color.fromCssColorString('#f0b95c') : Color.WHITE,
@@ -196,7 +244,7 @@ function addMission(viewer: Viewer) {
     position: Cartesian3.fromDegrees(
       runway.farEndLon,
       runway.farEndLat,
-      runway.elevationFt * FEET_TO_METERS + 18,
+      runwaySurfaceHeightsMeters.at(-1)! + 18,
     ),
     label: {
       backgroundColor: Color.BLACK.withAlpha(0.88),
@@ -221,11 +269,15 @@ export function FlightWorld({
 }: FlightWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraModeRef = useRef(cameraMode)
+  const viewerRef = useRef<Viewer | null>(null)
   const [status, setStatus] = useState<FlightWorldStatus>(
     ionToken ? loadingStatus : setupStatus,
   )
 
-  cameraModeRef.current = cameraMode
+  useEffect(() => {
+    cameraModeRef.current = cameraMode
+    viewerRef.current?.scene.requestRender()
+  }, [cameraMode])
 
   useEffect(() => {
     onStatusChange?.(status)
@@ -251,9 +303,12 @@ export function FlightWorld({
       sceneModePicker: false,
       selectionIndicator: false,
       shouldAnimate: false,
-      targetFrameRate: 60,
+      requestRenderMode: true,
+      maximumRenderTimeChange: Number.POSITIVE_INFINITY,
+      targetFrameRate: 45,
       timeline: false,
     })
+    viewerRef.current = viewer
     viewer.resolutionScale = Math.min(window.devicePixelRatio, 1.5)
     viewer.clock.currentTime = JulianDate.fromDate(
       solarNoonAtLongitude(
@@ -263,13 +318,23 @@ export function FlightWorld({
     viewer.clock.shouldAnimate = false
     viewer.scene.highDynamicRange = true
     viewer.scene.postProcessStages.fxaa.enabled = true
-    viewer.shadows = true
+    viewer.shadows = false
+    const stopRequestingRenders = flightSimulator.subscribe(() => viewer.scene.requestRender())
 
-    addMission(viewer)
+    let runwaySurfaceHeightsMeters = Object.freeze(
+      Array.from(
+        { length: RUNWAY_SURFACE_SAMPLE_COUNT },
+        () => COMPACT_TRAINING_MISSION.runway.elevationFt * FEET_TO_METERS,
+      ),
+    )
 
     const position = new CallbackPositionProperty(
       (_time, result?: Cartesian3) =>
-        aircraftPosition(flightSimulator.getState(), result),
+        aircraftPosition(
+          flightSimulator.getState(),
+          runwaySurfaceHeightsMeters,
+          result,
+        ),
       false,
     )
     const orientationPosition = new Cartesian3()
@@ -277,7 +342,7 @@ export function FlightWorld({
     const orientation = new CallbackProperty(
       (_time, result?: Quaternion) => {
         const state = flightSimulator.getState()
-        aircraftPosition(state, orientationPosition)
+        aircraftPosition(state, runwaySurfaceHeightsMeters, orientationPosition)
         aircraftAttitude(state, orientationAttitude)
         return Transforms.headingPitchRollQuaternion(
           orientationPosition,
@@ -290,7 +355,7 @@ export function FlightWorld({
       false,
     )
 
-    viewer.entities.add({
+    const aircraftEntity = viewer.entities.add({
       id: 'aircraft',
       position,
       orientation,
@@ -298,7 +363,7 @@ export function FlightWorld({
         minimumPixelSize: 84,
         maximumScale: 3,
         runAnimations: false,
-        shadows: ShadowMode.ENABLED,
+        shadows: ShadowMode.DISABLED,
         uri: AIRCRAFT_MODEL_URI,
       },
       label: {
@@ -337,7 +402,7 @@ export function FlightWorld({
 
       viewer.scene.screenSpaceCameraController.enableInputs = false
       const state = flightSimulator.getState()
-      aircraftPosition(state, cameraPosition)
+      aircraftPosition(state, runwaySurfaceHeightsMeters, cameraPosition)
       aircraftAttitude(state, cameraAttitude)
       const transform = Transforms.headingPitchRollToFixedFrame(
         cameraPosition,
@@ -374,22 +439,53 @@ export function FlightWorld({
     viewer.scene.preRender.addEventListener(updateCamera)
 
     let disposed = false
+    let removeFirstTileLoaded: (() => void) | undefined
+    let finishWorldTimer: number | undefined
+    let worldReady = false
     const loadWorldTimer = window.setTimeout(() => {
       if (disposed) return
       void createGooglePhotorealistic3DTileset({
         onlyUsingWithGoogleGeocoder: true,
+      }, {
+        maximumScreenSpaceError: 24,
+        shadows: ShadowMode.DISABLED,
+        showCreditsOnScreen: true,
       })
         .then((tileset) => {
           if (disposed || viewer.isDestroyed()) {
             tileset.destroy()
             return
           }
-          tileset.shadows = ShadowMode.ENABLED
           viewer.scene.primitives.add(tileset)
-          setStatus({
-            kind: 'ready',
-            message: 'KPWK photorealistic scenery is ready.',
+          const finishWorldLoading = () => {
+            if (disposed || viewer.isDestroyed() || worldReady) return
+            const heights = Array.from({ length: RUNWAY_SURFACE_SAMPLE_COUNT }, (_, index) => {
+              const sample = runwaySamplePosition(index)
+              const position = Cartographic.fromDegrees(sample.lon, sample.lat)
+              const height = viewer.scene.sampleHeightSupported
+                ? viewer.scene.sampleHeight(position, [aircraftEntity], 5)
+                : undefined
+              return typeof height === 'number' && Number.isFinite(height)
+                ? height
+                : runwaySurfaceHeightsMeters[index]
+            })
+            runwaySurfaceHeightsMeters = Object.freeze(heights)
+            addMission(viewer, runwaySurfaceHeightsMeters)
+            worldReady = true
+            setStatus({
+              kind: 'ready',
+              message: 'KPWK photorealistic scenery is ready.',
+            })
+          }
+
+          removeFirstTileLoaded = tileset.tileLoad.addEventListener(() => {
+            removeFirstTileLoaded?.()
+            removeFirstTileLoaded = undefined
+            window.clearTimeout(finishWorldTimer)
+            finishWorldTimer = window.setTimeout(finishWorldLoading, 0)
           })
+          finishWorldTimer = window.setTimeout(finishWorldLoading, 8_000)
+          viewer.scene.requestRender()
         })
         .catch((error: unknown) => {
           if (disposed) return
@@ -409,7 +505,11 @@ export function FlightWorld({
     return () => {
       disposed = true
       window.clearTimeout(loadWorldTimer)
+      window.clearTimeout(finishWorldTimer)
+      removeFirstTileLoaded?.()
+      stopRequestingRenders()
       viewer.scene.preRender.removeEventListener(updateCamera)
+      if (viewerRef.current === viewer) viewerRef.current = null
       viewer.destroy()
     }
   }, [])

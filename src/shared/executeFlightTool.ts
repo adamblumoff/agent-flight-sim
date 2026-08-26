@@ -3,7 +3,6 @@ import type {
   CheckrideDecision,
   CheckrideEvidenceSource,
   CheckrideSeed,
-  FlightEventType,
 } from '../sim/types'
 import type {
   FlightToolArguments,
@@ -43,7 +42,7 @@ const receipt = <Details>(
 ) => ({ ok: true as const, summary, tone, details })
 
 const boundedTimeout = (value: unknown): number => {
-  if (value === undefined) return 12_000
+  if (value === undefined) return 15_000
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new TypeError('timeout_ms must be a finite number')
   }
@@ -54,22 +53,27 @@ const commandInput = (input: FlightToolArguments['command_flight']) => {
   if (!flightCommands.has(input.command)) {
     throw new TypeError('command is not a supported flight command')
   }
-  if (input.target !== undefined && !proceedToFixTargetSet.has(input.target)) {
+  let target = input.target
+  if (input.command === 'proceed_to_fix' && target === undefined) {
+    const nextFix = flightSimulator.getState().mission.nextFix
+    if (nextFix === 'CROSSWIND' || nextFix === 'NORTH_GATE') target = nextFix
+  }
+  if (target !== undefined && !proceedToFixTargetSet.has(target)) {
     throw new TypeError('target must be CROSSWIND or NORTH_GATE')
   }
-  if (input.command === 'proceed_to_fix' && input.target === undefined) {
-    throw new TypeError('proceed_to_fix requires a target')
+  if (input.command === 'proceed_to_fix' && target === undefined) {
+    throw new TypeError('proceed_to_fix requires CROSSWIND or NORTH_GATE; no target could be inferred')
   }
-  if (input.command !== 'proceed_to_fix' && input.target !== undefined) {
+  if (input.command !== 'proceed_to_fix' && target !== undefined) {
     throw new TypeError('target is only valid with proceed_to_fix')
   }
-  if (input.wait_until_decision !== undefined && typeof input.wait_until_decision !== 'boolean') {
-    throw new TypeError('wait_until_decision must be a boolean')
+  if (input.wait_for_next_event !== undefined && typeof input.wait_for_next_event !== 'boolean') {
+    throw new TypeError('wait_for_next_event must be a boolean')
   }
 
   return {
     command: input.command,
-    target: input.target,
+    target,
     reason: reasonInput(input),
   }
 }
@@ -83,8 +87,10 @@ const executors: {
     const seed = input.seed ?? 17
     if (!seedSet.has(seed)) throw new TypeError('seed must be 17, 42, or 81')
     flightSimulator.reset(seed as CheckrideSeed)
+    flightSimulator.transferControl('agent', 'agent', 'AI checkride started')
     return receipt(`Checkride seed ${seed} ready`, 'automation', {
       seed: seed as CheckrideSeed,
+      brief: flightSimulator.getMissionBrief(),
       state: flightSimulator.getState(),
     })
   },
@@ -106,30 +112,38 @@ const executors: {
       },
     }),
   inspect_flight_evidence: async (input) => {
-    if (!evidenceSourceSet.has(input.source)) {
+    if (input.source !== undefined && !evidenceSourceSet.has(input.source)) {
       throw new TypeError('source must be weather, cockpit, traffic, or passenger')
     }
-    const evidence = flightSimulator.inspectCheckrideEvidence(
-      input.source as CheckrideEvidenceSource,
+    const evidence = input.source === undefined
+      ? checkrideEvidenceSources.map((source) =>
+          flightSimulator.inspectCheckrideEvidence(source))
+      : flightSimulator.inspectCheckrideEvidence(
+          input.source as CheckrideEvidenceSource,
+        )
+    return receipt(
+      input.source === undefined ? 'All evidence read' : `${input.source} evidence read`,
+      'neutral',
+      {
+        evidence,
+        inspectedSources: flightSimulator.getState().checkride.inspectedSources,
+      },
     )
-    return receipt(`${evidence.source} evidence read`, 'neutral', {
-      evidence,
-      inspectedSources: flightSimulator.getState().checkride.inspectedSources,
-    })
   },
   wait_for_flight_event: async (input) => {
-    if (typeof input.after_revision !== 'number' || !Number.isFinite(input.after_revision)) {
+    if (input.after_revision !== undefined &&
+      (typeof input.after_revision !== 'number' || !Number.isFinite(input.after_revision))) {
       throw new TypeError('after_revision must be a finite number')
     }
-    if (!Array.isArray(input.events) || input.events.length === 0) {
+    if (input.events !== undefined && (!Array.isArray(input.events) || input.events.length === 0)) {
       throw new TypeError('events must contain at least one event type')
     }
-    if (input.events.some((event) => !flightEventSet.has(event))) {
+    if (input.events?.some((event) => !flightEventSet.has(event))) {
       throw new TypeError('events contains an unsupported flight event type')
     }
     const result = await flightSimulator.waitForFlightEvent({
-      afterRevision: input.after_revision,
-      events: input.events as readonly FlightEventType[],
+      afterRevision: input.after_revision ?? flightSimulator.getEventRevision(),
+      events: input.events ?? flightEventValues,
       timeoutMs: boundedTimeout(input.timeout_ms),
     })
     return {
@@ -146,7 +160,7 @@ const executors: {
       ok: result.accepted,
       tone: result.accepted ? 'automation' as const : 'warning' as const,
     }
-    if (!result.accepted || input.wait_until_decision !== true) return base
+    if (!result.accepted || input.wait_for_next_event !== true) return base
 
     const nextEvent = await flightSimulator.waitForFlightEvent({
       afterRevision: result.eventRevision,
@@ -164,11 +178,26 @@ const executors: {
       'agent',
       reasonInput(input),
     )
-    return {
+    const base = {
       ...result,
       ok: result.accepted,
-      tone: result.accepted ? 'automation' : 'warning',
+      tone: result.accepted ? 'automation' as const : 'warning' as const,
     }
+    if (
+      !result.accepted ||
+      input.wait_for_next_event !== true ||
+      result.humanApproval === 'pending' ||
+      result.state.mission.allowedCommands.length > 0 ||
+      result.state.mission.outcome !== 'in_progress'
+    ) {
+      return base
+    }
+    const nextEvent = await flightSimulator.waitForFlightEvent({
+      afterRevision: result.eventRevision,
+      events: ['command_required', 'mission_complete'],
+      timeoutMs: boundedTimeout(input.timeout_ms),
+    })
+    return { ...base, nextEvent }
   },
   transfer_control: async (input) => {
     if (input.owner !== 'human' && input.owner !== 'agent') {
