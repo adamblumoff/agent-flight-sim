@@ -430,9 +430,6 @@ class FlightSimulator {
         this.publish({ ...this.state, gearDown: true, flapsDeg: 20 })
         break
       case 'land':
-        if (!this.state.mission.stableApproach) {
-          return this.rejectCommand(input, actor, reason, 'Final is not stable. Go around or stabilize first.')
-        }
         this.activeLegIndex = 6
         this.awaitingCommand = false
         this.landingAuthorized = true
@@ -699,7 +696,7 @@ class FlightSimulator {
       flapsDeg = 10
     }
 
-    if (this.activeLegIndex !== null && this.activeLegIndex !== 6) {
+    if (this.activeLegIndex === 0) {
       const item = legs[this.activeLegIndex]
       const segment = this.navigationSegment(state, target)
       if (segment.alongTrackNm >= item.distanceNm - 0.1) {
@@ -966,7 +963,7 @@ class FlightSimulator {
       state.airspeedKt <= 100 &&
       state.verticalSpeedFpm >= -700 &&
       state.verticalSpeedFpm <= 250 &&
-      local.eastNm < -0.2
+      (local.eastNm < -0.2 || (this.missionPhase === 'final' && this.awaitingCommand))
 
     return Object.freeze({
       phase: this.missionPhase,
