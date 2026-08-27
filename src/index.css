@@ -234,6 +234,12 @@ textarea:focus-visible {
   background: rgb(82 12 12 / 52%) !important;
 }
 
+.handoff-pending {
+  border-color: rgb(251 191 36 / 45%) !important;
+  color: #fbbf24 !important;
+  background: rgb(89 55 5 / 48%) !important;
+}
+
 .instrument-deck {
   position: absolute;
   z-index: 6;

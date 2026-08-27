@@ -75,6 +75,7 @@ export const checkrideDecisionValues = [
 ] as const satisfies readonly CheckrideDecision[]
 
 export const flightEventValues = [
+  'handoff_requested',
   'command_required',
   'system_alert',
   'decision_resolved',
@@ -139,7 +140,10 @@ export interface FlightToolResults {
     tone: ToolReceiptTone
     nextEvent?: FlightEventWaitResult
   }>
-  transfer_control: FlightToolReceipt<{ readonly controlOwner: ControlOwner }>
+  transfer_control: FlightToolReceipt<{
+    readonly controlOwner: ControlOwner
+    readonly state: FlightState
+  }>
 }
 
 export type FlightToolName = keyof FlightToolArguments
@@ -185,7 +189,7 @@ export const flightToolDefinitions = [
     name: 'get_flight_state',
     title: 'Read flight state',
     description:
-      'Read the live aircraft state and mission navigation, including the active leg, next fix, navigation errors, approach stability, and allowed commands. Never changes the flight.',
+      'Read the live aircraft state and mission navigation, including any pending handoff, active leg, next fix, navigation errors, approach stability, and allowed commands. Never changes the flight.',
     inputSchema: emptySchema,
     readOnly: true,
   },
@@ -207,7 +211,7 @@ export const flightToolDefinitions = [
     name: 'wait_for_flight_event',
     title: 'Wait for flight event',
     description:
-      'Wait without polling for the next actionable event. Omit every argument for a bounded 15 second wait. Call again after a timeout; the receipt always includes the current state and revision.',
+      'Wait without polling for the next actionable event, including a pilot handoff request. Omit every argument for a bounded 15 second wait. Call again after a timeout; the receipt always includes the current state and revision.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -266,7 +270,7 @@ export const flightToolDefinitions = [
     name: 'transfer_control',
     title: 'Transfer flight control',
     description:
-      'Transfer primary flight control to the pilot or agent after an explicit handoff. Returning control to the pilot stops agent mission guidance immediately.',
+      'Accept a pending pilot handoff by choosing agent, or return control to the pilot. Returning control to the pilot stops agent mission guidance immediately.',
     inputSchema: {
       type: 'object',
       properties: {

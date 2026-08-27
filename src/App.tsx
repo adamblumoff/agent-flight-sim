@@ -93,6 +93,15 @@ export default function App() {
     flightSimulator.transferControl('human', 'human', 'My controls')
   }, [])
 
+  const toggleAgentHandoff = useCallback(() => {
+    const current = flightSimulator.getState()
+    if (current.handoffRequested) {
+      flightSimulator.cancelAgentHandoff('human', 'Pilot canceled the browser agent handoff')
+    } else {
+      flightSimulator.requestAgentHandoff('human', 'Pilot requested browser agent controls')
+    }
+  }, [])
+
   const resolveHumanApproval = useCallback((approved: boolean) => {
     flightSimulator.resolveHumanApproval(
       approved,
@@ -127,14 +136,14 @@ export default function App() {
         if (current.controlOwner === 'agent') {
           flightSimulator.transferControl('human', 'human', 'My controls')
         } else if (webMcpStatus === 'ready') {
-          flightSimulator.transferControl('agent', 'human', 'Your controls')
+          toggleAgentHandoff()
         }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [webMcpStatus])
+  }, [toggleAgentHandoff, webMcpStatus])
 
   const webMcp = {
     registering: { label: 'Connecting tools', tone: 'waiting' as const, icon: LoaderCircle },
@@ -220,6 +229,8 @@ export default function App() {
         <div className="owner-control">
           {state.controlOwner === 'agent' ? (
             <StatusBadge tone="agent" icon={Bot}>Agent flying</StatusBadge>
+          ) : state.handoffRequested ? (
+            <StatusBadge tone="waiting" icon={LoaderCircle}>Waiting for agent</StatusBadge>
           ) : (
             <StatusBadge tone="neutral" icon={UserRound}>You are flying</StatusBadge>
           )}
@@ -285,6 +296,7 @@ export default function App() {
             status={webMcpStatus}
             activities={webMcpActivities}
             controlOwner={state.controlOwner}
+            handoffRequested={state.handoffRequested}
             checkride={state.checkride}
             mission={state.mission}
             onResolveHumanApproval={resolveHumanApproval}
@@ -293,25 +305,29 @@ export default function App() {
           <div className="right-rail-actions">
             <Button
               variant={state.controlOwner === 'human' ? 'default' : 'outline'}
-              className={state.controlOwner === 'agent' ? 'take-controls' : ''}
+              className={state.controlOwner === 'agent'
+                ? 'take-controls'
+                : state.handoffRequested
+                  ? 'handoff-pending'
+                  : ''}
               disabled={state.controlOwner === 'human' && webMcpStatus !== 'ready'}
-              onClick={() =>
-                flightSimulator.transferControl(
-                  state.controlOwner === 'human' ? 'agent' : 'human',
-                  'human',
-                  state.controlOwner === 'human' ? 'Your controls' : 'My controls',
-                )
-              }
+              onClick={state.controlOwner === 'human' ? toggleAgentHandoff : takeControls}
             >
               {state.controlOwner === 'human' ? (
-                webMcpStatus === 'ready' ? <Bot data-icon="inline-start" /> : <ShieldAlert data-icon="inline-start" />
+                state.handoffRequested
+                  ? <CircleStop data-icon="inline-start" />
+                  : webMcpStatus === 'ready'
+                    ? <Bot data-icon="inline-start" />
+                    : <ShieldAlert data-icon="inline-start" />
               ) : (
                 <CircleStop data-icon="inline-start" />
               )}
               {state.controlOwner === 'human'
-                ? webMcpStatus === 'ready'
-                  ? 'Give agent controls'
-                  : 'WebMCP required'
+                ? state.handoffRequested
+                  ? 'Cancel handoff'
+                  : webMcpStatus === 'ready'
+                    ? 'Request agent controls'
+                    : 'WebMCP required'
                 : 'My controls'}
             </Button>
             <Tooltip>

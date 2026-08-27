@@ -12,6 +12,7 @@ import type { WebMcpActivity as WebMcpActivityItem, WebMcpStatus } from '../webm
 export interface WebMcpActivityProps {
   readonly status: WebMcpStatus
   readonly controlOwner: ControlOwner
+  readonly handoffRequested: boolean
   readonly activities: readonly WebMcpActivityItem[]
   readonly checkride: CheckrideState
   readonly onResolveHumanApproval: (approved: boolean) => void
@@ -84,6 +85,7 @@ function ActivityReceipt({ activity }: { readonly activity: WebMcpActivityItem }
 export function WebMcpActivityPanel({
   status,
   controlOwner,
+  handoffRequested,
   activities,
   checkride,
   mission,
@@ -114,11 +116,21 @@ export function WebMcpActivityPanel({
         Your browser agent calls the flight tools registered by this page. The simulator runs each
         call locally and shows the result here.
       </p>
-      <p className="webmcp-status-description">{currentStatus.description}</p>
+      <p className="webmcp-status-description">
+        {handoffRequested
+          ? 'Handoff published. Keep flying until the browser agent accepts it.'
+          : currentStatus.description}
+      </p>
 
       <div className="webmcp-control-owner">
         <span>Flight control</span>
-        <strong>{controlOwner === 'agent' ? 'Browser agent' : 'Human pilot'}</strong>
+        <strong>
+          {controlOwner === 'agent'
+            ? 'Browser agent'
+            : handoffRequested
+              ? 'Human pilot, handoff pending'
+              : 'Human pilot'}
+        </strong>
       </div>
 
       <dl className="mission-evidence" aria-label="Mission status">

@@ -57,6 +57,7 @@ export interface CheckrideState {
 }
 
 export type FlightEventType =
+  | 'handoff_requested'
   | 'command_required'
   | 'system_alert'
   | 'decision_resolved'
@@ -155,6 +156,7 @@ export interface FlightState {
   readonly flapsDeg: number
   readonly gearDown: boolean
   readonly controlOwner: ControlOwner
+  readonly handoffRequested: boolean
   readonly flightDirector: FlightDirectorState
   readonly scenario: FlightScenario
   readonly mission: MissionNavigationState

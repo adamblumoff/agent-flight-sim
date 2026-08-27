@@ -407,6 +407,7 @@ const initialState = (checkride = initialCheckride(17)): FlightState =>
     flapsDeg: 0,
     gearDown: true,
     controlOwner: 'human',
+    handoffRequested: false,
     flightDirector: {
       enabled: false,
       headingDeg: COMPACT_TRAINING_MISSION.runway.headingDeg,
@@ -748,8 +749,31 @@ class FlightSimulator {
     this.publish({
       ...this.state,
       controlOwner: owner,
+      handoffRequested: false,
       flightDirector: { ...this.state.flightDirector, enabled: owner === 'agent' },
     })
+  }
+
+  requestAgentHandoff = (
+    actor: TraceActor = 'human',
+    reason = 'Request browser agent controls',
+  ): void => {
+    if (this.state.controlOwner !== 'human' || this.state.handoffRequested) return
+    this.record(actor, 'request_agent_handoff', reason, {})
+    this.queueFlightEvent(
+      'handoff_requested',
+      'The pilot requested an agent handoff. Accept control when ready.',
+    )
+    this.publish({ ...this.state, handoffRequested: true })
+  }
+
+  cancelAgentHandoff = (
+    actor: TraceActor = 'human',
+    reason = 'Cancel browser agent handoff',
+  ): void => {
+    if (!this.state.handoffRequested) return
+    this.record(actor, 'cancel_agent_handoff', reason, {})
+    this.publish({ ...this.state, handoffRequested: false })
   }
 
   commandFlight = (

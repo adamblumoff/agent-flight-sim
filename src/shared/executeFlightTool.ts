@@ -203,14 +203,19 @@ const executors: {
     if (input.owner !== 'human' && input.owner !== 'agent') {
       throw new TypeError('owner must be human or agent')
     }
+    const current = flightSimulator.getState()
+    if (input.owner === 'agent' && current.controlOwner === 'human' && !current.handoffRequested) {
+      throw new Error('The pilot has not requested an agent handoff.')
+    }
     flightSimulator.transferControl(input.owner, 'agent', reasonInput(input))
-    const controlOwner = flightSimulator.getState().controlOwner
+    const state = flightSimulator.getState()
+    const controlOwner = state.controlOwner
     return receipt(
       controlOwner === 'agent'
         ? 'Agent has the controls'
         : 'Pilot has the controls; agent guidance stopped',
       controlOwner === 'agent' ? 'automation' : 'success',
-      { controlOwner },
+      { controlOwner, state },
     )
   },
 }
