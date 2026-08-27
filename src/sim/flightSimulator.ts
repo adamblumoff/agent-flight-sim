@@ -1,6 +1,6 @@
 import type {
   ActionReceipt, AircraftConfigurationInput, AutopilotState, AutopilotTargetsInput,
-  CheckrideSeed, ControlOwner, DebriefEvent, EvidenceSource, FlightEvent,
+  CheckrideSeed, ConfigurationProcedure, ControlOwner, DebriefEvent, EvidenceSource, FlightEvent,
   FlightEventType, FlightEventWaitInput, FlightEventWaitResult, FlightEvidence,
   FlightState, FlightStateListener, MissionBrief, MissionOutcome, MissionPhase,
   PilotControls, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
@@ -33,6 +33,27 @@ const TAKEOFF_POWER_ACCEL_KT_PER_SECOND = 5.8
 const TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND = 0.2
 const TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND = 0.65
 const MAX_GROUND_PITCH_DEG = 10
+
+const isDestructiveImpact = ({
+  onRunway,
+  gearDown,
+  impactFpm,
+  airspeedKt,
+  bankDeg,
+  pitchDeg,
+}: {
+  onRunway: boolean
+  gearDown: boolean
+  impactFpm: number
+  airspeedKt: number
+  bankDeg: number
+  pitchDeg: number
+}) => !onRunway
+  || impactFpm > 900
+  || airspeedKt > 110
+  || Math.abs(bankDeg) > 32
+  || pitchDeg < -12
+  || (!gearDown && (impactFpm > 350 || airspeedKt > 70))
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 const approach = (value: number, target: number, change: number) => value < target ? Math.min(value + change, target) : Math.max(value - change, target)
@@ -83,9 +104,24 @@ export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   evidenceSources: Object.freeze(['weather', 'cockpit', 'traffic', 'passenger'] as const),
   successConditions: Object.freeze([
     'Take off from North Field runway 18.',
+    'Retract gear after a positive climb rate, then retract takeoff flaps in the climb.',
     'Check at least two evidence sources before selecting a route.',
+    'Use flaps 10 on base, then gear down and flaps 20 on final.',
     'Reach final with gear down and at least 20 degrees of flaps.',
     'Touch down below 90 knots and 600 feet per minute.',
+  ]),
+})
+
+const NORMAL_DEPARTURE_MISSION: MissionBrief = Object.freeze({
+  ...SHARED_AUTONOMY_MISSION,
+  name: 'North Field departure',
+  objective: 'Depart North Field runway 18, clean up the aircraft, and monitor for an enroute update.',
+  availablePlans: Object.freeze([]),
+  successConditions: Object.freeze([
+    'Take off from North Field runway 18.',
+    'Retract gear after a positive climb rate.',
+    'Retract takeoff flaps after the climb is established.',
+    'Monitor for an enroute update before changing the route.',
   ]),
 })
 
@@ -109,6 +145,15 @@ const scenarios: Readonly<Record<CheckrideSeed, ScenarioConditions>> = Object.fr
     traffic: Object.freeze({ delayMinutes: 1, priorityAvailable: true, summary: 'Emergency priority is available at KPWK.' }),
   }),
 })
+
+const NORMAL_DEPARTURE_SCENARIO: ScenarioConditions = Object.freeze({
+  weather: Object.freeze({ visibilityMiles: 10, ceilingFt: 6_500, windDirectionDeg: 180, windSpeedKt: 6, summary: 'Good visibility and light winds for departure.' }),
+  engine: Object.freeze({ health: 'normal' as const, maximumPower: 1, summary: 'Engine indications are normal.' }),
+  passenger: Object.freeze({ condition: 'stable' as const, summary: 'The cabin is secure and the passenger is comfortable.' }),
+  traffic: Object.freeze({ delayMinutes: 0, priorityAvailable: false, summary: 'No traffic conflicts are reported.' }),
+})
+
+const EMERGENCY_ALERT = 'A new engine, weather, traffic, and passenger scenario has developed. Reassess the flight and build a route now.'
 
 const evidenceFor = (scenario: ScenarioConditions): Readonly<Record<EvidenceSource, FlightEvidence>> => Object.freeze({
   weather: Object.freeze({ source: 'weather', headline: 'Airport weather', detail: scenario.weather.summary, reliability: 'current' }),
@@ -166,27 +211,73 @@ const routeFor = (plan: RoutePlan): RouteState => {
 const initialAutopilot = (): AutopilotState => Object.freeze({ enabled: false, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg, altitudeFt: 1_200, airspeedKt: 82, verticalMode: 'climb' })
 const initialRoute = (): RouteState => Object.freeze({ plan: 'unassigned', destination: null, runway: null, waypoints: Object.freeze([]), activeWaypointIndex: 0, reason: null })
 
+const configurationProcedureFor = (state: Pick<FlightState, 'aircraftPhase' | 'altitudeFt' | 'route' | 'gearDown' | 'flapsDeg'>): ConfigurationProcedure => {
+  if (state.aircraftPhase === 'landing_roll' || state.aircraftPhase === 'stopped' || state.aircraftPhase === 'crash_slide') {
+    return Object.freeze({ stage: 'complete', gearDown: state.gearDown, flapsDeg: state.flapsDeg as 0 | 10 | 20 | 30, compliant: true, instruction: 'Configuration sequence complete.' })
+  }
+  let stage: ConfigurationProcedure['stage'] = 'takeoff'
+  let gearDown = true
+  let flapsDeg: ConfigurationProcedure['flapsDeg'] = 10
+  let instruction = 'Takeoff: gear down, flaps 10°.'
+  if (state.aircraftPhase === 'airborne') {
+    const aglFt = state.altitudeFt - NORTH_FIELD_RUNWAY_18.elevationFt
+    if (state.route.plan === 'unassigned') {
+      if (aglFt < 180) {
+        stage = 'positive_rate'
+        gearDown = false
+        instruction = 'Positive rate: retract the landing gear; hold flaps 10°.'
+      } else {
+        stage = 'climb_cleanup'
+        gearDown = false
+        flapsDeg = 0
+        instruction = 'Climb established: retract flaps to 0°.'
+      }
+    } else if (state.route.activeWaypointIndex === 0) {
+      stage = 'climb_cleanup'
+      gearDown = false
+      flapsDeg = 0
+      instruction = 'Climb established: retract flaps to 0°.'
+    } else if (state.route.activeWaypointIndex === 1) {
+      stage = 'base'
+      gearDown = false
+      flapsDeg = 10
+      instruction = 'Base leg: select flaps 10°; keep the gear up.'
+    } else if (state.route.activeWaypointIndex === 2) {
+      stage = 'final'
+      flapsDeg = 20
+      instruction = 'Final approach: gear down, flaps 20°.'
+    } else {
+      stage = 'landing'
+      flapsDeg = 30
+      instruction = 'Landing: select flaps 30° and verify gear down.'
+    }
+  }
+  return Object.freeze({ stage, gearDown, flapsDeg, compliant: state.gearDown === gearDown && state.flapsDeg === flapsDeg, instruction })
+}
+
 const initialState = (seed: CheckrideSeed): FlightState => {
   const start = NORTH_FIELD_START
-  const scenario = scenarios[seed]
+  const scenario = NORMAL_DEPARTURE_SCENARIO
   const autopilot = initialAutopilot()
   const fuel = seed === 81 ? 6.5 : 8.5
-  return Object.freeze({
+  const state = {
     ...start, altitudeFt: NORTH_FIELD_RUNWAY_18.elevationFt, airspeedKt: 0, verticalSpeedFpm: 0, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg,
-    pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: 10, gearDown: true,
+    pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: 10 as const, gearDown: true,
     elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
     agentMode: 'idle', autopilot, route: initialRoute(), scenario,
     motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0 }),
+    impact: null,
     aircraftPhase: 'takeoff_roll',
     approval: Object.freeze({ status: 'none', question: null, requestedAction: null }),
     mission: Object.freeze({ phase: 'preflight', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, distanceToThresholdNm: distanceNm(start, KPWK_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, eventRevision: 0 }),
-    checkride: Object.freeze({ seed, status: 'decision_required', objective: SHARED_AUTONOMY_MISSION.objective, deadlineSeconds: 300, fuelMinutesRemaining: fuel, alert: 'After departure, a rough engine, weather, traffic, and a passenger problem complicate the flight to KPWK.', humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: Object.freeze({ total: 100 }), decision: null }),
+    checkride: Object.freeze({ seed, status: 'armed', objective: NORMAL_DEPARTURE_MISSION.objective, deadlineSeconds: 300, fuelMinutesRemaining: fuel, alert: null, humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: Object.freeze({ total: 100 }), decision: null }),
     debrief: Object.freeze({ status: 'in_progress', elapsedSeconds: 0, decision: 'unassigned', decisionReason: null, events: Object.freeze([]), landing: null }),
-  })
+  } satisfies Omit<FlightState, 'procedure'>
+  return Object.freeze({ ...state, procedure: configurationProcedureFor(state) }) satisfies FlightState
 }
 
 interface EventWaiter { readonly afterRevision: number; readonly events: ReadonlySet<FlightEventType>; readonly resolve: (result: FlightEventWaitResult) => void; readonly timeout: ReturnType<typeof setTimeout> }
-interface CrashDynamics { elapsedSeconds: number; readonly outcome: 'unsafe_touchdown' | 'crashed'; readonly rollDirection: -1 | 1 }
+interface CrashDynamics { elapsedSeconds: number; readonly outcome: 'unsafe_touchdown' | 'crashed' | 'fuel_exhausted'; readonly rollDirection: -1 | 1 }
 
 class FlightSimulator {
   private state = initialState(17)
@@ -198,9 +289,13 @@ class FlightSimulator {
   private animationFrame: number | null = null
   private traceId = 1
   private eventRevision = 0
+  private impactRevision = 0
   private bounceCount = 0
   private peakTouchdownImpactFpm = 0
   private crashDynamics: CrashDynamics | null = null
+  private selectedScenario = scenarios[17]
+  private emergencyTriggered = false
+  private fuelExhausted = false
   private pilotControls: PilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
   private manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
   private readonly listeners = new Set<FlightStateListener>()
@@ -219,7 +314,7 @@ class FlightSimulator {
   getSnapshot = () => this.snapshot
   getTrace = () => this.trace
   getEventRevision = () => this.eventRevision
-  getMissionBrief = () => SHARED_AUTONOMY_MISSION
+  getMissionBrief = () => this.emergencyTriggered ? SHARED_AUTONOMY_MISSION : NORMAL_DEPARTURE_MISSION
   subscribe = (listener: FlightStateListener) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
 
   start = () => {
@@ -241,13 +336,16 @@ class FlightSimulator {
     this.events = Object.freeze([])
     this.trace = Object.freeze([])
     this.accumulator = 0
+    this.impactRevision = 0
     this.bounceCount = 0
     this.peakTouchdownImpactFpm = 0
     this.crashDynamics = null
+    this.selectedScenario = scenarios[seed]
+    this.emergencyTriggered = false
+    this.fuelExhausted = false
     this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
     this.manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
-    this.record('system', 'mission_started', `Emergency seed ${seed} started`, {})
-    this.queueEvent('emergency_detected', this.state.checkride.alert!)
+    this.record('system', 'mission_started', `Normal departure seed ${seed} started`, {})
     this.previousState = this.state
     this.publish(this.state)
   }
@@ -328,6 +426,7 @@ class FlightSimulator {
   setRoute = (plan: RoutePlan, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
     if (plan === 'unassigned') return this.receipt(false, 'Choose return_kpwk.')
     if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    if (!this.emergencyTriggered) return this.receipt(false, 'The departure is normal. Wait for a new scenario before changing the route.')
     if (actor === 'agent' && this.state.checkride.inspectedSources.length < 2) return this.receipt(false, 'Inspect at least two evidence sources before choosing a route.')
     const route = Object.freeze({ ...routeFor(plan), reason })
     const target = route.waypoints[0]
@@ -364,11 +463,21 @@ class FlightSimulator {
 
   configureAircraft = (input: AircraftConfigurationInput, actor: TraceActor = 'agent'): ActionReceipt => {
     if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const required = configurationProcedureFor(this.state)
+    if (actor === 'agent' && input.gearDown !== undefined && input.gearDown !== required.gearDown) {
+      return this.receipt(false, `${required.instruction} Gear ${required.gearDown ? 'down' : 'up'} is required in this phase.`)
+    }
+    if (actor === 'agent' && input.flapsDeg !== undefined && input.flapsDeg !== required.flapsDeg) {
+      return this.receipt(false, `${required.instruction} Flaps ${required.flapsDeg}° are required in this phase.`)
+    }
     if (actor === 'human') this.takePilotControl(input.reason ?? 'Pilot changed configuration')
-    this.state = Object.freeze({ ...this.state, gearDown: input.gearDown ?? this.state.gearDown, flapsDeg: input.flapsDeg ?? this.state.flapsDeg })
+    const configured = { ...this.state, gearDown: input.gearDown ?? this.state.gearDown, flapsDeg: input.flapsDeg ?? this.state.flapsDeg }
+    const procedure = configurationProcedureFor(configured)
+    this.state = Object.freeze({ ...configured, procedure })
     this.record(actor, 'aircraft_configured', input.reason ?? 'Aircraft configuration updated', { gearDown: this.state.gearDown, flapsDeg: this.state.flapsDeg })
+    if (procedure.compliant && !required.compliant) this.queueEvent('configuration_confirmed', procedure.instruction)
     this.publish(this.state)
-    return this.receipt(true, `Gear ${this.state.gearDown ? 'down' : 'up'}, flaps ${this.state.flapsDeg}°.`)
+    return this.receipt(true, `Gear ${this.state.gearDown ? 'down' : 'up'}, flaps ${this.state.flapsDeg}°. ${procedure.compliant ? 'Configuration check complete.' : procedure.instruction}`)
   }
 
   requestHumanApproval = (question: string, requestedAction: string, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
@@ -459,6 +568,11 @@ class FlightSimulator {
       pitch = approach(pitch, 0, 10 * dt)
       throttle = 0
       verticalSpeed = 0
+    } else if (this.fuelExhausted && this.state.aircraftPhase === 'airborne') {
+      throttle = 0
+      bank = approach(bank, 0, 12 * dt)
+      pitch = approach(pitch, -6, 5 * dt)
+      verticalSpeed = approach(verticalSpeed, -1_050, 360 * dt)
     } else if (this.state.controlOwner === 'agent' && this.state.autopilot.enabled) {
       if (this.state.aircraftPhase === 'takeoff_roll') {
         bank = approach(bank, clamp(headingError(NORTH_FIELD_RUNWAY_18.headingDeg, heading) * 0.65, -12, 12), 24 * dt)
@@ -499,7 +613,9 @@ class FlightSimulator {
     const drag = 0.36 + this.state.flapsDeg * 0.008 + (this.state.gearDown ? 0.12 : 0)
     const power = throttle * scenario.engine.maximumPower
     const gravityAlongFlightPath = -Math.sin(radians(pitch)) * 5.5
-    const acceleration = this.state.aircraftPhase === 'takeoff_roll'
+    const acceleration = this.fuelExhausted
+      ? (78 - airspeed) * 0.22
+      : this.state.aircraftPhase === 'takeoff_roll'
       ? power * TAKEOFF_POWER_ACCEL_KT_PER_SECOND
         - (airspeed > 0.05 || power > 0 ? TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND : 0)
         - TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND * (airspeed / ROTATE_SPEED_KT) ** 2
@@ -519,6 +635,7 @@ class FlightSimulator {
     let phase = routeUpdate.phase
     let outcome: MissionOutcome = 'in_progress'
     let landing = this.state.debrief.landing
+    let impact = this.state.impact
     let touchdownJustOccurred = false
     let aircraftPhase = this.state.aircraftPhase
     let departedJustNow = false
@@ -544,8 +661,10 @@ class FlightSimulator {
       altitude = contactAltitude
       const impactFpm = Math.abs(verticalSpeed)
       this.peakTouchdownImpactFpm = Math.max(this.peakTouchdownImpactFpm, impactFpm)
-      const safeContact = onRunway
+      const safeContact = !this.fuelExhausted
+        && onRunway
         && this.state.gearDown
+        && this.state.flapsDeg >= 20
         && airspeed <= MAX_TOUCHDOWN_SPEED_KT
         && impactFpm <= MAX_SAFE_TOUCHDOWN_FPM
         && Math.abs(bank) <= MAX_TOUCHDOWN_BANK_DEG
@@ -575,22 +694,45 @@ class FlightSimulator {
         }
       } else {
         aircraftPhase = 'crash_slide'
-        const crashOutcome = onRunway ? 'unsafe_touchdown' : 'crashed'
+        const crashOutcome = this.fuelExhausted ? 'fuel_exhausted' : onRunway ? 'unsafe_touchdown' : 'crashed'
+        const rollDirection = frame.crossNm < 0 ? -1 : 1
+        const destructive = this.fuelExhausted || isDestructiveImpact({
+          onRunway,
+          gearDown: this.state.gearDown,
+          impactFpm,
+          airspeedKt: airspeed,
+          bankDeg: bank,
+          pitchDeg: pitch,
+        })
         landing = Object.freeze({ runway: runway.id, sinkRateFpm: Math.round(impactFpm), airspeedKt: Math.round(airspeed), centerlineErrorFt: Math.round(Math.abs(frame.crossNm) * FEET_PER_NM), touchdownDistanceFt: Math.round(frame.alongNm * FEET_PER_NM), bounces: this.bounceCount, onRunway, safe: false })
-        this.crashDynamics = { elapsedSeconds: 0, outcome: crashOutcome, rollDirection: frame.crossNm < 0 ? -1 : 1 }
+        this.impactRevision += 1
+        this.crashDynamics = { elapsedSeconds: 0, outcome: crashOutcome, rollDirection }
+        impact = Object.freeze({
+          revision: this.impactRevision,
+          severity: destructive ? 'destructive' : 'hard',
+          sinkRateFpm: impactFpm,
+          airspeedKt: airspeed,
+          bankDeg: bank,
+          pitchDeg: pitch,
+          onRunway,
+          rollDirection,
+        })
         throttle = 0
         verticalSpeed = 0
         phase = 'failed'
       }
     }
-    if ((fuelMinutesRemaining <= 0 || elapsedSeconds >= SHARED_AUTONOMY_MISSION.deadlineSeconds) && outcome === 'in_progress') outcome = 'fuel_exhausted'
+    const fuelJustExhausted = fuelMinutesRemaining <= 0 && !this.fuelExhausted
+    if (fuelJustExhausted) this.fuelExhausted = true
 
     const motion = Object.freeze({
       longitudinalAccelerationKtPerSecond: (airspeed - this.state.airspeedKt) / dt,
       verticalAccelerationFpmPerSecond: (verticalSpeed - this.state.verticalSpeedFpm) / dt,
       turnRateDegPerSecond: turnRate,
     })
-    const partial = { ...this.state, ...position, altitudeFt: altitude, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed, headingDeg: heading, pitchDeg: pitch, bankDeg: bank, throttle, elapsedSeconds, fuelMinutesRemaining, motion, aircraftPhase, route: routeUpdate.route } as FlightState
+    const partialWithoutProcedure = { ...this.state, ...position, altitudeFt: altitude, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed, headingDeg: heading, pitchDeg: pitch, bankDeg: bank, throttle, elapsedSeconds, fuelMinutesRemaining, motion, impact, aircraftPhase, route: routeUpdate.route }
+    const procedure = configurationProcedureFor(partialWithoutProcedure)
+    const partial = { ...partialWithoutProcedure, procedure } as FlightState
     const mission = this.navigation(partial, phase, outcome, runway)
     const approachJustStabilized = mission.stableApproach && !this.state.mission.stableApproach
     const status = outcome === 'in_progress' ? 'in_progress' : outcome === 'landed' ? 'landed' : 'failed'
@@ -604,6 +746,30 @@ class FlightSimulator {
       debrief: Object.freeze({ ...this.state.debrief, status, elapsedSeconds, landing }),
       agentMode: status === 'in_progress' ? this.state.agentMode : 'complete',
     })
+    if (!this.emergencyTriggered && aircraftPhase === 'airborne' && elapsedSeconds >= 45) {
+      this.emergencyTriggered = true
+      this.state = Object.freeze({
+        ...this.state,
+        scenario: this.selectedScenario,
+        agentMode: this.state.controlOwner === 'agent' ? 'thinking' : this.state.agentMode,
+        checkride: Object.freeze({
+          ...this.state.checkride,
+          status: 'decision_required',
+          objective: SHARED_AUTONOMY_MISSION.objective,
+          alert: EMERGENCY_ALERT,
+          inspectedSources: Object.freeze([]),
+        }),
+      })
+      this.record('system', 'scenario_triggered', EMERGENCY_ALERT, { seed: this.state.checkride.seed })
+      this.addDebrief('system', 'Unexpected emergency scenario received')
+      this.queueEvent('emergency_detected', EMERGENCY_ALERT)
+    }
+    if (fuelJustExhausted && outcome === 'in_progress') {
+      this.record('system', 'fuel_exhausted', 'The engine stopped after fuel exhaustion', {})
+      this.addDebrief('system', 'Fuel exhausted; engine-out descent began')
+      this.queueEvent('emergency_detected', 'Fuel exhausted. The engine has stopped; the aircraft is descending.')
+    }
+    if (procedure.stage !== this.previousState.procedure.stage && !procedure.compliant) this.queueEvent('configuration_required', procedure.instruction)
     if (approachJustStabilized) this.queueEvent('approach_stable', `${runway.id} approach is stable.`)
     if (departedJustNow) this.addDebrief(this.state.controlOwner, `Departed ${NORTH_FIELD_RUNWAY_18.id}`)
     if (touchdownJustOccurred) this.queueEvent('touchdown', `Touchdown on ${runway.id}.`)

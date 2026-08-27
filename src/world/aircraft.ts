@@ -16,6 +16,18 @@ import {
   Vector3,
 } from 'three'
 
+export interface AircraftBreakawayPart {
+  readonly name: 'left-wing' | 'right-wing' | 'left-tail' | 'right-tail' | 'fin' | 'propeller'
+  readonly root: Group
+}
+
+export interface AircraftRig {
+  readonly root: Group
+  readonly landingGear: readonly Group[]
+  readonly flaps: readonly Group[]
+  readonly breakawayParts: readonly AircraftBreakawayPart[]
+}
+
 const bodyMaterial = new MeshPhysicalMaterial({
   color: 0xe8eceb,
   metalness: 0.18,
@@ -54,11 +66,10 @@ function wheel(x: number, z: number, scale = 1) {
   return assembly
 }
 
-export function createAircraft() {
+export function createAircraft(): AircraftRig {
   const aircraft = new Group()
   aircraft.name = 'N417FS'
   const landingGear = [wheel(-1.45, 0.35), wheel(1.45, 0.35), wheel(0, -2.8, 0.78)]
-  aircraft.userData.landingGear = landingGear
 
   const fuselage = mesh(new CapsuleGeometry(0.66, 4.7, 6, 14), bodyMaterial)
   fuselage.rotation.x = Math.PI / 2
@@ -68,36 +79,39 @@ export function createAircraft() {
   nose.rotation.x = -Math.PI / 2
   nose.position.set(0, 1.4, -3.9)
 
-  const wings = mesh(new BoxGeometry(10.8, 0.14, 1), bodyMaterial)
-  wings.position.set(0, 1.32, -0.75)
-  wings.rotation.x = -0.035
-
-  const outerWingPanels = [-4.35, 4.35].map((x) => {
-    const panel = mesh(new BoxGeometry(2.1, 0.12, 0.56), bodyMaterial)
-    panel.position.set(x, 1.31, 0.03)
-    return panel
-  })
-
-  const flaps = [-2.15, 2.15].map((x) => {
+  const flaps: Group[] = []
+  const wingAssemblies = ([-1, 1] as const).map((side) => {
+    const assembly = new Group()
+    assembly.name = side < 0 ? 'Left wing' : 'Right wing'
+    assembly.position.set(side * 2.7, 1.32, -0.75)
+    assembly.rotation.x = -0.035
+    const panel = mesh(new BoxGeometry(5.4, 0.14, 1), bodyMaterial)
+    const stripe = mesh(new BoxGeometry(5.15, 0.04, 0.28), accentMaterial)
+    stripe.position.set(0, 0.08, -0.05)
     const pivot = new Group()
     pivot.name = 'Flap'
-    pivot.position.set(x, 1.31, -0.25)
-    const panel = mesh(new BoxGeometry(2.2, 0.11, 0.56), bodyMaterial)
-    panel.position.z = 0.28
-    pivot.add(panel)
-    return pivot
+    pivot.position.set(-side * 0.55, -0.01, 0.5)
+    const flapPanel = mesh(new BoxGeometry(2.2, 0.11, 0.56), bodyMaterial)
+    flapPanel.position.z = 0.28
+    pivot.add(flapPanel)
+    flaps.push(pivot)
+    assembly.add(panel, stripe, pivot)
+    return assembly
   })
-  aircraft.userData.flaps = flaps
 
-  const wingStripe = mesh(new BoxGeometry(10.3, 0.04, 0.28), accentMaterial)
-  wingStripe.position.set(0, 1.4, -0.8)
+  const tailAssemblies = ([-1, 1] as const).map((side) => {
+    const assembly = new Group()
+    assembly.name = side < 0 ? 'Left tailplane' : 'Right tailplane'
+    assembly.position.set(side * 1.025, 1.58, 2.8)
+    assembly.add(mesh(new BoxGeometry(2.05, 0.11, 0.78), bodyMaterial))
+    return assembly
+  })
 
-  const tailplane = mesh(new BoxGeometry(4.1, 0.11, 0.78), bodyMaterial)
-  tailplane.position.set(0, 1.58, 2.8)
-
-  const fin = mesh(new BoxGeometry(0.14, 1.75, 1.45), accentMaterial)
-  fin.position.set(0, 2.2, 2.7)
-  fin.rotation.x = -0.28
+  const finAssembly = new Group()
+  finAssembly.name = 'Fin'
+  finAssembly.position.set(0, 2.2, 2.7)
+  finAssembly.rotation.x = -0.28
+  finAssembly.add(mesh(new BoxGeometry(0.14, 1.75, 1.45), accentMaterial))
 
   const windshield = mesh(new BoxGeometry(1.02, 0.61, 0.08), glassMaterial)
   windshield.position.set(0, 1.82, -1.92)
@@ -108,33 +122,44 @@ export function createAircraft() {
   const sideWindowRight = sideWindowLeft.clone()
   sideWindowRight.position.x = 0.65
 
+  const propellerAssembly = new Group()
+  propellerAssembly.name = 'Propeller'
+  propellerAssembly.position.set(0, 1.4, -4.76)
   const spinner = mesh(new SphereGeometry(0.22, 12, 8), accentMaterial)
   spinner.scale.z = 1.3
-  spinner.position.set(0, 1.4, -4.76)
   const propellerDisc = new Mesh(
     new CircleGeometry(1.08, 32),
     new MeshBasicMaterial({ color: 0xaeb8ba, transparent: true, opacity: 0.16, depthWrite: false }),
   )
-  propellerDisc.position.set(0, 1.4, -4.82)
+  propellerDisc.position.z = -0.06
+  propellerAssembly.add(spinner, propellerDisc)
 
   aircraft.add(
     fuselage,
     nose,
-    wings,
-    ...outerWingPanels,
-    ...flaps,
-    wingStripe,
-    tailplane,
-    fin,
+    ...wingAssemblies,
+    ...tailAssemblies,
+    finAssembly,
     windshield,
     sideWindowLeft,
     sideWindowRight,
-    spinner,
-    propellerDisc,
+    propellerAssembly,
     ...landingGear,
   )
 
-  return aircraft
+  return {
+    root: aircraft,
+    landingGear,
+    flaps,
+    breakawayParts: [
+      { name: 'left-wing', root: wingAssemblies[0] },
+      { name: 'right-wing', root: wingAssemblies[1] },
+      { name: 'left-tail', root: tailAssemblies[0] },
+      { name: 'right-tail', root: tailAssemblies[1] },
+      { name: 'fin', root: finAssembly },
+      { name: 'propeller', root: propellerAssembly },
+    ],
+  }
 }
 
 function seededRandom(seed: number) {

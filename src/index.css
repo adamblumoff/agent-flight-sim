@@ -462,6 +462,161 @@ summary:focus-visible {
   height: 15px;
 }
 
+.flight-minimap {
+  position: absolute;
+  z-index: 8;
+  top: 76px;
+  left: 20px;
+  width: 238px;
+  padding: 11px;
+  border: 1px solid rgb(244 239 222 / 16%);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgb(28 31 26 / 88%), rgb(15 18 15 / 82%));
+  box-shadow: 0 16px 44px rgb(0 0 0 / 28%), inset 0 1px rgb(255 255 255 / 3%);
+  color: var(--cream);
+  pointer-events: none;
+  backdrop-filter: blur(16px) saturate(110%);
+}
+
+.minimap-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 1px 2px 8px;
+}
+
+.minimap-heading span {
+  color: rgb(244 239 222 / 43%);
+  font-size: 7px;
+  font-weight: 680;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.minimap-heading strong {
+  overflow: hidden;
+  color: rgb(244 239 222 / 76%);
+  font: 500 8px/1.2 "Kode Mono Variable", monospace;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flight-minimap svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+  border: 1px solid rgb(244 239 222 / 7%);
+  border-radius: 11px;
+  background: #0b100c;
+}
+
+.minimap-surface {
+  fill: url("#minimap-surface");
+}
+
+.minimap-range {
+  fill: url("#minimap-range");
+}
+
+.minimap-grid {
+  fill: none;
+  stroke: rgb(244 239 222 / 5%);
+  stroke-dasharray: 2 5;
+  stroke-width: 0.7;
+}
+
+.minimap-label {
+  fill: rgb(244 239 222 / 52%);
+  font: 600 6px/1 "Kode Mono Variable", monospace;
+  letter-spacing: 0.05em;
+}
+
+.minimap-runway {
+  stroke-linecap: round;
+  stroke-width: 5;
+}
+
+.minimap-runway-departure {
+  stroke: #8f8361;
+}
+
+.minimap-runway-arrival {
+  stroke: #d8d7ce;
+}
+
+.minimap-route-history,
+.minimap-route-active {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.minimap-route-history {
+  stroke: rgb(139 196 155 / 24%);
+  stroke-width: 1.2;
+}
+
+.minimap-route-active {
+  stroke: var(--green);
+  stroke-dasharray: 5 4;
+  stroke-width: 1.55;
+}
+
+.minimap-fix {
+  fill: #151710;
+  stroke: rgb(139 196 155 / 64%);
+  stroke-width: 1.2;
+}
+
+.minimap-fix-active {
+  fill: var(--green);
+  stroke: #eef1df;
+}
+
+.minimap-aircraft {
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 70%));
+}
+
+.minimap-aircraft circle {
+  fill: #151b16;
+  stroke: rgb(244 239 222 / 35%);
+  stroke-width: 0.8;
+}
+
+.minimap-aircraft path {
+  fill: var(--cream);
+}
+
+.minimap-compass path {
+  fill: var(--green);
+}
+
+.minimap-compass text {
+  fill: rgb(244 239 222 / 62%);
+  font: 650 6px/1 "Kode Mono Variable", monospace;
+  text-anchor: middle;
+}
+
+.minimap-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 2px 0;
+  color: rgb(244 239 222 / 43%);
+  font: 560 7px/1 "Kode Mono Variable", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.minimap-footer strong {
+  color: rgb(244 239 222 / 72%);
+  font-weight: 600;
+}
+
 .instrument-console {
   position: absolute;
   z-index: 7;
@@ -1100,6 +1255,12 @@ summary:focus-visible {
     transform: none;
   }
 
+  .flight-minimap {
+    top: 158px;
+    left: 12px;
+    width: 184px;
+  }
+
   .copilot-panel {
     top: auto;
     right: 12px;
@@ -1166,6 +1327,16 @@ summary:focus-visible {
 
   .instrument-console {
     width: calc(100% - 72px);
+  }
+
+  .flight-minimap {
+    top: 154px;
+    width: 158px;
+    padding: 7px;
+  }
+
+  .minimap-heading strong {
+    max-width: 104px;
   }
 
   .manual-controls {

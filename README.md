@@ -31,7 +31,7 @@ The on-screen gear, flaps, and power controls do the same work. Any direct pilot
 The page registers these tools:
 
 ```text
-start_emergency
+start_flight
 get_mission_brief
 get_flight_state
 inspect_flight_evidence
@@ -43,13 +43,13 @@ wait_for_flight_event
 transfer_control
 ```
 
-A normal agent flight is intentionally short:
+A normal agent flight is intentionally short but procedural:
 
-1. Call `start_emergency` with seed 17, 42, or 81.
-2. Read the brief and inspect the weather, cockpit, traffic, and passenger evidence.
-3. Call `set_route` with `return_kpwk` and explain the choice.
-4. Lower the gear and select at least 20 degrees of flaps with `configure_aircraft`.
-5. Use `wait_for_flight_event` for approach, touchdown, and mission completion instead of polling.
+1. Call `start_flight` with seed 17, 42, or 81.
+2. Fly the normal departure, responding to `configuration_required` events for gear and flap cleanup.
+3. Wait for `emergency_detected`; the scenario and evidence change only after that event.
+4. Inspect the new weather, cockpit, traffic, and passenger evidence, then call `set_route` with `return_kpwk` and explain the choice.
+5. Follow each configuration checkpoint through base, final, and landing, then wait for touchdown and mission completion instead of polling.
 
 The intent-level tools make route and configuration decisions; the deterministic autopilot supplies the continuous control loop. The aircraft therefore keeps flying while a model is thinking or waiting for a human decision. Event waits return after at most 15 seconds and can be resumed from the returned monotonic revision.
 

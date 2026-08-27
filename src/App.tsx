@@ -13,6 +13,7 @@ import {
 } from './components/ownership-control'
 import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
+import { FlightMinimap } from './components/flight-minimap'
 import { flightSimulator } from './sim/flightSimulator'
 import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
@@ -78,8 +79,10 @@ function deriveObservations(state: FlightState): readonly CopilotObservation[] {
 }
 
 function deriveRecommendation(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return 'Depart North Field runway 18, then continue to KPWK runway 16.'
+  if (state.mission.phase === 'preflight') return 'Depart North Field runway 18 and monitor for the enroute brief.'
   if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
+  if (!state.procedure.compliant) return state.procedure.instruction
+  if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
   if (state.approval.status === 'pending') {
     return state.approval.requestedAction ?? 'Hold the current flight path until you decide.'
   }
@@ -97,13 +100,26 @@ function derivePlan(state: FlightState): readonly string[] {
   if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
     return [
       'Take off from North Field runway 18 and climb through 1,000 feet.',
-      'Assess the emergency, then continue to KPWK runway 16.',
+      'Clean up the aircraft and monitor for the enroute brief.',
     ]
   }
   if (state.route.plan === 'unassigned') {
+    if (state.checkride.status === 'armed') {
+      return [
+        'Complete the normal departure and clean up the aircraft.',
+        'Maintain the climb while monitoring for new conditions.',
+      ]
+    }
     return [
       'Confirm weather, engine, passenger, and traffic conditions.',
       'Commit to the KPWK return, then configure the aircraft for runway 16.',
+    ]
+  }
+
+  if (!state.procedure.compliant) {
+    return [
+      state.procedure.instruction,
+      'Verify the configuration, then continue to the active route fix.',
     ]
   }
 
@@ -125,9 +141,11 @@ function deriveAction(state: FlightState): string {
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
+  if (state.checkride.status === 'armed') return 'Normal departure. Monitoring the aircraft and surrounding conditions.'
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
     return 'Reviewing the available evidence and route options.'
   }
+  if (!state.procedure.compliant) return state.procedure.instruction
   if (state.controlOwner === 'agent' && state.autopilot.enabled) {
     const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
     const target = waypoint?.name ?? state.route.destination ?? 'assigned route'
@@ -138,8 +156,9 @@ function deriveAction(state: FlightState): string {
 }
 
 function deriveHeadline(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return 'North Field to KPWK'
+  if (state.mission.phase === 'preflight') return 'North Field departure'
   if (state.mission.phase === 'takeoff') return 'Departing runway 18'
+  if (state.checkride.status === 'armed') return 'Normal departure'
   if (state.approval.status === 'pending') return 'Holding for your decision'
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') return 'Assessing the emergency'
   if (state.agentMode === 'flying') {
@@ -326,10 +345,10 @@ export default function App() {
     error: 'Connection failed',
   } as const
   const ownershipMode = deriveOwnershipMode(state, webMcpStatus === 'ready')
-  const isDeparture = state.mission.phase === 'preflight' || state.mission.phase === 'takeoff'
-  const destination = isDeparture ? 'KPWK' : state.route.destination ?? 'Route pending'
-  const routeDetail = isDeparture
-    ? 'Depart North Field 18 · Land KPWK 16'
+  const awaitingScenario = state.checkride.status === 'armed'
+  const destination = awaitingScenario ? 'Departure' : state.route.destination ?? 'Route pending'
+  const routeDetail = awaitingScenario
+    ? 'North Field 18 · Await enroute brief'
     : state.route.destination === null
     ? 'Decision needed'
     : state.route.runway
@@ -355,9 +374,9 @@ export default function App() {
         >
           <div className="takeoff-briefing-card">
             <p>Flight briefing</p>
-            <h1 id="takeoff-briefing-title">Take off here. Land at KPWK.</h1>
+            <h1 id="takeoff-briefing-title">Fly the North Field departure.</h1>
             <p id="takeoff-briefing-copy">
-              You are lined up on North Field runway 18. Depart, climb through 1,000 feet, then continue to Chicago Executive runway 16.
+              You are lined up on North Field runway 18. Depart, climb through 1,000 feet, clean up the aircraft, and monitor for the enroute brief.
             </p>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
@@ -377,7 +396,7 @@ export default function App() {
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
             <strong>Flightdeck</strong>
-            <span>N417FS · North Field to KPWK</span>
+            <span>N417FS · North Field departure</span>
           </div>
         </div>
 
@@ -391,6 +410,8 @@ export default function App() {
 
         <OwnershipControl mode={ownershipMode} onClick={toggleHandoff} />
       </header>
+
+      <FlightMinimap state={state} />
 
       <nav className="camera-switcher" aria-label="Camera view">
         {cameraOptions.map(({ mode, label, icon: Icon }) => (

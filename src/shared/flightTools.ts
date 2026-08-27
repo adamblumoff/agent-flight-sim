@@ -11,10 +11,10 @@ export interface FlightToolReceipt<T> { readonly ok: true; readonly summary: str
 export const checkrideSeeds = [17, 42, 81] as const satisfies readonly CheckrideSeed[]
 export const evidenceSources = ['weather', 'cockpit', 'traffic', 'passenger'] as const satisfies readonly EvidenceSource[]
 export const routePlans = ['return_kpwk'] as const satisfies readonly RoutePlan[]
-export const flightEventValues = ['handoff_requested', 'emergency_detected', 'plan_updated', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
+export const flightEventValues = ['handoff_requested', 'emergency_detected', 'plan_updated', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
 export interface FlightToolArguments {
-  start_emergency: { readonly seed?: CheckrideSeed }
+  start_flight: { readonly seed?: CheckrideSeed }
   get_mission_brief: Record<string, never>
   get_flight_state: Record<string, never>
   inspect_flight_evidence: { readonly source?: EvidenceSource }
@@ -27,7 +27,7 @@ export interface FlightToolArguments {
 }
 
 export interface FlightToolResults {
-  start_emergency: FlightToolReceipt<{ readonly seed: CheckrideSeed; readonly brief: MissionBrief; readonly state: FlightState }>
+  start_flight: FlightToolReceipt<{ readonly seed: CheckrideSeed; readonly brief: MissionBrief; readonly state: FlightState }>
   get_mission_brief: FlightToolReceipt<{ readonly brief: MissionBrief }>
   get_flight_state: FlightToolReceipt<{ readonly state: FlightState; readonly units: Readonly<Record<string, string>> }>
   inspect_flight_evidence: FlightToolReceipt<{ readonly evidence: FlightEvidence | readonly FlightEvidence[]; readonly inspectedSources: readonly EvidenceSource[] }>
@@ -46,8 +46,8 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 
 export const flightToolDefinitions = [
   {
-    name: 'start_emergency', title: 'Start emergency flight', readOnly: false,
-    description: 'Start a reproducible departure from North Field and take copilot control. The aircraft takes off while you inspect evidence and choose the KPWK arrival plan.',
+    name: 'start_flight', title: 'Start flight', readOnly: false,
+    description: 'Start a reproducible normal departure from North Field and take copilot control. Maintain the departure and wait for emergency_detected; only then inspect the changed evidence and build the KPWK route.',
     inputSchema: { type: 'object', properties: { seed: { type: 'number', enum: checkrideSeeds, default: 17 } }, additionalProperties: false },
   },
   {
@@ -56,7 +56,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'get_flight_state', title: 'Read flight state', readOnly: true,
-    description: 'Read live aircraft motion, fuel, control owner, current route, autopilot targets, approval, scenario conditions, and debrief.', inputSchema: emptySchema,
+    description: 'Read live aircraft motion, fuel, control owner, current route, required phase-specific aircraft configuration, autopilot targets, approval, scenario conditions, and debrief.', inputSchema: emptySchema,
   },
   {
     name: 'inspect_flight_evidence', title: 'Inspect evidence', readOnly: true,
@@ -75,7 +75,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'configure_aircraft', title: 'Configure aircraft', readOnly: false,
-    description: 'Set landing gear and flaps. Route guidance handles movement, but landing configuration remains a copilot decision.',
+    description: 'Set landing gear and flaps for the current procedure stage. Read state.procedure first: premature or out-of-sequence settings are rejected, and configuration_required events announce each transition.',
     inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0, 10, 20, 30] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
   },
   {
@@ -85,7 +85,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'wait_for_flight_event', title: 'Wait for flight event', readOnly: true,
-    description: 'Wait without polling for a handoff, approval, touchdown, mission completion, or failure. Call again after a timeout.',
+    description: 'Wait without polling for a configuration change, handoff, approval, touchdown, mission completion, or failure. Call again after a timeout.',
     inputSchema: { type: 'object', properties: { after_revision: { type: 'number', minimum: 0 }, events: { type: 'array', items: { type: 'string', enum: flightEventValues }, minItems: 1 }, timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 15000 } }, additionalProperties: false },
   },
   {

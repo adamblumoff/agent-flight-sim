@@ -26,7 +26,7 @@ import {
   Vector3,
 } from 'three'
 import type { FlightState } from '../sim/types'
-import { waypointToWorldVector, WORLD_DEPARTURE_RUNWAY, WORLD_RUNWAY } from './coordinates'
+import { WORLD_DEPARTURE_RUNWAY, WORLD_RUNWAY } from './coordinates'
 
 const runway = WORLD_RUNWAY
 const runwayLength = runway.lengthFt * 0.3048
@@ -55,30 +55,25 @@ function createTerrainMaterial(anisotropy: number) {
   const fieldColors = ['#4a6542', '#596f45', '#66754a', '#52623e', '#71805a', '#435b3c']
   context.fillStyle = '#516944'
   context.fillRect(0, 0, canvas.width, canvas.height)
-  for (let y = 0; y < canvas.height; y += 90) {
-    for (let x = 0; x < canvas.width; x += 105) {
-      context.fillStyle = fieldColors[Math.floor(random() * fieldColors.length)]
-      context.globalAlpha = 0.72 + random() * 0.22
-      context.fillRect(x + 2, y + 2, 99, 84)
-      context.fillStyle = 'rgba(231,220,169,.08)'
-      for (let stripe = 8; stripe < 90; stripe += 12) context.fillRect(x + stripe, y + 2, 2, 84)
-    }
+  for (let index = 0; index < 70; index += 1) {
+    context.fillStyle = fieldColors[Math.floor(random() * fieldColors.length)]
+    context.globalAlpha = 0.12 + random() * 0.12
+    context.beginPath()
+    context.ellipse(
+      random() * canvas.width,
+      random() * canvas.height,
+      70 + random() * 190,
+      45 + random() * 125,
+      random() * Math.PI,
+      0,
+      Math.PI * 2,
+    )
+    context.fill()
   }
-  context.globalAlpha = 0.85
-  context.strokeStyle = '#7f8278'
-  context.lineWidth = 5
-  context.beginPath()
-  context.moveTo(-40, 290)
-  context.bezierCurveTo(260, 230, 670, 390, 1_070, 300)
-  context.moveTo(160, -30)
-  context.lineTo(260, 1_060)
-  context.moveTo(790, -30)
-  context.lineTo(690, 1_060)
-  context.stroke()
-  context.globalAlpha = 0.16
+  context.globalAlpha = 0.11
   for (let index = 0; index < 2_200; index += 1) {
-    context.fillStyle = random() > 0.48 ? '#182d1d' : '#c2bd89'
-    const size = 1 + random() * 3
+    context.fillStyle = random() > 0.48 ? '#203724' : '#c2bd89'
+    const size = 0.5 + random() * 1.5
     context.fillRect(random() * 1_024, random() * 1_024, size, size)
   }
   context.globalAlpha = 1
@@ -310,26 +305,6 @@ function addAirport(root: Group) {
   const cab = box(15, 7, 15, buildingWall)
   cab.position.set(-145, 44, -570)
   root.add(tower, cab)
-  const road = groundBox(root, 14, 2_700, -270, -runwayLength / 2, asphalt)
-  road.rotation.y = -0.05
-
-  const random = seededRandom(8_731)
-  const city = new InstancedMesh(new BoxGeometry(1, 1, 1), buildingDark, 115)
-  const matrix = new Matrix4()
-  const scale = new Vector3()
-  const position = new Vector3()
-  for (let index = 0; index < city.count; index += 1) {
-    const side = random() > 0.5 ? 1 : -1
-    const width = 18 + random() * 48
-    const height = 6 + random() * 20
-    const depth = 16 + random() * 45
-    position.set(side * (380 + random() * 1_600), height / 2, 350 - random() * 3_600)
-    scale.set(width, height, depth)
-    matrix.compose(position, city.quaternion, scale)
-    city.setMatrixAt(index, matrix)
-  }
-  city.instanceMatrix.needsUpdate = true
-  root.add(city)
 }
 
 function createSky() {
@@ -381,19 +356,6 @@ function createRain() {
   return rain
 }
 
-function createGuidanceLine() {
-  const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array(6), 3))
-  const line = new Line(geometry, new LineBasicMaterial({
-    color: 0x90c9cf,
-    transparent: true,
-    opacity: 0.34,
-    depthWrite: false,
-  }))
-  line.frustumCulled = false
-  return line
-}
-
 export function createAirportWorld(scene: Scene, anisotropy = 1) {
   const root = new Group()
   root.name = 'KPWK training airport'
@@ -408,8 +370,7 @@ export function createAirportWorld(scene: Scene, anisotropy = 1) {
 
   const sky = createSky()
   const rain = createRain()
-  const guidance = createGuidanceLine()
-  root.add(sky, rain, guidance)
+  root.add(sky, rain)
   scene.add(root)
 
   scene.add(new AmbientLight(0x667077, 0.42))
@@ -431,8 +392,6 @@ export function createAirportWorld(scene: Scene, anisotropy = 1) {
   scene.add(sun.target)
 
   const shadowTexelSize = (sun.shadow.camera.right - sun.shadow.camera.left) / sun.shadow.mapSize.width
-  const targetPosition = new Vector3()
-
   let currentWeather = ''
   const setWeather = (state: FlightState) => {
     const visibility = state.scenario.weather.visibilityMiles
@@ -483,16 +442,6 @@ export function createAirportWorld(scene: Scene, anisotropy = 1) {
         positions.setY(index, wrappedTop)
         positions.setY(index + 1, wrappedTop - length)
       }
-      positions.needsUpdate = true
-    }
-
-    const target = state.route.waypoints[state.route.activeWaypointIndex]
-    guidance.visible = Boolean(target) && state.altitudeFt > runway.elevationFt + 20
-    if (target) {
-      waypointToWorldVector(target, targetPosition)
-      const positions = guidance.geometry.getAttribute('position') as BufferAttribute
-      positions.setXYZ(0, aircraftPosition.x, aircraftPosition.y + 0.5, aircraftPosition.z)
-      positions.setXYZ(1, targetPosition.x, targetPosition.y + 0.5, targetPosition.z)
       positions.needsUpdate = true
     }
   }

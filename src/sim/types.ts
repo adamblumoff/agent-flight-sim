@@ -14,6 +14,9 @@ export type AircraftPhase = 'takeoff_roll' | 'airborne' | 'landing_roll' | 'stop
 
 export interface AutopilotState { readonly enabled: boolean; readonly headingDeg: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalMode: VerticalMode }
 export interface MotionState { readonly longitudinalAccelerationKtPerSecond: number; readonly verticalAccelerationFpmPerSecond: number; readonly turnRateDegPerSecond: number }
+export interface ImpactState { readonly revision: number; readonly severity: 'hard' | 'destructive'; readonly sinkRateFpm: number; readonly airspeedKt: number; readonly bankDeg: number; readonly pitchDeg: number; readonly onRunway: boolean; readonly rollDirection: -1 | 1 }
+export type ConfigurationStage = 'takeoff' | 'positive_rate' | 'climb_cleanup' | 'base' | 'final' | 'landing' | 'complete'
+export interface ConfigurationProcedure { readonly stage: ConfigurationStage; readonly gearDown: boolean; readonly flapsDeg: 0 | 10 | 20 | 30; readonly compliant: boolean; readonly instruction: string }
 export interface RouteWaypoint { readonly id: string; readonly name: string; readonly lat: number; readonly lon: number; readonly altitudeFt: number; readonly airspeedKt: number }
 export interface RouteState { readonly plan: RoutePlan; readonly destination: 'KPWK' | null; readonly runway: '16' | null; readonly waypoints: readonly RouteWaypoint[]; readonly activeWaypointIndex: number; readonly reason: string | null }
 
@@ -30,7 +33,7 @@ export interface LandingResult { readonly runway: string; readonly sinkRateFpm: 
 export interface DebriefEvent { readonly elapsedSeconds: number; readonly actor: TraceActor; readonly summary: string }
 export interface DebriefState { readonly status: 'in_progress' | 'landed' | 'failed'; readonly elapsedSeconds: number; readonly decision: RoutePlan; readonly decisionReason: string | null; readonly events: readonly DebriefEvent[]; readonly landing: LandingResult | null }
 
-export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'plan_updated' | 'approval_required' | 'approval_resolved' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
+export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'plan_updated' | 'configuration_required' | 'configuration_confirmed' | 'approval_required' | 'approval_resolved' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
 export interface FlightEvent { readonly revision: number; readonly type: FlightEventType; readonly elapsedSeconds: number; readonly message: string; readonly phase: MissionPhase; readonly routePlan: RoutePlan }
 export interface MissionNavigationState { readonly phase: MissionPhase; readonly outcome: MissionOutcome; readonly nextFix: string | null; readonly distanceToNextFixNm: number | null; readonly distanceToThresholdNm: number; readonly centerlineErrorNm: number; readonly glidepathErrorFt: number; readonly stableApproach: boolean; readonly eventRevision: number }
 
@@ -54,8 +57,9 @@ export interface FlightState {
   readonly controlOwner: ControlOwner; readonly handoffRequested: boolean; readonly agentMode: AgentMode
   readonly autopilot: AutopilotState
   readonly motion: MotionState
+  readonly impact: ImpactState | null
   readonly aircraftPhase: AircraftPhase
-  readonly route: RouteState; readonly scenario: ScenarioConditions
+  readonly route: RouteState; readonly scenario: ScenarioConditions; readonly procedure: ConfigurationProcedure
   readonly approval: HumanApprovalState; readonly mission: MissionNavigationState; readonly checkride: CheckrideState; readonly debrief: DebriefState
 }
 

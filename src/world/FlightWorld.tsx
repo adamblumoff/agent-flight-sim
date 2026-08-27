@@ -4,7 +4,6 @@ import {
   Box3,
   Color,
   Euler,
-  Group,
   MathUtils,
   Mesh,
   PCFShadowMap,
@@ -19,6 +18,7 @@ import {
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { flightSimulator } from '../sim/flightSimulator'
 import { createAircraft, createCrashEffects } from './aircraft'
+import { createAircraftBreakup } from './aircraftBreakup'
 import { createAirportWorld, disposeScene } from './airportScene'
 import { stateToWorldVector, WORLD_RUNWAY } from './coordinates'
 
@@ -100,11 +100,13 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     controls.enabled = false
 
     const world = createAirportWorld(scene, Math.min(8, renderer.capabilities.getMaxAnisotropy()))
-    const aircraft = createAircraft()
-    const landingGear = aircraft.userData.landingGear as Group[]
-    const flaps = aircraft.userData.flaps as Group[]
+    const aircraftRig = createAircraft()
+    const aircraft = aircraftRig.root
+    const landingGear = aircraftRig.landingGear
+    const flaps = aircraftRig.flaps
+    const breakup = createAircraftBreakup(aircraft, aircraftRig.breakawayParts)
     const crashEffects = createCrashEffects()
-    scene.add(aircraft, crashEffects.root)
+    scene.add(aircraft, breakup.root, crashEffects.root)
 
     const timer = new Timer()
     timer.connect(document)
@@ -116,6 +118,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     const dynamicChaseOffset = chaseOffset.clone()
     const dynamicChaseLookAhead = chaseLookAhead.clone()
     const smoothedTarget = new Vector3()
+    const freeLookDirection = new Vector3()
     const explosionPosition = new Vector3()
     const aircraftBounds = new Box3()
     const visiblePartBounds = new Box3()
@@ -126,6 +129,10 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     let previousMode: FlightCameraMode | null = null
     let smoothedAcceleration = 0
     let visualFlapRadians = 0
+    let visualGearCompression = 0
+    let gearCompressionPulse = 0
+    let handledImpactRevision = 0
+    let safeLandingWasActive = false
     let crashWasActive = false
     let animationFrame = 0
     let disposed = false
@@ -172,22 +179,34 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       aircraftPosition.y += groundY + 0.01
       aircraft.position.copy(aircraftPosition)
 
-      const previousCrashed = previousState.debrief.landing?.safe === false
       attitude.set(
-        (previousCrashed ? MathUtils.clamp(previousState.pitchDeg, -2, 2) : previousState.pitchDeg) * DEG_TO_RAD,
+        previousState.pitchDeg * DEG_TO_RAD,
         -(previousState.headingDeg - RUNWAY_HEADING_DEG) * DEG_TO_RAD,
-        -(previousCrashed ? MathUtils.clamp(previousState.bankDeg, -3, 3) : previousState.bankDeg) * DEG_TO_RAD,
+        -previousState.bankDeg * DEG_TO_RAD,
       )
       previousAttitudeQuaternion.setFromEuler(attitude)
       attitude.set(
-        (crashLanding ? MathUtils.clamp(state.pitchDeg, -2, 2) : state.pitchDeg) * DEG_TO_RAD,
+        state.pitchDeg * DEG_TO_RAD,
         -(state.headingDeg - RUNWAY_HEADING_DEG) * DEG_TO_RAD,
-        -(crashLanding ? MathUtils.clamp(state.bankDeg, -3, 3) : state.bankDeg) * DEG_TO_RAD,
+        -state.bankDeg * DEG_TO_RAD,
       )
       currentAttitudeQuaternion.setFromEuler(attitude)
       attitudeQuaternion.slerpQuaternions(previousAttitudeQuaternion, currentAttitudeQuaternion, interpolationAlpha)
       aircraft.quaternion.copy(attitudeQuaternion)
-      for (const gear of landingGear) gear.visible = state.gearDown
+      const safeLanding = state.debrief.landing?.safe === true
+      if (safeLanding && !safeLandingWasActive) {
+        gearCompressionPulse = MathUtils.clamp(state.debrief.landing!.sinkRateFpm / 600, 0, 1) * 0.18
+      }
+      safeLandingWasActive = safeLanding
+      gearCompressionPulse = MathUtils.damp(gearCompressionPulse, 0, 2.6, deltaSeconds)
+      const suspensionTarget = state.gearDown && (state.aircraftPhase === 'landing_roll' || state.aircraftPhase === 'stopped')
+        ? 0.09 + gearCompressionPulse
+        : 0
+      visualGearCompression = MathUtils.damp(visualGearCompression, suspensionTarget, 11, deltaSeconds)
+      for (const gear of landingGear) {
+        gear.visible = state.gearDown
+        gear.position.y = visualGearCompression
+      }
       visualFlapRadians = MathUtils.damp(visualFlapRadians, state.flapsDeg * DEG_TO_RAD, 4.5, deltaSeconds)
       for (const flap of flaps) flap.rotation.x = visualFlapRadians
 
@@ -205,7 +224,16 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
         if (penetration > 0) aircraft.position.y += penetration
       }
 
-      const crashActive = Boolean(crashLanding)
+      const destructiveImpact = state.impact?.severity === 'destructive' ? state.impact : null
+      if (destructiveImpact && destructiveImpact.revision !== handledImpactRevision) {
+        handledImpactRevision = destructiveImpact.revision
+        breakup.start(destructiveImpact)
+      } else if (!state.impact && handledImpactRevision !== 0) {
+        handledImpactRevision = 0
+        breakup.reset()
+      }
+      breakup.update(deltaSeconds, groundY)
+      const crashActive = Boolean(destructiveImpact)
       if (crashActive && !crashWasActive) {
         explosionPosition.copy(crashOrigin).applyQuaternion(attitudeQuaternion).add(aircraft.position)
         crashEffects.start(explosionPosition)
@@ -216,6 +244,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
 
       const mode = cameraModeRef.current
       aircraft.visible = mode !== 'cockpit'
+      breakup.setVisible(mode !== 'cockpit')
       const renderedAcceleration = MathUtils.lerp(
         previousState.motion.longitudinalAccelerationKtPerSecond,
         state.motion.longitudinalAccelerationKtPerSecond,
@@ -233,12 +262,15 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       }
       if (mode === 'free') {
         if (previousMode !== 'free') {
-          desiredCameraPosition.copy(chaseOffset).applyQuaternion(attitudeQuaternion).add(aircraft.position)
-          camera.position.copy(desiredCameraPosition)
-          controls.target.copy(aircraft.position)
+          camera.getWorldDirection(freeLookDirection)
+          camera.up.set(0, 1, 0)
+          controls.target.copy(camera.position).addScaledVector(
+            freeLookDirection,
+            Math.max(25, camera.position.distanceTo(aircraft.position)),
+          )
           controls.enabled = true
+          controls.update()
         }
-        controls.target.lerp(aircraft.position, 1 - Math.exp(-deltaSeconds * 2.2))
         controls.update()
       } else {
         controls.enabled = false
