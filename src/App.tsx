@@ -1,73 +1,185 @@
 import '@fontsource-variable/sora'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { Eye, Glasses, MapPin, Orbit, Plane } from 'lucide-react'
 import {
-  AlertTriangle,
-  Bot,
-  CheckCircle2,
-  CircleStop,
-  Eye,
-  Gauge,
-  Glasses,
-  LoaderCircle,
-  Orbit,
-  Plane,
-  RefreshCw,
-  Route,
-  ShieldAlert,
-  UserRound,
-} from 'lucide-react'
-import { WebMcpActivityPanel } from './components/webmcp-activity'
-import { Badge } from './components/ui/badge'
+  CopilotPanel,
+  type CopilotDebrief,
+  type CopilotObservation,
+} from './components/copilot-panel'
+import {
+  OwnershipControl,
+  type OwnershipMode,
+} from './components/ownership-control'
 import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip'
 import { flightSimulator } from './sim/flightSimulator'
+import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
-const flapSettings = [0, 10, 20, 30]
-
-const formatMissionLabel = (value: string) =>
-  value.replaceAll('_', ' ').replace(/^\w/, (letter) => letter.toUpperCase())
+const flapSettings = [0, 10, 20, 30] as const
 
 const cameraOptions: ReadonlyArray<{
   mode: FlightCameraMode
   label: string
   icon: typeof Eye
 }> = [
-  { mode: 'chase', label: 'Chase camera', icon: Eye },
-  { mode: 'cockpit', label: 'Cockpit camera', icon: Glasses },
+  { mode: 'chase', label: 'Chase view', icon: Eye },
+  { mode: 'cockpit', label: 'Cockpit view', icon: Glasses },
   { mode: 'free', label: 'Free camera', icon: Orbit },
 ]
 
-function Stat({ label, value, unit }: { label: string; value: string; unit: string }) {
-  return (
-    <div className="min-w-0 border-r border-white/10 px-3 first:pl-0 last:border-r-0 last:pr-0">
-      <span className="block truncate text-[9px] font-medium tracking-[0.16em] text-white/42 uppercase">{label}</span>
-      <div className="mt-1.5 flex items-end gap-1.5">
-        <strong className="truncate font-mono text-[clamp(18px,2vw,27px)] font-medium leading-none tracking-[-0.06em] text-white">{value}</strong>
-        <small className="pb-0.5 font-mono text-[8px] text-white/38">{unit}</small>
-      </div>
-    </div>
-  )
+const routePlanLabels: Record<RoutePlan, string> = {
+  unassigned: 'Route pending',
+  return_kpwk: 'Return to KPWK',
 }
 
-function StatusBadge({
-  tone,
-  icon: Icon,
-  children,
+const formatLabel = (value: string) =>
+  value.replaceAll('_', ' ').replace(/^\w/, (letter) => letter.toUpperCase())
+
+const formatElapsed = (seconds: number) => {
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = Math.floor(seconds % 60)
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+}
+
+function deriveObservations(state: FlightState): readonly CopilotObservation[] {
+  const { weather, engine, passenger, traffic } = state.scenario
+  const weatherTone = weather.visibilityMiles < 3 || weather.ceilingFt < 1_000
+    ? 'critical'
+    : weather.visibilityMiles < 5 || weather.ceilingFt < 2_000
+      ? 'caution'
+      : 'normal'
+
+  return [
+    {
+      label: 'Weather',
+      value: `${weather.summary} · ${weather.visibilityMiles} mi, ${weather.ceilingFt.toLocaleString()} ft ceiling`,
+      tone: weatherTone,
+    },
+    {
+      label: 'Engine',
+      value: engine.summary,
+      tone: engine.health === 'failing' ? 'critical' : engine.health === 'rough' ? 'caution' : 'normal',
+    },
+    {
+      label: 'Passenger',
+      value: passenger.summary,
+      tone: passenger.condition === 'critical' ? 'critical' : passenger.condition === 'urgent' ? 'caution' : 'normal',
+    },
+    {
+      label: 'Traffic',
+      value: traffic.summary,
+      tone: traffic.delayMinutes >= 10 ? 'caution' : 'normal',
+    },
+  ]
+}
+
+function deriveRecommendation(state: FlightState): string {
+  if (state.approval.status === 'pending') {
+    return state.approval.requestedAction ?? 'Hold the current flight path until you decide.'
+  }
+  if (state.route.reason) return state.route.reason
+  if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
+    return 'Check the current conditions before changing the route or aircraft configuration.'
+  }
+  if (state.scenario.engine.health === 'failing' || state.scenario.passenger.condition === 'critical') {
+    return 'Commit to the nearby runway promptly and configure early for landing.'
+  }
+  return 'Verify that the nearby runway remains usable, then commit to the return.'
+}
+
+function derivePlan(state: FlightState): readonly string[] {
+  if (state.route.plan === 'unassigned') {
+    return [
+      'Confirm weather, engine, passenger, and traffic conditions.',
+      'Commit to the KPWK return, then configure the aircraft for runway 16.',
+    ]
+  }
+
+  const remainingWaypoints = state.route.waypoints.slice(state.route.activeWaypointIndex)
+  if (remainingWaypoints.length > 0) {
+    return remainingWaypoints.slice(0, 3).map((waypoint) =>
+      `${waypoint.name} · ${waypoint.altitudeFt.toLocaleString()} ft · ${waypoint.airspeedKt} kt`
+    )
+  }
+
+  return [
+    `${routePlanLabels[state.route.plan]}${state.route.runway ? ` for runway ${state.route.runway}` : ''}.`,
+  ]
+}
+
+function deriveAction(state: FlightState): string {
+  if (state.approval.status === 'pending') {
+    return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
+  }
+  if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
+    return 'Reviewing the available evidence and route options.'
+  }
+  if (state.controlOwner === 'agent' && state.autopilot.enabled) {
+    const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
+    const target = waypoint?.name ?? state.route.destination ?? 'assigned route'
+    return `Tracking ${target} at ${Math.round(state.autopilot.headingDeg).toString().padStart(3, '0')}°, ${Math.round(state.autopilot.altitudeFt).toLocaleString()} ft, ${Math.round(state.autopilot.airspeedKt)} kt.`
+  }
+  if (state.controlOwner === 'agent') return 'Holding the current flight path while the next action is selected.'
+  return 'Monitoring the aircraft and emergency conditions while you fly.'
+}
+
+function deriveHeadline(state: FlightState): string {
+  if (state.approval.status === 'pending') return 'Holding for your decision'
+  if (state.agentMode === 'requested' || state.agentMode === 'thinking') return 'Assessing the emergency'
+  if (state.agentMode === 'flying') {
+    return state.route.destination ? `Flying to ${state.route.destination}` : 'Managing the flight'
+  }
+  return state.scenario.engine.health === 'normal' ? 'Ready when you are' : 'Emergency in progress'
+}
+
+function deriveDebrief(state: FlightState): CopilotDebrief | null {
+  if (state.debrief.status === 'in_progress') return null
+
+  const landing = state.debrief.landing
+  const landingSummary = landing
+    ? `${landing.safe ? 'Stable' : 'Unsafe'} touchdown on runway ${landing.runway} at ${Math.abs(Math.round(landing.sinkRateFpm))} fpm, ${Math.round(landing.centerlineErrorFt)} ft from centerline.`
+    : state.debrief.decisionReason ?? 'The flight ended before a landing result was recorded.'
+
+  return {
+    title: state.debrief.status === 'landed' ? 'Safely on the ground' : 'The flight did not finish safely',
+    outcome: state.debrief.status === 'landed' ? 'Landed' : 'Failed',
+    elapsed: formatElapsed(state.debrief.elapsedSeconds),
+    decision: routePlanLabels[state.debrief.decision],
+    summary: landingSummary,
+    events: state.debrief.events.slice(-4).map((event) => event.summary),
+  }
+}
+
+function deriveOwnershipMode(state: FlightState, webMcpReady: boolean): OwnershipMode {
+  if (state.controlOwner === 'agent') {
+    if (state.agentMode === 'complete') return 'complete'
+    return state.agentMode === 'thinking' ? 'thinking' : 'flying'
+  }
+  if (state.handoffRequested || state.agentMode === 'requested') return 'handoff_pending'
+  return webMcpReady ? 'human' : 'unavailable'
+}
+
+function InstrumentStat({
+  label,
+  value,
+  unit,
 }: {
-  tone: 'ready' | 'waiting' | 'failed' | 'agent' | 'neutral'
-  icon: typeof CheckCircle2
-  children: string
+  readonly label: string
+  readonly value: string
+  readonly unit: string
 }) {
   return (
-    <Badge variant="outline" className={`status-badge status-${tone}`}>
-      <Icon data-icon="inline-start" />
-      {children}
-    </Badge>
+    <div className="instrument-stat">
+      <span>{label}</span>
+      <div className="instrument-value">
+        <strong>{value}</strong>
+        <small>{unit}</small>
+      </div>
+    </div>
   )
 }
 
@@ -77,11 +189,11 @@ export default function App() {
     flightSimulator.getSnapshot,
     flightSimulator.getSnapshot,
   )
-  const { status: webMcpStatus, activities: webMcpActivities } = useWebMcp()
+  const { status: webMcpStatus, activities } = useWebMcp()
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
-    message: 'Loading the KPWK checkride.',
+    message: 'Loading the flight world.',
   })
 
   useEffect(() => {
@@ -89,30 +201,31 @@ export default function App() {
     return () => flightSimulator.stop()
   }, [])
 
-  const takeControls = useCallback(() => {
-    flightSimulator.transferControl('human', 'human', 'My controls')
-  }, [])
-
-  const toggleAgentHandoff = useCallback(() => {
+  const toggleHandoff = useCallback(() => {
     const current = flightSimulator.getState()
-    if (current.handoffRequested) {
-      flightSimulator.cancelAgentHandoff('human', 'Pilot canceled the browser agent handoff')
+    if (current.controlOwner === 'agent') {
+      flightSimulator.transferControl('human', 'human', 'Pilot took back control')
+    } else if (current.handoffRequested) {
+      flightSimulator.cancelAgentHandoff('human', 'Pilot canceled the copilot handoff')
     } else {
-      flightSimulator.requestAgentHandoff('human', 'Pilot requested browser agent controls')
+      flightSimulator.requestAgentHandoff('human', 'Pilot asked the copilot to take control')
     }
   }, [])
 
-  const resolveHumanApproval = useCallback((approved: boolean) => {
+  const resolveApproval = useCallback((approved: boolean) => {
     flightSimulator.resolveHumanApproval(
       approved,
       'human',
-      approved ? 'Human approved the priority approach' : 'Human denied the priority approach',
+      approved ? 'Pilot approved the requested action' : 'Pilot declined the requested action',
     )
   }, [])
 
+  const resetScenario = useCallback(() => flightSimulator.reset(), [])
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
+      const target = event.target
+      if (target instanceof HTMLElement && target.matches('input, textarea, select, button, [contenteditable="true"]')) return
 
       const current = flightSimulator.getState()
       const key = event.key.toLowerCase()
@@ -127,268 +240,148 @@ export default function App() {
         if (key === 'arrowdown') flightSimulator.setThrottle(current.throttle - 0.05, 'human', 'Pilot throttle input')
         if (key === 'g') flightSimulator.setGear(!current.gearDown, 'human', 'Pilot gear command')
         if (key === 'f') {
-          const index = flapSettings.indexOf(current.flapsDeg)
+          const index = flapSettings.indexOf(current.flapsDeg as (typeof flapSettings)[number])
           flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Pilot flap command')
         }
       }
 
-      if (key === 't') {
-        if (current.controlOwner === 'agent') {
-          flightSimulator.transferControl('human', 'human', 'My controls')
-        } else if (webMcpStatus === 'ready') {
-          toggleAgentHandoff()
-        }
-      }
+      if (key === 't' && (current.controlOwner === 'agent' || webMcpStatus === 'ready')) toggleHandoff()
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [toggleAgentHandoff, webMcpStatus])
+  }, [toggleHandoff, webMcpStatus])
 
-  const webMcp = {
-    registering: { label: 'Connecting tools', tone: 'waiting' as const, icon: LoaderCircle },
-    ready: { label: 'WebMCP ready', tone: 'ready' as const, icon: CheckCircle2 },
-    unsupported: { label: 'WebMCP unavailable', tone: 'waiting' as const, icon: ShieldAlert },
-    error: { label: 'WebMCP error', tone: 'failed' as const, icon: AlertTriangle },
-  }[webMcpStatus]
-  const worldTone = worldStatus.kind === 'ready' ? 'ready' : worldStatus.kind === 'error' ? 'failed' : 'waiting'
-  const WorldIcon = worldStatus.kind === 'ready' ? CheckCircle2 : worldStatus.kind === 'error' ? AlertTriangle : LoaderCircle
+  const webMcpLabels = {
+    registering: 'Connecting',
+    ready: 'Ready',
+    unsupported: 'Unavailable',
+    error: 'Connection failed',
+  } as const
+  const ownershipMode = deriveOwnershipMode(state, webMcpStatus === 'ready')
+  const destination = state.route.destination ?? 'Route pending'
+  const routeDetail = state.route.destination === null
+    ? 'Decision needed'
+    : state.route.runway
+      ? `Runway ${state.route.runway}`
+      : state.mission.nextFix && state.mission.distanceToNextFixNm !== null
+        ? `${state.mission.nextFix} · ${state.mission.distanceToNextFixNm.toFixed(1)} NM`
+        : routePlanLabels[state.route.plan]
 
   return (
-    <TooltipProvider>
-      <main className="app-shell">
-        <Suspense fallback={<div className="flight-world world-loading" />}>
-          <FlightWorld cameraMode={cameraMode} onStatusChange={setWorldStatus} />
-        </Suspense>
-        <div className="scene-shade" />
+    <main className="app-shell">
+      <Suspense fallback={<div className="flight-world world-loading" />}>
+        <FlightWorld cameraMode={cameraMode} onStatusChange={setWorldStatus} />
+      </Suspense>
+      <div className="scene-shade" />
 
-        <header className="topbar">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white text-black">
-              <Plane className="size-4 -rotate-12" strokeWidth={1.8} />
-            </span>
-            <div className="min-w-0">
-              <strong className="block truncate text-[13px] font-semibold tracking-[-0.02em]">Flightdeck</strong>
-              <span className="block truncate font-mono text-[8px] tracking-[0.16em] text-white/38 uppercase">KPWK AI checkride · seed {state.checkride.seed} · N417FS</span>
-            </div>
+      <header className="flight-header">
+        <div className="flight-brand">
+          <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
+          <div>
+            <strong>Flightdeck</strong>
+            <span>N417FS · emergency checkride</span>
           </div>
+        </div>
 
-          <div
-            className="mission-progress"
-            aria-label={`Mission phase ${formatMissionLabel(state.mission.phase)}`}
+        <div className="route-summary" aria-label={`Route ${destination}, ${routeDetail}`}>
+          <MapPin aria-hidden="true" />
+          <strong>{destination}</strong>
+          <span>{routeDetail}</span>
+          <i className="route-divider" aria-hidden="true" />
+          <span>{formatLabel(state.mission.phase)}</span>
+        </div>
+
+        <OwnershipControl mode={ownershipMode} onClick={toggleHandoff} />
+      </header>
+
+      <nav className="camera-switcher" aria-label="Camera view">
+        {cameraOptions.map(({ mode, label, icon: Icon }) => (
+          <button
+            key={mode}
+            type="button"
+            className="camera-button"
+            aria-label={label}
+            aria-pressed={cameraMode === mode}
+            title={label}
+            onClick={() => setCameraMode(mode)}
           >
-            <span>Phase</span>
-            <strong>{formatMissionLabel(state.mission.phase)}</strong>
-            <i aria-hidden="true" />
-            <span>Next</span>
-            <strong>
-              {state.mission.nextFix ? formatMissionLabel(state.mission.nextFix) : 'Full stop'}
-            </strong>
-            <small>
-              {state.checkride.status === 'decision_required'
-                ? 'Decision required'
-                : state.checkride.status === 'awaiting_human'
-                  ? 'Human approval'
-                  : state.mission.nextFix && state.mission.distanceToNextFixNm !== null
-                ? `${state.mission.distanceToNextFixNm.toFixed(1)} NM`
-                : state.mission.outcome !== 'in_progress'
-                  ? formatMissionLabel(state.mission.outcome)
-                  : state.mission.awaitingCommand
-                    ? 'Awaiting command'
-                    : 'En route'}
-            </small>
-          </div>
+            <Icon aria-hidden="true" />
+          </button>
+        ))}
+      </nav>
 
-          <div className="flex items-center justify-end gap-1.5">
-            <StatusBadge tone={worldTone} icon={WorldIcon}>{worldStatus.kind === 'setup' ? 'World setup' : worldStatus.kind}</StatusBadge>
-            <StatusBadge tone={webMcp.tone} icon={webMcp.icon}>{webMcp.label}</StatusBadge>
-          </div>
-        </header>
-
-        <nav className="camera-rail" aria-label="Camera mode">
-          {cameraOptions.map(({ mode, label, icon: Icon }) => (
-            <Tooltip key={mode}>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={cameraMode === mode ? 'default' : 'ghost'}
-                    size="icon"
-                    aria-label={label}
-                    aria-pressed={cameraMode === mode}
-                    onClick={() => setCameraMode(mode)}
-                  />
-                }
-              >
-                <Icon />
-              </TooltipTrigger>
-              <TooltipContent side="right">{label}</TooltipContent>
-            </Tooltip>
-          ))}
-        </nav>
-
-        <div className="owner-control">
-          {state.controlOwner === 'agent' ? (
-            <StatusBadge tone="agent" icon={Bot}>Agent flying</StatusBadge>
-          ) : state.handoffRequested ? (
-            <StatusBadge tone="waiting" icon={LoaderCircle}>Waiting for agent</StatusBadge>
-          ) : (
-            <StatusBadge tone="neutral" icon={UserRound}>You are flying</StatusBadge>
-          )}
-          {state.controlOwner === 'agent' ? (
-            <Button className="take-controls" size="sm" onClick={takeControls}>
-              <CircleStop data-icon="inline-start" /> My controls
-            </Button>
-          ) : null}
+      <section className="instrument-console" aria-label="Flight instruments and controls">
+        <div className="instrument-readings">
+          <InstrumentStat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
+          <InstrumentStat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
+          <InstrumentStat label="Vertical" value={Math.round(state.verticalSpeedFpm).toString()} unit="FPM" />
+          <InstrumentStat label="Heading" value={Math.round(state.headingDeg).toString().padStart(3, '0')} unit="MAG" />
         </div>
 
-        <section className="instrument-deck" aria-label="Flight controls and instruments">
-          <div className="instrument-grid">
-            <Stat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
-            <Stat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
-            <Stat label="Vertical" value={Math.round(state.verticalSpeedFpm).toString()} unit="FPM" />
-            <Stat label="Heading" value={Math.round(state.headingDeg).toString().padStart(3, '0')} unit="MAG" />
-          </div>
-
-          <div className="configuration-controls">
-            <Button
-              variant="outline"
-              size="sm"
+        <div className="manual-controls">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={state.controlOwner === 'agent'}
+            onClick={() => flightSimulator.setGear(!state.gearDown, 'human', 'Cockpit gear control')}
+          >
+            Gear <span>{state.gearDown ? 'Down' : 'Up'}</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={state.controlOwner === 'agent'}
+            onClick={() => {
+              const index = flapSettings.indexOf(state.flapsDeg as (typeof flapSettings)[number])
+              flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Cockpit flap control')
+            }}
+          >
+            Flaps <span>{state.flapsDeg}°</span>
+          </Button>
+          <label className="throttle-control">
+            <span>Power</span>
+            <Slider
+              aria-label="Engine power"
+              min={0}
+              max={100}
+              step={1}
+              value={[state.throttle * 100]}
               disabled={state.controlOwner === 'agent'}
-              onClick={() => flightSimulator.setGear(!state.gearDown, 'human', 'Cockpit gear control')}
-            >
-              Gear <span className="font-mono text-[10px] text-white/60">{state.gearDown ? 'DOWN' : 'UP'}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={state.controlOwner === 'agent'}
-              onClick={() => {
-                const index = flapSettings.indexOf(state.flapsDeg)
-                flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Cockpit flap control')
-              }}
-            >
-              Flaps <span className="font-mono text-[10px] text-white/60">{state.flapsDeg}°</span>
-            </Button>
-            <label className="throttle-control">
-              <span>Throttle</span>
-              <Slider
-                aria-label="Throttle"
-                min={0}
-                max={100}
-                step={1}
-                value={[state.throttle * 100]}
-                disabled={state.controlOwner === 'agent'}
-                onValueChange={(value) =>
-                  flightSimulator.setThrottle(
-                    (typeof value === 'number' ? value : value[0]) / 100,
-                    'human',
-                    'Cockpit throttle control',
-                  )
-                }
-              />
-              <strong>{Math.round(state.throttle * 100)}%</strong>
-            </label>
-          </div>
-        </section>
-
-        <aside className="right-rail">
-          <WebMcpActivityPanel
-            status={webMcpStatus}
-            activities={webMcpActivities}
-            controlOwner={state.controlOwner}
-            handoffRequested={state.handoffRequested}
-            checkride={state.checkride}
-            mission={state.mission}
-            onResolveHumanApproval={resolveHumanApproval}
-          />
-
-          <div className="right-rail-actions">
-            <Button
-              variant={state.controlOwner === 'human' ? 'default' : 'outline'}
-              className={state.controlOwner === 'agent'
-                ? 'take-controls'
-                : state.handoffRequested
-                  ? 'handoff-pending'
-                  : ''}
-              disabled={state.controlOwner === 'human' && webMcpStatus !== 'ready'}
-              onClick={state.controlOwner === 'human' ? toggleAgentHandoff : takeControls}
-            >
-              {state.controlOwner === 'human' ? (
-                state.handoffRequested
-                  ? <CircleStop data-icon="inline-start" />
-                  : webMcpStatus === 'ready'
-                    ? <Bot data-icon="inline-start" />
-                    : <ShieldAlert data-icon="inline-start" />
-              ) : (
-                <CircleStop data-icon="inline-start" />
-              )}
-              {state.controlOwner === 'human'
-                ? state.handoffRequested
-                  ? 'Cancel handoff'
-                  : webMcpStatus === 'ready'
-                    ? 'Request agent controls'
-                    : 'WebMCP required'
-                : 'My controls'}
-            </Button>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label="Toggle flight director"
-                    onClick={() =>
-                      flightSimulator.setFlightDirector(
-                        { enabled: !state.flightDirector.enabled },
-                        'human',
-                        'Cockpit flight-director toggle',
-                      )
-                    }
-                  />
-                }
-              >
-                <Gauge className={state.flightDirector.enabled ? 'text-blue-400' : ''} />
-              </TooltipTrigger>
-              <TooltipContent>Flight director {state.flightDirector.enabled ? 'engaged' : 'standby'}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label="Start the next checkride seed"
-                    onClick={() => {
-                      const seeds = [17, 42, 81] as const
-                      const currentIndex = seeds.indexOf(state.checkride.seed)
-                      flightSimulator.reset(seeds[(currentIndex + 1) % seeds.length])
-                    }}
-                  />
-                }
-              >
-                <AlertTriangle className={state.checkride.alert ? 'text-amber-400' : ''} />
-              </TooltipTrigger>
-              <TooltipContent>Start next seed</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={<Button variant="outline" size="icon" aria-label="Reset checkride" onClick={() => flightSimulator.reset()} />}
-              >
-                <RefreshCw />
-              </TooltipTrigger>
-              <TooltipContent>Reset seed {state.checkride.seed}</TooltipContent>
-            </Tooltip>
-          </div>
-        </aside>
-
-        <div className="control-hints" aria-label="Keyboard controls">
-          <Route className="size-3" />
-          <span><kbd>W</kbd><kbd>S</kbd> pitch</span>
-          <span><kbd>A</kbd><kbd>D</kbd> bank</span>
-          <span><kbd>↑</kbd><kbd>↓</kbd> power</span>
-          {webMcpStatus === 'ready' ? <span><kbd>T</kbd> handoff</span> : null}
+              onValueChange={(value) =>
+                flightSimulator.setThrottle(
+                  (typeof value === 'number' ? value : value[0]) / 100,
+                  'human',
+                  'Cockpit throttle control',
+                )
+              }
+            />
+            <strong>{Math.round(state.throttle * 100)}%</strong>
+          </label>
         </div>
-      </main>
-    </TooltipProvider>
+      </section>
+
+      <CopilotPanel
+        phase={formatLabel(state.mission.phase)}
+        headline={deriveHeadline(state)}
+        observations={deriveObservations(state)}
+        recommendation={deriveRecommendation(state)}
+        plan={derivePlan(state)}
+        action={deriveAction(state)}
+        approvalPending={state.approval.status === 'pending'}
+        approvalPrompt={state.approval.question ?? 'Approve the copilot’s requested action?'}
+        debrief={deriveDebrief(state)}
+        diagnostics={{
+          world: worldStatus.message,
+          webMcp: webMcpLabels[webMcpStatus],
+          missionRevision: state.mission.eventRevision,
+          scenarioId: `Seed ${state.checkride.seed}`,
+          recentTools: activities.slice(-4).reverse().map((activity) => `${activity.title} · ${activity.status}`),
+        }}
+        onApprove={() => resolveApproval(true)}
+        onDeny={() => resolveApproval(false)}
+        onReset={resetScenario}
+      />
+    </main>
   )
 }

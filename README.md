@@ -1,67 +1,65 @@
-# Agent Flight Sim
+# Flightdeck
 
-An in-browser AI checkride where a human pilot and a browser agent operate the same aircraft through WebMCP. Every browser-agent call runs in the local simulator and leaves a visible receipt.
+Flightdeck is a browser-native shared-cockpit experiment. A human pilot and a browser agent operate the same lightweight emergency-flight simulation through WebMCP, with one explicit control owner at a time.
 
-The flight model and controller run locally at 60 Hz. React renders cockpit state at 10 Hz, and Cesium reads the live aircraft position without routing frame updates through React. A seeded scenario director introduces weather, traffic, fuel, aircraft, and passenger problems. The browser agent inspects separate evidence sources, makes a scored decision, and waits for the next meaningful event without polling.
+The aircraft model and autopilot run locally at 60 Hz. Three.js renders a compact procedural airport directly from the live simulator state, while React receives lower-frequency snapshots for instruments and the copilot interface. No map service, Cesium token, webhook, or backend is required.
 
-## Run it
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Copy `.env.example` to `.env.local` and add a Cesium ion browser token:
+Open the app in a browser that supports WebMCP. Browsers without `document.modelContext` retain the complete manual cockpit; only agent control is unavailable.
 
-```text
-VITE_CESIUM_ION_TOKEN=your_public_browser_token
-```
-
-The token loads Google Photorealistic 3D Tiles. Restrict production tokens by asset and URL in Cesium ion.
-
-Open the app in ChatGPT's in-app browser, which supports WebMCP, or enable `chrome://flags/#enable-webmcp-testing` in Chrome. Browsers without WebMCP can still use every manual flight control.
-
-## Controls
+## Fly manually
 
 | Input | Action |
 | --- | --- |
 | `W` / `S` | Pitch up or down |
 | `A` / `D` | Bank left or right |
-| `↑` / `↓` | Increase or decrease throttle |
+| `Up` / `Down` | Increase or decrease power |
 | `F` | Cycle flaps |
 | `G` | Toggle landing gear |
-| `T` | Transfer flight control |
+| `T` | Request, cancel, or reclaim agent control |
 
-The mission is a short deteriorating arrival at Chicago Executive Airport. Seeds 17, 42, and 81 preserve the same objective but change the safest response. Choose chase, cockpit, or free camera modes. The semantic recorder attributes each command to the human, agent, or simulator.
+The on-screen gear, flaps, and power controls do the same work. Any direct pilot input immediately returns control to the human and disconnects the autopilot.
 
-Ask the browser agent to start a seed, brief the mission, take control, and fly. When the scenario changes, the agent can inspect weather, cockpit, traffic, and passenger reports before choosing a response. Seed 42 requires a human to approve or deny the risky priority approach. Use **My controls** at any time to stop agent control immediately.
+## Fly through WebMCP
 
-## WebMCP tools
-
-The app registers these native `document.modelContext` tools:
+The page registers these tools:
 
 ```text
-start_checkride
+start_emergency
 get_mission_brief
 get_flight_state
 inspect_flight_evidence
+set_route
+set_autopilot_targets
+configure_aircraft
+request_human_approval
 wait_for_flight_event
-command_flight
-decide_checkride
 transfer_control
 ```
 
-`start_checkride` resets a reproducible seed. `get_mission_brief` describes the objective, runway, constraints, evidence sources, and legal first command. `inspect_flight_evidence` reads one source after an alert. `command_flight` accepts bounded commands such as `takeoff`, `proceed_to_fix`, `begin_approach`, `land`, and `go_around`. `decide_checkride` records the agent's risk decision. `transfer_control` moves authority between the pilot and agent.
+A normal agent flight is intentionally short:
 
-`command_flight` and `decide_checkride` acknowledge immediately by default. Call `wait_for_flight_event` to wait for `system_alert`, `command_required`, `touchdown`, or `mission_complete` without polling. Each wait lasts at most 15 seconds and returns the latest state and revision on timeout, so another wait can resume cleanly. Set `wait_for_next_event: true` only when a combined command-and-wait request is useful. The page already owns the event stream, so it does not need a webhook.
+1. Call `start_emergency` with seed 17, 42, or 81.
+2. Read the brief and inspect the weather, cockpit, traffic, and passenger evidence.
+3. Call `set_route` with `return_kpwk` and explain the choice.
+4. Lower the gear and select at least 20 degrees of flaps with `configure_aircraft`.
+5. Use `wait_for_flight_event` for approach, touchdown, and mission completion instead of polling.
 
-The WebMCP panel reports registration state and records every external tool invocation, including read-only calls. The browser agent supplies the model and calls the tools. Browsers without `document.modelContext` keep the manual cockpit but do not register agent controls.
+The intent-level tools make route and configuration decisions; the deterministic autopilot supplies the continuous control loop. The aircraft therefore keeps flying while a model is thinking or waiting for a human decision. Event waits return after at most 15 seconds and can be resumed from the returned monotonic revision.
 
-## Stack
+The three seeds vary weather, engine health, traffic, and passenger urgency. These are decision evidence, while engine power and visibility also affect the running simulation and world. The current vertical slice deliberately models only the return to Chicago Executive runway 16; it does not pretend to simulate an unrendered diversion airport.
 
-- React 19, TypeScript, Vite, Tailwind 4, and shadcn Base/Nova components
-- CesiumJS with Google Photorealistic 3D Tiles and a GLB aircraft
-- Native WebMCP imperative API backed by the shared tool registry
-- A renderer-independent TypeScript simulation and flight controller
+## Architecture
 
-This is a procedural simulation prototype, not a certified aviation training tool.
+- React 19, TypeScript, Vite, Tailwind CSS, and Base UI
+- Three.js procedural airport and aircraft rendering
+- Renderer-independent TypeScript flight model and deterministic autopilot
+- Native WebMCP imperative API backed by the same simulator used by the manual UI
+
+This is an interactive product prototype, not a certified aviation-training device.

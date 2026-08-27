@@ -1,238 +1,75 @@
 import { flightSimulator } from '../sim/flightSimulator'
-import type {
-  CheckrideDecision,
-  CheckrideEvidenceSource,
-  CheckrideSeed,
-} from '../sim/types'
-import type {
-  FlightToolArguments,
-  FlightToolName,
-  FlightToolResults,
-  ToolReceiptTone,
-} from './flightTools'
+import type { CheckrideSeed, EvidenceSource, RoutePlan } from '../sim/types'
 import {
-  checkrideDecisionValues,
-  checkrideEvidenceSources,
-  checkrideSeeds,
-  flightCommandValues,
-  flightEventValues,
-  proceedToFixTargets,
+  checkrideSeeds, evidenceSources, flightEventValues, routePlans,
+  type FlightToolArguments, type FlightToolName, type FlightToolResults,
+  type ToolReceiptTone,
 } from './flightTools'
 
 type UnknownInput = Readonly<Record<string, unknown>>
-
-const flightCommands = new Set<string>(flightCommandValues)
-const proceedToFixTargetSet = new Set<string>(proceedToFixTargets)
 const seedSet = new Set<number>(checkrideSeeds)
-const evidenceSourceSet = new Set<string>(checkrideEvidenceSources)
-const checkrideDecisionSet = new Set<string>(checkrideDecisionValues)
-const flightEventSet = new Set<string>(flightEventValues)
+const evidenceSet = new Set<string>(evidenceSources)
+const routeSet = new Set<string>(routePlans)
+const eventSet = new Set<string>(flightEventValues)
 
-const reasonInput = (input: UnknownInput): string => {
-  const reason = input.reason
-  return typeof reason === 'string' && reason.trim()
-    ? reason.trim()
-    : 'Requested by the browser agent'
-}
-
-const receipt = <Details>(
-  summary: string,
-  tone: ToolReceiptTone,
-  details: Details,
-) => ({ ok: true as const, summary, tone, details })
-
-const boundedTimeout = (value: unknown): number => {
+const reasonInput = (input: UnknownInput, fallback = 'Requested by the copilot') => typeof input.reason === 'string' && input.reason.trim() ? input.reason.trim() : fallback
+const receipt = <T>(summary: string, tone: ToolReceiptTone, details: T) => ({ ok: true as const, summary, tone, details })
+const action = (result: ReturnType<typeof flightSimulator.setRoute>) => ({ ...result, ok: result.accepted, tone: result.accepted ? 'automation' as const : 'warning' as const })
+const boundedTimeout = (value: unknown) => {
   if (value === undefined) return 15_000
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new TypeError('timeout_ms must be a finite number')
-  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError('timeout_ms must be a finite number')
   return Math.min(15_000, Math.max(1_000, Math.floor(value)))
 }
 
-const commandInput = (input: FlightToolArguments['command_flight']) => {
-  if (!flightCommands.has(input.command)) {
-    throw new TypeError('command is not a supported flight command')
-  }
-  let target = input.target
-  if (input.command === 'proceed_to_fix' && target === undefined) {
-    const nextFix = flightSimulator.getState().mission.nextFix
-    if (nextFix === 'CROSSWIND' || nextFix === 'NORTH_GATE') target = nextFix
-  }
-  if (target !== undefined && !proceedToFixTargetSet.has(target)) {
-    throw new TypeError('target must be CROSSWIND or NORTH_GATE')
-  }
-  if (input.command === 'proceed_to_fix' && target === undefined) {
-    throw new TypeError('proceed_to_fix requires CROSSWIND or NORTH_GATE; no target could be inferred')
-  }
-  if (input.command !== 'proceed_to_fix' && target !== undefined) {
-    throw new TypeError('target is only valid with proceed_to_fix')
-  }
-  if (input.wait_for_next_event !== undefined && typeof input.wait_for_next_event !== 'boolean') {
-    throw new TypeError('wait_for_next_event must be a boolean')
-  }
-
-  return {
-    command: input.command,
-    target,
-    reason: reasonInput(input),
-  }
-}
-
-const executors: {
-  readonly [Name in FlightToolName]: (
-    input: FlightToolArguments[Name],
-  ) => Promise<FlightToolResults[Name]>
-} = {
-  start_checkride: async (input) => {
+const executors: { readonly [Name in FlightToolName]: (input: FlightToolArguments[Name]) => Promise<FlightToolResults[Name]> } = {
+  start_emergency: async (input) => {
     const seed = input.seed ?? 17
     if (!seedSet.has(seed)) throw new TypeError('seed must be 17, 42, or 81')
     flightSimulator.reset(seed as CheckrideSeed)
-    flightSimulator.transferControl('agent', 'agent', 'AI checkride started')
-    return receipt(`Checkride seed ${seed} ready`, 'automation', {
-      seed: seed as CheckrideSeed,
-      brief: flightSimulator.getMissionBrief(),
-      state: flightSimulator.getState(),
-    })
+    flightSimulator.transferControl('agent', 'agent', 'Copilot started the emergency mission')
+    return receipt(`Emergency seed ${seed} is airborne`, 'automation', { seed: seed as CheckrideSeed, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
   },
-  get_mission_brief: async () =>
-    receipt('Mission brief read', 'neutral', {
-      brief: flightSimulator.getMissionBrief(),
-    }),
-  get_flight_state: async () =>
-    receipt('Live flight and checkride state read', 'neutral', {
-      state: flightSimulator.getState(),
-      units: {
-        altitude: 'feet',
-        airspeed: 'knots',
-        verticalSpeed: 'feet per minute',
-        angles: 'degrees',
-        navigationDistance: 'nautical miles',
-        glidepathError: 'feet',
-        fuelEndurance: 'minutes',
-      },
-    }),
+  get_mission_brief: async () => receipt('Mission brief read', 'neutral', { brief: flightSimulator.getMissionBrief() }),
+  get_flight_state: async () => receipt('Live flight state read', 'neutral', {
+    state: flightSimulator.getState(),
+    units: { altitude: 'feet MSL', airspeed: 'knots', verticalSpeed: 'feet per minute', angles: 'degrees', distance: 'nautical miles', fuelEndurance: 'minutes' },
+  }),
   inspect_flight_evidence: async (input) => {
-    if (input.source !== undefined && !evidenceSourceSet.has(input.source)) {
-      throw new TypeError('source must be weather, cockpit, traffic, or passenger')
-    }
+    if (input.source !== undefined && !evidenceSet.has(input.source)) throw new TypeError('source must be weather, cockpit, traffic, or passenger')
     const evidence = input.source === undefined
-      ? checkrideEvidenceSources.map((source) =>
-          flightSimulator.inspectCheckrideEvidence(source))
-      : flightSimulator.inspectCheckrideEvidence(
-          input.source as CheckrideEvidenceSource,
-        )
-    return receipt(
-      input.source === undefined ? 'All evidence read' : `${input.source} evidence read`,
-      'neutral',
-      {
-        evidence,
-        inspectedSources: flightSimulator.getState().checkride.inspectedSources,
-      },
-    )
+      ? evidenceSources.map((source) => flightSimulator.inspectEvidence(source))
+      : flightSimulator.inspectEvidence(input.source as EvidenceSource)
+    return receipt(input.source ? `${input.source} report read` : 'All evidence read', 'neutral', { evidence, inspectedSources: flightSimulator.getState().checkride.inspectedSources })
+  },
+  set_route: async (input) => {
+    if (!routeSet.has(input.plan)) throw new TypeError('plan must be return_kpwk')
+    if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
+    return action(flightSimulator.setRoute(input.plan as RoutePlan, input.reason.trim(), 'agent'))
+  },
+  set_autopilot_targets: async (input) => action(flightSimulator.setAutopilotTargets(input, 'agent', reasonInput({ ...input }))),
+  configure_aircraft: async (input) => action(flightSimulator.configureAircraft(input, 'agent')),
+  request_human_approval: async (input) => {
+    if (![input.question, input.requested_action, input.reason].every((value) => typeof value === 'string' && value.trim())) throw new TypeError('question, requested_action, and reason are required')
+    return action(flightSimulator.requestHumanApproval(input.question.trim(), input.requested_action.trim(), input.reason.trim(), 'agent'))
   },
   wait_for_flight_event: async (input) => {
-    if (input.after_revision !== undefined &&
-      (typeof input.after_revision !== 'number' || !Number.isFinite(input.after_revision))) {
-      throw new TypeError('after_revision must be a finite number')
-    }
-    if (input.events !== undefined && (!Array.isArray(input.events) || input.events.length === 0)) {
-      throw new TypeError('events must contain at least one event type')
-    }
-    if (input.events?.some((event) => !flightEventSet.has(event))) {
-      throw new TypeError('events contains an unsupported flight event type')
-    }
-    const result = await flightSimulator.waitForFlightEvent({
-      afterRevision: input.after_revision ?? flightSimulator.getEventRevision(),
-      events: input.events ?? flightEventValues,
-      timeoutMs: boundedTimeout(input.timeout_ms),
-    })
-    return {
-      ...result,
-      ok: true,
-      summary: result.event === 'timeout' ? 'Flight event wait timed out' : result.message,
-      tone: result.event === 'timeout' ? 'neutral' : 'automation',
-    }
-  },
-  command_flight: async (input) => {
-    const result = flightSimulator.commandFlight(commandInput(input), 'agent')
-    const base = {
-      ...result,
-      ok: result.accepted,
-      tone: result.accepted ? 'automation' as const : 'warning' as const,
-    }
-    if (!result.accepted || input.wait_for_next_event !== true) return base
-
-    const nextEvent = await flightSimulator.waitForFlightEvent({
-      afterRevision: result.eventRevision,
-      events: flightEventValues,
-      timeoutMs: boundedTimeout(input.timeout_ms),
-    })
-    return { ...base, nextEvent }
-  },
-  decide_checkride: async (input) => {
-    if (!checkrideDecisionSet.has(input.decision)) {
-      throw new TypeError('decision is not supported')
-    }
-    const result = flightSimulator.decideCheckride(
-      input.decision as CheckrideDecision,
-      'agent',
-      reasonInput(input),
-    )
-    const base = {
-      ...result,
-      ok: result.accepted,
-      tone: result.accepted ? 'automation' as const : 'warning' as const,
-    }
-    if (
-      !result.accepted ||
-      input.wait_for_next_event !== true ||
-      result.humanApproval === 'pending' ||
-      result.state.mission.allowedCommands.length > 0 ||
-      result.state.mission.outcome !== 'in_progress'
-    ) {
-      return base
-    }
-    const nextEvent = await flightSimulator.waitForFlightEvent({
-      afterRevision: result.eventRevision,
-      events: ['command_required', 'mission_complete'],
-      timeoutMs: boundedTimeout(input.timeout_ms),
-    })
-    return { ...base, nextEvent }
+    if (input.after_revision !== undefined && (typeof input.after_revision !== 'number' || !Number.isFinite(input.after_revision))) throw new TypeError('after_revision must be a finite number')
+    if (input.events !== undefined && (!Array.isArray(input.events) || input.events.length === 0 || input.events.some((event) => !eventSet.has(event)))) throw new TypeError('events contains an unsupported flight event')
+    const result = await flightSimulator.waitForFlightEvent({ afterRevision: input.after_revision ?? flightSimulator.getEventRevision(), events: input.events ?? flightEventValues, timeoutMs: boundedTimeout(input.timeout_ms) })
+    return { ...result, ok: true, summary: result.event === 'timeout' ? 'No new flight event' : result.message, tone: result.event === 'timeout' ? 'neutral' : 'automation' }
   },
   transfer_control: async (input) => {
-    if (input.owner !== 'human' && input.owner !== 'agent') {
-      throw new TypeError('owner must be human or agent')
-    }
+    if (input.owner !== 'human' && input.owner !== 'agent') throw new TypeError('owner must be human or agent')
     const current = flightSimulator.getState()
-    if (input.owner === 'agent' && current.controlOwner === 'human' && !current.handoffRequested) {
-      throw new Error('The pilot has not requested an agent handoff.')
-    }
+    if (input.owner === 'agent' && current.controlOwner === 'human' && !current.handoffRequested) throw new Error('The pilot has not requested a copilot handoff.')
     flightSimulator.transferControl(input.owner, 'agent', reasonInput(input))
     const state = flightSimulator.getState()
-    const controlOwner = state.controlOwner
-    return receipt(
-      controlOwner === 'agent'
-        ? 'Agent has the controls'
-        : 'Pilot has the controls; agent guidance stopped',
-      controlOwner === 'agent' ? 'automation' : 'success',
-      { controlOwner, state },
-    )
+    return receipt(state.controlOwner === 'agent' ? 'Copilot has control' : 'Pilot has control', state.controlOwner === 'agent' ? 'automation' : 'success', { controlOwner: state.controlOwner, state })
   },
 }
 
-export function executeFlightTool<Name extends FlightToolName>(
-  name: Name,
-  input: FlightToolArguments[Name],
-): Promise<FlightToolResults[Name]> {
-  return executors[name](input)
-}
-
-export function executeFlightToolFromUnknown(
-  name: FlightToolName,
-  input: unknown,
-): Promise<FlightToolResults[FlightToolName]> {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-    throw new TypeError(`${name} input must be an object`)
-  }
+export function executeFlightTool<Name extends FlightToolName>(name: Name, input: FlightToolArguments[Name]): Promise<FlightToolResults[Name]> { return executors[name](input) }
+export function executeFlightToolFromUnknown(name: FlightToolName, input: unknown): Promise<FlightToolResults[FlightToolName]> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new TypeError(`${name} input must be an object`)
   return executors[name](input as never)
 }
