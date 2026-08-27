@@ -16,7 +16,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { flightSimulator } from '../sim/flightSimulator'
 import { createAircraft } from './aircraft'
 import { createAirportWorld, disposeScene } from './airportScene'
-import { stateToWorld } from './coordinates'
+import { stateToWorldVector } from './coordinates'
 
 export type FlightCameraMode = 'chase' | 'cockpit' | 'free'
 
@@ -44,8 +44,8 @@ const DEG_TO_RAD = Math.PI / 180
 const RUNWAY_HEADING_DEG = 159
 const chaseOffset = new Vector3(0, 6.2, 18)
 const chaseLookAhead = new Vector3(0, -4.5, -28)
-const cockpitOffset = new Vector3(0, 1.8, -1.28)
-const cockpitLookAhead = new Vector3(0, 1.7, -80)
+const cockpitOffset = new Vector3(0, 2.05, -2.35)
+const cockpitLookAhead = new Vector3(0, 1.9, -80)
 
 export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -66,7 +66,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
 
     let renderer: WebGLRenderer
     try {
-      renderer = new WebGLRenderer({ antialias: true })
+      renderer = new WebGLRenderer({ antialias: true, reversedDepthBuffer: true })
     } catch (error) {
       console.error('Three.js world failed to initialize', error)
       setStatus({ kind: 'error', message: 'This browser could not start the 3D flight view.' })
@@ -85,7 +85,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
 
     const scene = new Scene()
     scene.background = new Color(0x849ba0)
-    const camera = new PerspectiveCamera(56, 1, 0.08, 12_000)
+    const camera = new PerspectiveCamera(56, 1, 0.25, 8_000)
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
@@ -94,21 +94,41 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     controls.maxPolarAngle = Math.PI * 0.485
     controls.enabled = false
 
-    const world = createAirportWorld(scene)
+    const world = createAirportWorld(scene, Math.min(8, renderer.capabilities.getMaxAnisotropy()))
     const aircraft = createAircraft()
     scene.add(aircraft)
 
     const timer = new Timer()
     timer.connect(document)
     const aircraftPosition = new Vector3()
+    const previousAircraftPosition = new Vector3()
+    const currentAircraftPosition = new Vector3()
     const desiredCameraPosition = new Vector3()
     const desiredCameraTarget = new Vector3()
     const smoothedTarget = new Vector3()
     const attitude = new Euler(0, 0, 0, 'YXZ')
+    const previousAttitudeQuaternion = new Quaternion()
+    const currentAttitudeQuaternion = new Quaternion()
     const attitudeQuaternion = new Quaternion()
     let previousMode: FlightCameraMode | null = null
     let animationFrame = 0
     let disposed = false
+    let statsPanel: import('stats-gl').default | null = null
+
+    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('stats')) {
+      void import('stats-gl').then(async ({ default: Stats }) => {
+        if (disposed) return
+        const panel = new Stats({ trackGPU: true, trackHz: true, horizontal: true })
+        await panel.init(renderer)
+        if (disposed) {
+          panel.dispose()
+          return
+        }
+        panel.dom.style.cssText = 'position:absolute;top:12px;left:56px;z-index:40;'
+        container.append(panel.dom)
+        statsPanel = panel
+      })
+    }
 
     const resize = () => {
       const width = Math.max(1, container.clientWidth)
@@ -126,20 +146,32 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       timer.update(timestamp)
       const deltaSeconds = Math.min(timer.getDelta(), 0.05)
       const state = flightSimulator.getState()
-      const position = stateToWorld(state)
-      aircraftPosition.set(position.x, position.y + 0.025, position.z)
+      const previousState = flightSimulator.getPreviousState()
+      const interpolationAlpha = flightSimulator.getInterpolationAlpha(timestamp)
+      stateToWorldVector(previousState, previousAircraftPosition)
+      stateToWorldVector(state, currentAircraftPosition)
+      aircraftPosition.lerpVectors(previousAircraftPosition, currentAircraftPosition, interpolationAlpha)
+      aircraftPosition.y += 0.025
       aircraft.position.copy(aircraftPosition)
 
+      attitude.set(
+        previousState.pitchDeg * DEG_TO_RAD,
+        -(previousState.headingDeg - RUNWAY_HEADING_DEG) * DEG_TO_RAD,
+        -previousState.bankDeg * DEG_TO_RAD,
+      )
+      previousAttitudeQuaternion.setFromEuler(attitude)
       attitude.set(
         state.pitchDeg * DEG_TO_RAD,
         -(state.headingDeg - RUNWAY_HEADING_DEG) * DEG_TO_RAD,
         -state.bankDeg * DEG_TO_RAD,
       )
-      attitudeQuaternion.setFromEuler(attitude)
+      currentAttitudeQuaternion.setFromEuler(attitude)
+      attitudeQuaternion.slerpQuaternions(previousAttitudeQuaternion, currentAttitudeQuaternion, interpolationAlpha)
       aircraft.quaternion.copy(attitudeQuaternion)
-      world.update(state, deltaSeconds)
+      world.update(state, aircraftPosition, deltaSeconds)
 
       const mode = cameraModeRef.current
+      aircraft.visible = mode !== 'cockpit'
       if (previousMode !== mode) {
         camera.fov = mode === 'cockpit' ? 70 : 56
         camera.updateProjectionMatrix()
@@ -160,11 +192,11 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
         desiredCameraPosition.copy(cameraOffset).applyQuaternion(attitudeQuaternion).add(aircraftPosition)
         desiredCameraTarget.copy(cameraLookAhead).applyQuaternion(attitudeQuaternion).add(aircraftPosition)
 
-        if (previousMode !== mode) {
+        if (previousMode !== mode || mode === 'cockpit') {
           camera.position.copy(desiredCameraPosition)
           smoothedTarget.copy(desiredCameraTarget)
         } else {
-          const blend = 1 - Math.exp(-deltaSeconds * (mode === 'cockpit' ? 16 : 4.8))
+          const blend = 1 - Math.exp(-deltaSeconds * 4.8)
           camera.position.lerp(desiredCameraPosition, blend)
           smoothedTarget.lerp(desiredCameraTarget, blend)
         }
@@ -175,6 +207,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       previousMode = mode
 
       renderer.render(scene, camera)
+      statsPanel?.update()
       animationFrame = requestAnimationFrame(render)
     }
 
@@ -193,6 +226,8 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       timer.dispose()
       renderer.domElement.removeEventListener('webglcontextlost', handleContextLost)
       controls.dispose()
+      statsPanel?.dispose()
+      statsPanel?.dom.remove()
       disposeScene(scene)
       renderer.dispose()
       renderer.domElement.remove()

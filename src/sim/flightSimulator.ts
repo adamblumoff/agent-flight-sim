@@ -145,6 +145,7 @@ interface EventWaiter { readonly afterRevision: number; readonly events: Readonl
 
 class FlightSimulator {
   private state = initialState(17)
+  private previousState = this.state
   private snapshot = this.state
   private accumulator = 0
   private lastFrameMs: number | null = null
@@ -158,6 +159,13 @@ class FlightSimulator {
   private events: readonly FlightEvent[] = Object.freeze([])
 
   getState = () => this.state
+  getPreviousState = () => this.previousState
+  getInterpolationAlpha = (renderTimeMs: number) => {
+    const pendingSeconds = this.lastFrameMs === null
+      ? 0
+      : clamp((renderTimeMs - this.lastFrameMs) / 1_000, 0, MAX_FRAME)
+    return clamp((this.accumulator + pendingSeconds) / STEP, 0, 1)
+  }
   getSnapshot = () => this.snapshot
   getTrace = () => this.trace
   getEventRevision = () => this.eventRevision
@@ -185,6 +193,7 @@ class FlightSimulator {
     this.accumulator = 0
     this.record('system', 'mission_started', `Emergency seed ${seed} started`, {})
     this.queueEvent('emergency_detected', this.state.checkride.alert!)
+    this.previousState = this.state
     this.publish(this.state)
   }
 
@@ -329,7 +338,10 @@ class FlightSimulator {
 
   /** Runs the real fixed-step loop without wall-clock waiting. */
   advanceForTesting = (seconds: number) => {
-    for (let elapsed = 0; elapsed < seconds; elapsed += STEP) this.advance(STEP)
+    for (let elapsed = 0; elapsed < seconds; elapsed += STEP) {
+      this.previousState = this.state
+      this.advance(STEP)
+    }
     this.snapshot = this.state
     this.emit()
   }
@@ -339,6 +351,7 @@ class FlightSimulator {
     this.accumulator += Math.min((timeMs - this.lastFrameMs) / 1_000, MAX_FRAME)
     this.lastFrameMs = timeMs
     while (this.accumulator >= STEP) {
+      this.previousState = this.state
       this.advance(STEP)
       this.accumulator -= STEP
       this.snapshotClock += STEP
@@ -417,10 +430,13 @@ class FlightSimulator {
     const mission = this.navigation(partial, phase, outcome, runway)
     const approachJustStabilized = mission.stableApproach && !this.state.mission.stableApproach
     const status = outcome === 'in_progress' ? 'in_progress' : outcome === 'landed' ? 'landed' : 'failed'
+    const score = status === 'in_progress'
+      ? this.state.checkride.score
+      : Object.freeze({ total: status === 'landed' ? 100 : 35 })
     this.state = Object.freeze({
       ...partial,
       autopilot: routeUpdate.autopilot, mission,
-      checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, status: status === 'in_progress' ? this.state.checkride.status : 'complete', score: Object.freeze({ total: status === 'landed' ? 100 : status === 'failed' ? 35 : this.state.checkride.score.total }) }),
+      checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, status: status === 'in_progress' ? this.state.checkride.status : 'complete', score }),
       debrief: Object.freeze({ ...this.state.debrief, status, elapsedSeconds, landing }),
       agentMode: status === 'in_progress' ? this.state.agentMode : 'complete',
     })

@@ -28,7 +28,7 @@ import {
   Vector3,
 } from 'three'
 import type { FlightState } from '../sim/types'
-import { stateToWorld, waypointToWorld, WORLD_RUNWAY } from './coordinates'
+import { waypointToWorldVector, WORLD_RUNWAY } from './coordinates'
 
 const runway = WORLD_RUNWAY
 const runwayLength = runway.lengthFt * 0.3048
@@ -36,7 +36,6 @@ const runwayWidth = runway.widthFt * 0.3048
 
 const asphalt = new MeshStandardMaterial({ color: 0x282d2e, roughness: 0.92 })
 const concrete = new MeshStandardMaterial({ color: 0x777973, roughness: 0.88 })
-const paint = new MeshStandardMaterial({ color: 0xe5e3d7, roughness: 0.8 })
 const yellowPaint = new MeshStandardMaterial({ color: 0xc69c42, roughness: 0.8 })
 const buildingWall = new MeshStandardMaterial({ color: 0x9a9c91, roughness: 0.82 })
 const buildingDark = new MeshStandardMaterial({ color: 0x4c5352, roughness: 0.78 })
@@ -49,7 +48,7 @@ function seededRandom(seed: number) {
   }
 }
 
-function createTerrainMaterial() {
+function createTerrainMaterial(anisotropy: number) {
   const canvas = document.createElement('canvas')
   canvas.width = 1_024
   canvas.height = 1_024
@@ -87,7 +86,63 @@ function createTerrainMaterial() {
   context.globalAlpha = 1
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
+  texture.anisotropy = anisotropy
   return new MeshStandardMaterial({ map: texture, color: 0xb7c0a8, roughness: 0.98 })
+}
+
+function createRunwayTexture(anisotropy: number) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 4_096
+  const context = canvas.getContext('2d')!
+  const random = seededRandom(16)
+  const xToPixel = (x: number) => (x / runwayWidth + 0.5) * canvas.width
+  const zToPixel = (z: number) => (1 + z / runwayLength) * canvas.height
+  const drawMarking = (x: number, z: number, width: number, depth: number) => {
+    const left = xToPixel(x - width / 2)
+    const right = xToPixel(x + width / 2)
+    const top = zToPixel(z - depth / 2)
+    const bottom = zToPixel(z + depth / 2)
+    context.fillRect(left, top, right - left, bottom - top)
+  }
+
+  context.fillStyle = '#282d2e'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.globalAlpha = 0.12
+  for (let index = 0; index < 5_000; index += 1) {
+    const shade = Math.floor(35 + random() * 28)
+    context.fillStyle = `rgb(${shade},${shade + 2},${shade + 2})`
+    context.fillRect(random() * canvas.width, random() * canvas.height, 1 + random() * 2, 1 + random() * 6)
+  }
+  context.globalAlpha = 1
+  context.fillStyle = '#e5e3d7'
+
+  for (let z = -235; z > -runwayLength + 210; z -= 62) drawMarking(0, z, 0.85, 27)
+  for (const end of [-48, -runwayLength + 48]) {
+    for (let x = -17.5; x <= 17.5; x += 5) drawMarking(x, end, 2.1, 24)
+  }
+  for (const z of [-325, -390, -runwayLength + 325, -runwayLength + 390]) {
+    drawMarking(-8.6, z, 3.2, 42)
+    drawMarking(8.6, z, 3.2, 42)
+  }
+
+  const drawRunwayNumber = (text: string, z: number, rotation: number) => {
+    context.save()
+    context.translate(canvas.width / 2, zToPixel(z))
+    context.rotate(rotation)
+    context.font = '900 190px Arial, sans-serif'
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.fillText(text, 0, 0)
+    context.restore()
+  }
+  drawRunwayNumber('16', -132, Math.PI)
+  drawRunwayNumber('34', -runwayLength + 132, 0)
+
+  const texture = new CanvasTexture(canvas)
+  texture.colorSpace = SRGBColorSpace
+  texture.anisotropy = anisotropy
+  return texture
 }
 
 function box(width: number, height: number, depth: number, material: MeshStandardMaterial) {
@@ -114,72 +169,56 @@ function groundBox(
   return result
 }
 
-function textMarking(text: string, width: number, height: number) {
-  const canvas = document.createElement('canvas')
-  canvas.width = 512
-  canvas.height = 256
-  const context = canvas.getContext('2d')!
-  context.fillStyle = '#e8e7df'
-  context.font = '900 190px Arial, sans-serif'
-  context.textAlign = 'center'
-  context.textBaseline = 'middle'
-  context.fillText(text, 256, 136)
-  const material = new MeshBasicMaterial({
-    map: new CanvasTexture(canvas),
-    transparent: true,
-    depthWrite: false,
-  })
-  const marking = new Mesh(new PlaneGeometry(width, height), material)
-  marking.rotation.x = -Math.PI / 2
-  marking.position.y = 0.126
-  return marking
-}
-
-function addRunway(root: Group) {
-  groundBox(root, runwayWidth, runwayLength, 0, -runwayLength / 2, asphalt, 0.12)
-
-  for (let z = -235; z > -runwayLength + 210; z -= 62) {
-    groundBox(root, 0.85, 27, 0, z, paint, 0.012, 0.12)
-  }
-  for (const end of [-48, -runwayLength + 48]) {
-    for (let x = -17.5; x <= 17.5; x += 5) groundBox(root, 2.1, 24, x, end, paint, 0.012, 0.12)
-  }
-  for (const z of [-325, -390, -runwayLength + 325, -runwayLength + 390]) {
-    groundBox(root, 3.2, 42, -8.6, z, paint, 0.012, 0.12)
-    groundBox(root, 3.2, 42, 8.6, z, paint, 0.012, 0.12)
-  }
-
-  const runway16 = textMarking('16', 22, 11)
-  runway16.position.z = -132
-  root.add(runway16)
-  const runway34 = textMarking('34', 22, 11)
-  runway34.position.z = -runwayLength + 132
-  runway34.rotation.z = Math.PI
-  root.add(runway34)
+function addRunway(root: Group, anisotropy: number) {
+  const runwaySurface = new Mesh(
+    new PlaneGeometry(runwayWidth, runwayLength),
+    new MeshStandardMaterial({ map: createRunwayTexture(anisotropy), roughness: 0.92 }),
+  )
+  runwaySurface.rotation.x = -Math.PI / 2
+  runwaySurface.position.set(0, 0.006, -runwayLength / 2)
+  runwaySurface.receiveShadow = true
+  root.add(runwaySurface)
 
   const lightGeometry = new SphereGeometry(0.18, 6, 4)
-  const edgeLight = new MeshBasicMaterial({ color: 0xf3f6dd, toneMapped: false })
-  const thresholdGreen = new MeshBasicMaterial({ color: 0x4effa3, toneMapped: false })
-  const thresholdRed = new MeshBasicMaterial({ color: 0xff4f40, toneMapped: false })
+  const edgeLight = new MeshBasicMaterial({ color: 0xf3f6dd, toneMapped: false, transparent: true, depthWrite: false })
+  const thresholdGreen = new MeshBasicMaterial({ color: 0x4effa3, toneMapped: false, transparent: true, depthWrite: false })
+  const thresholdRed = new MeshBasicMaterial({ color: 0xff4f40, toneMapped: false, transparent: true, depthWrite: false })
+  const edgePositions: Vector3[] = []
+  const greenPositions: Vector3[] = []
+  const redPositions: Vector3[] = []
   for (let z = -12; z >= -runwayLength + 12; z -= 48) {
-    for (const x of [-runwayWidth / 2 - 0.8, runwayWidth / 2 + 0.8]) {
-      const light = new Mesh(lightGeometry, edgeLight)
-      light.position.set(x, 0.22, z)
-      root.add(light)
-    }
+    for (const x of [-runwayWidth / 2 - 0.8, runwayWidth / 2 + 0.8]) edgePositions.push(new Vector3(x, 0.22, z))
   }
   for (let x = -runwayWidth / 2 + 2; x < runwayWidth / 2; x += 4.5) {
-    const near = new Mesh(lightGeometry, thresholdGreen)
-    near.position.set(x, 0.22, -2)
-    root.add(near)
-    const far = new Mesh(lightGeometry, thresholdRed)
-    far.position.set(x, 0.22, -runwayLength + 2)
-    root.add(far)
+    greenPositions.push(new Vector3(x, 0.22, -2))
+    redPositions.push(new Vector3(x, 0.22, -runwayLength + 2))
   }
-  for (let z = 40; z <= 430; z += 35) {
-    const light = new Mesh(lightGeometry, edgeLight)
-    light.position.set(0, 0.24, z)
-    root.add(light)
+  for (let z = 40; z <= 430; z += 35) edgePositions.push(new Vector3(0, 0.24, z))
+
+  const matrix = new Matrix4()
+  const createLights = (positions: Vector3[], material: MeshBasicMaterial) => {
+    const lights = new InstancedMesh(lightGeometry, material, positions.length)
+    positions.forEach((position, index) => {
+      matrix.makeTranslation(position.x, position.y, position.z)
+      lights.setMatrixAt(index, matrix)
+    })
+    lights.instanceMatrix.needsUpdate = true
+    root.add(lights)
+    return lights
+  }
+  const lightMeshes = [
+    createLights(edgePositions, edgeLight),
+    createLights(greenPositions, thresholdGreen),
+    createLights(redPositions, thresholdRed),
+  ]
+  const lightMaterials = [edgeLight, thresholdGreen, thresholdRed]
+
+  return {
+    update(distanceFromRunwayCenter: number) {
+      const opacity = Math.max(0, Math.min(1, (2_800 - distanceFromRunwayCenter) / 1_000))
+      for (const material of lightMaterials) material.opacity = opacity
+      for (const lights of lightMeshes) lights.visible = opacity > 0.01
+    },
   }
 }
 
@@ -291,15 +330,15 @@ function createGuidanceLine() {
   return line
 }
 
-export function createAirportWorld(scene: Scene) {
+export function createAirportWorld(scene: Scene, anisotropy = 1) {
   const root = new Group()
   root.name = 'KPWK training airport'
-  const terrain = new Mesh(new PlaneGeometry(12_000, 12_000), createTerrainMaterial())
+  const terrain = new Mesh(new PlaneGeometry(12_000, 12_000), createTerrainMaterial(anisotropy))
   terrain.rotation.x = -Math.PI / 2
   terrain.position.set(0, -0.08, -1_200)
   terrain.receiveShadow = true
   root.add(terrain)
-  addRunway(root)
+  const runwayLights = addRunway(root, anisotropy)
   addAirport(root)
 
   const sky = createSky()
@@ -327,6 +366,7 @@ export function createAirportWorld(scene: Scene) {
   scene.add(sun.target)
 
   const shadowTexelSize = (sun.shadow.camera.right - sun.shadow.camera.left) / sun.shadow.mapSize.width
+  const targetPosition = new Vector3()
 
   let currentWeather = ''
   const setWeather = (state: FlightState) => {
@@ -357,10 +397,10 @@ export function createAirportWorld(scene: Scene) {
     }
   }
 
-  const update = (state: FlightState, deltaSeconds: number) => {
+  const update = (state: FlightState, aircraftPosition: Vector3, deltaSeconds: number) => {
     setWeather(state)
-    const aircraftPosition = stateToWorld(state)
     sky.position.set(aircraftPosition.x, 0, aircraftPosition.z)
+    runwayLights.update(Math.hypot(aircraftPosition.x, aircraftPosition.z + runwayLength / 2))
     const shadowCenterX = Math.round(aircraftPosition.x / shadowTexelSize) * shadowTexelSize
     const shadowCenterZ = Math.round(aircraftPosition.z / shadowTexelSize) * shadowTexelSize
     sun.position.set(shadowCenterX - 950, 1_300, shadowCenterZ + 620)
@@ -379,7 +419,7 @@ export function createAirportWorld(scene: Scene) {
     const target = state.route.waypoints[state.route.activeWaypointIndex]
     guidance.visible = Boolean(target) && state.altitudeFt > runway.elevationFt + 20
     if (target) {
-      const targetPosition = waypointToWorld(target)
+      waypointToWorldVector(target, targetPosition)
       const positions = guidance.geometry.getAttribute('position') as BufferAttribute
       positions.setXYZ(0, aircraftPosition.x, aircraftPosition.y + 0.5, aircraftPosition.z)
       positions.setXYZ(1, targetPosition.x, targetPosition.y + 0.5, targetPosition.z)
