@@ -28,12 +28,46 @@ const MAX_TOUCHDOWN_BANK_DEG = 18
 const MAX_TOUCHDOWN_SPEED_KT = 90
 const MAX_BOUNCES = 2
 const CRASH_SLIDE_SECONDS = 2.5
+const ROTATE_SPEED_KT = 55
+const TAKEOFF_POWER_ACCEL_KT_PER_SECOND = 5.8
+const TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND = 0.2
+const TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND = 0.65
+const MAX_GROUND_PITCH_DEG = 10
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 const approach = (value: number, target: number, change: number) => value < target ? Math.min(value + change, target) : Math.max(value - change, target)
 const radians = (degrees: number) => degrees * Math.PI / 180
 const normalizeHeading = (degrees: number) => ((degrees % 360) + 360) % 360
 const headingError = (target: number, current: number) => ((target - current + 540) % 360) - 180
+
+// A compact airframe envelope keeps Three mesh details out of the fixed-step simulator.
+const collisionHull = Object.freeze([
+  Object.freeze({ x: 0, y: 0.8, z: -4.8 }),
+  Object.freeze({ x: 0, y: 1.1, z: 3.5 }),
+  Object.freeze({ x: -5.4, y: 1.25, z: -0.55 }),
+  Object.freeze({ x: 5.4, y: 1.25, z: -0.55 }),
+  Object.freeze({ x: 0, y: 0.7, z: 0 }),
+])
+const extendedGearContactPoints = Object.freeze([
+  Object.freeze({ x: -1.45, y: 0, z: 0.35 }),
+  Object.freeze({ x: 1.45, y: 0, z: 0.35 }),
+  Object.freeze({ x: 0, y: 0, z: -2.8 }),
+])
+const collisionPoints = Object.freeze([...collisionHull, ...extendedGearContactPoints])
+
+const groundClearanceFt = (pitchDeg: number, bankDeg: number, gearDown: boolean) => {
+  const pitch = radians(pitchDeg)
+  const roll = radians(-bankDeg)
+  let lowestMeters = 0
+  const pointCount = gearDown ? collisionPoints.length : collisionHull.length
+  for (let index = 0; index < pointCount; index += 1) {
+    const point = collisionPoints[index]
+    const pitchedY = point.y * Math.cos(pitch) - point.z * Math.sin(pitch)
+    const rotatedY = point.x * Math.sin(roll) + pitchedY * Math.cos(roll)
+    lowestMeters = Math.min(lowestMeters, rotatedY)
+  }
+  return -lowestMeters / 0.3048
+}
 
 const KPWK_THRESHOLD = Object.freeze({ lat: KPWK_RUNWAY_16.thresholdLat, lon: KPWK_RUNWAY_16.thresholdLon })
 
@@ -429,7 +463,7 @@ class FlightSimulator {
       if (this.state.aircraftPhase === 'takeoff_roll') {
         bank = approach(bank, clamp(headingError(NORTH_FIELD_RUNWAY_18.headingDeg, heading) * 0.65, -12, 12), 24 * dt)
         throttle = approach(throttle, 1, 0.55 * dt)
-        const rotating = airspeed >= 55
+        const rotating = airspeed >= ROTATE_SPEED_KT
         verticalSpeed = approach(verticalSpeed, rotating ? 650 : 0, 520 * dt)
         pitch = approach(pitch, rotating ? 7 : 0, 7 * dt)
       } else {
@@ -446,9 +480,17 @@ class FlightSimulator {
         pitch = approach(pitch, clamp(verticalSpeed / 130, -6, 7), 6 * dt)
       }
     } else {
-      this.manualAttitudeTarget.pitchDeg = clamp(this.manualAttitudeTarget.pitchDeg + this.pilotControls.pitchAxis * 32 * dt, -55, 55)
-      this.manualAttitudeTarget.bankDeg = clamp(this.manualAttitudeTarget.bankDeg + this.pilotControls.bankAxis * 70 * dt, -60, 60)
-      pitch = approach(pitch, this.manualAttitudeTarget.pitchDeg, 32 * dt)
+      const onTakeoffRoll = this.state.aircraftPhase === 'takeoff_roll'
+      this.manualAttitudeTarget.pitchDeg = clamp(
+        this.manualAttitudeTarget.pitchDeg + this.pilotControls.pitchAxis * 32 * dt,
+        onTakeoffRoll ? 0 : -55,
+        onTakeoffRoll ? MAX_GROUND_PITCH_DEG : 55,
+      )
+      this.manualAttitudeTarget.bankDeg = onTakeoffRoll
+        ? 0
+        : clamp(this.manualAttitudeTarget.bankDeg + this.pilotControls.bankAxis * 70 * dt, -60, 60)
+      const targetPitch = onTakeoffRoll && airspeed < ROTATE_SPEED_KT ? 0 : this.manualAttitudeTarget.pitchDeg
+      pitch = approach(pitch, targetPitch, 32 * dt)
       bank = approach(bank, this.manualAttitudeTarget.bankDeg, 70 * dt)
       const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch)), -4_500, 4_500)
       verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, 1_200 * dt)
@@ -457,7 +499,12 @@ class FlightSimulator {
     const drag = 0.36 + this.state.flapsDeg * 0.008 + (this.state.gearDown ? 0.12 : 0)
     const power = throttle * scenario.engine.maximumPower
     const gravityAlongFlightPath = -Math.sin(radians(pitch)) * 5.5
-    airspeed = clamp(airspeed + (power * 8.5 - drag * 5.8 + gravityAlongFlightPath) * dt, 0, 150)
+    const acceleration = this.state.aircraftPhase === 'takeoff_roll'
+      ? power * TAKEOFF_POWER_ACCEL_KT_PER_SECOND
+        - (airspeed > 0.05 || power > 0 ? TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND : 0)
+        - TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND * (airspeed / ROTATE_SPEED_KT) ** 2
+      : power * 8.5 - drag * 5.8 + gravityAlongFlightPath
+    airspeed = clamp(airspeed + acceleration * dt, 0, 150)
     const turnRate = airspeed > 20 ? 1_091 * Math.tan(radians(clamp(bank, -60, 60))) / airspeed : 0
     heading = normalizeHeading(heading + turnRate * dt)
     const position = offsetPosition(this.state, heading, airspeed * dt / 3_600)
@@ -478,8 +525,9 @@ class FlightSimulator {
 
     if (aircraftPhase === 'takeoff_roll') {
       phase = 'takeoff'
-      if (airspeed < 55 || pitch <= 1) {
-        altitude = NORTH_FIELD_RUNWAY_18.elevationFt
+      const takeoffContactAltitude = NORTH_FIELD_RUNWAY_18.elevationFt + groundClearanceFt(pitch, bank, this.state.gearDown)
+      if (airspeed < ROTATE_SPEED_KT || pitch <= 1) {
+        altitude = takeoffContactAltitude
         verticalSpeed = 0
       } else if (altitude > NORTH_FIELD_RUNWAY_18.elevationFt + 5) {
         aircraftPhase = 'airborne'
@@ -488,8 +536,12 @@ class FlightSimulator {
       }
     }
 
-    if (aircraftPhase !== 'takeoff_roll' && altitude <= runway.elevation && verticalSpeed <= 0) {
-      altitude = runway.elevation
+    const contactAltitude = runway.elevation + groundClearanceFt(pitch, bank, this.state.gearDown)
+    const groundContact = aircraftPhase === 'landing_roll'
+      || aircraftPhase === 'stopped'
+      || (altitude <= contactAltitude && verticalSpeed <= 0)
+    if (aircraftPhase !== 'takeoff_roll' && groundContact) {
+      altitude = contactAltitude
       const impactFpm = Math.abs(verticalSpeed)
       this.peakTouchdownImpactFpm = Math.max(this.peakTouchdownImpactFpm, impactFpm)
       const safeContact = onRunway

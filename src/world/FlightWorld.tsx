@@ -191,7 +191,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       visualFlapRadians = MathUtils.damp(visualFlapRadians, state.flapsDeg * DEG_TO_RAD, 4.5, deltaSeconds)
       for (const flap of flaps) flap.rotation.x = visualFlapRadians
 
-      if (crashLanding) {
+      if (state.aircraftPhase !== 'airborne') {
         aircraft.updateMatrixWorld(true)
         aircraftBounds.makeEmpty()
         aircraft.traverseVisible((part) => {

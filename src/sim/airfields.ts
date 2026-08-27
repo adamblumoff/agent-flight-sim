@@ -36,7 +36,7 @@ export const KPWK_RUNWAY_16: MissionRunway = Object.freeze({
 
 const northFieldReference = offsetPosition({ lat: KPWK_RUNWAY_16.thresholdLat, lon: KPWK_RUNWAY_16.thresholdLon }, 339, 0.9)
 const northFieldThreshold = offsetPosition(northFieldReference, 249, 0.38)
-const northFieldFarEnd = offsetPosition(northFieldThreshold, 159, 2_600 / 6_076.12)
+const northFieldFarEnd = offsetPosition(northFieldThreshold, 180, 2_600 / 6_076.12)
 
 export const NORTH_FIELD_AIRPORT: Airport = Object.freeze({
   code: 'KNFD',
@@ -53,7 +53,7 @@ export const NORTH_FIELD_RUNWAY_18: MissionRunway = Object.freeze({
   thresholdLon: northFieldThreshold.lon,
   farEndLat: northFieldFarEnd.lat,
   farEndLon: northFieldFarEnd.lon,
-  headingDeg: 159,
+  headingDeg: 180,
   lengthFt: 2_600,
   widthFt: 75,
   elevationFt: NORTH_FIELD_AIRPORT.elevationFt,

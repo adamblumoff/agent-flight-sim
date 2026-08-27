@@ -551,9 +551,20 @@ summary:focus-visible {
   text-transform: uppercase;
 }
 
-.manual-controls > button span {
+.manual-controls > button .control-value {
   color: var(--cream);
   font-family: "Kode Mono Variable", monospace;
+}
+
+.control-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.control-shortcut {
+  color: rgb(244 239 222 / 42%);
+  font: 500 8px/1 "Kode Mono Variable", monospace;
 }
 
 .throttle-control {

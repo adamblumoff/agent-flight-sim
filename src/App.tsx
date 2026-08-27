@@ -121,7 +121,7 @@ function derivePlan(state: FlightState): readonly string[] {
 
 function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return 'Ready on North Field runway 18.'
-  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return 'Accelerating on runway 18. Rotate near 60 knots.'
+  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return 'Accelerating on runway 18. Rotate near 55 knots.'
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
@@ -329,7 +329,7 @@ export default function App() {
   const isDeparture = state.mission.phase === 'preflight' || state.mission.phase === 'takeoff'
   const destination = isDeparture ? 'KPWK' : state.route.destination ?? 'Route pending'
   const routeDetail = isDeparture
-    ? 'Depart NF18 · Land RWY16'
+    ? 'Depart North Field 18 · Land KPWK 16'
     : state.route.destination === null
     ? 'Decision needed'
     : state.route.runway
@@ -361,7 +361,7 @@ export default function App() {
             </p>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
-              <li><kbd>W</kbd><span>At 60 knots, raise the nose. Release the key when the pitch looks right.</span></li>
+              <li><kbd>W</kbd><span>At 55 knots, raise the nose. Release the key when the pitch looks right.</span></li>
               <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
@@ -421,20 +421,24 @@ export default function App() {
             variant="outline"
             size="sm"
             disabled={state.controlOwner === 'agent'}
+            aria-keyshortcuts="G"
             onClick={() => flightSimulator.setGear(!state.gearDown, 'human', 'Cockpit gear control')}
           >
-            Gear <span>{state.gearDown ? 'Down' : 'Up'}</span>
+            <span className="control-label">Gear <kbd className="control-shortcut">(G)</kbd></span>
+            <span className="control-value">{state.gearDown ? 'Down' : 'Up'}</span>
           </Button>
           <Button
             variant="outline"
             size="sm"
             disabled={state.controlOwner === 'agent'}
+            aria-keyshortcuts="F"
             onClick={() => {
               const index = flapSettings.indexOf(state.flapsDeg as (typeof flapSettings)[number])
               flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Cockpit flap control')
             }}
           >
-            Flaps <span>{state.flapsDeg}°</span>
+            <span className="control-label">Flaps <kbd className="control-shortcut">(F)</kbd></span>
+            <span className="control-value">{state.flapsDeg}°</span>
           </Button>
           <label className="throttle-control">
             <span>Power</span>

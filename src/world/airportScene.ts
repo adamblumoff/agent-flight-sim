@@ -88,14 +88,26 @@ function createTerrainMaterial(anisotropy: number) {
   return new MeshStandardMaterial({ map: texture, color: 0xb7c0a8, roughness: 0.98 })
 }
 
-function createRunwayTexture(
-  anisotropy: number,
-  widthMeters = runwayWidth,
-  lengthMeters = runwayLength,
-  nearNumber = '16',
-  farNumber = '34',
-  seed = 16,
-) {
+interface RunwayTextureOptions {
+  readonly widthMeters?: number
+  readonly lengthMeters?: number
+  readonly nearNumber?: string
+  readonly farNumber?: string
+  readonly seed?: number
+  readonly surfaceColor?: string
+  readonly includeAimingPoints?: boolean
+}
+
+function createRunwayTexture(anisotropy: number, options: RunwayTextureOptions = {}) {
+  const {
+    widthMeters = runwayWidth,
+    lengthMeters = runwayLength,
+    nearNumber = '16',
+    farNumber = '34',
+    seed = 16,
+    surfaceColor = '#282d2e',
+    includeAimingPoints = true,
+  } = options
   const canvas = document.createElement('canvas')
   canvas.width = 512
   canvas.height = 4_096
@@ -111,7 +123,7 @@ function createRunwayTexture(
     context.fillRect(left, top, right - left, bottom - top)
   }
 
-  context.fillStyle = '#282d2e'
+  context.fillStyle = surfaceColor
   context.fillRect(0, 0, canvas.width, canvas.height)
   context.globalAlpha = 0.12
   for (let index = 0; index < 5_000; index += 1) {
@@ -127,11 +139,13 @@ function createRunwayTexture(
   for (const end of [-42, -lengthMeters + 42]) {
     for (let x = -thresholdHalfWidth; x <= thresholdHalfWidth; x += 5) drawMarking(x, end, 2.1, 21)
   }
-  const aimingOffset = Math.min(325, lengthMeters * 0.28)
-  for (const z of [-aimingOffset, -aimingOffset - 65, -lengthMeters + aimingOffset, -lengthMeters + aimingOffset + 65]) {
-    const markingOffset = Math.min(8.6, widthMeters * 0.22)
-    drawMarking(-markingOffset, z, 3.2, 36)
-    drawMarking(markingOffset, z, 3.2, 36)
+  if (includeAimingPoints) {
+    const aimingOffset = Math.min(325, lengthMeters * 0.28)
+    for (const z of [-aimingOffset, -aimingOffset - 65, -lengthMeters + aimingOffset, -lengthMeters + aimingOffset + 65]) {
+      const markingOffset = Math.min(8.6, widthMeters * 0.22)
+      drawMarking(-markingOffset, z, 3.2, 36)
+      drawMarking(markingOffset, z, 3.2, 36)
+    }
   }
 
   const drawRunwayNumber = (text: string, z: number, rotation: number) => {
@@ -240,17 +254,33 @@ function addDepartureRunway(root: Group, anisotropy: number) {
   group.position.set(departure.x, 0, departure.z)
   group.rotation.y = -departure.headingOffsetDeg * Math.PI / 180
   const surfaceMaterial = new MeshStandardMaterial({
-    map: createRunwayTexture(anisotropy, width, length, departure.nearNumber, departure.farNumber, 18),
+    map: createRunwayTexture(anisotropy, {
+      widthMeters: width,
+      lengthMeters: length,
+      nearNumber: departure.nearNumber,
+      farNumber: departure.farNumber,
+      seed: 18,
+      surfaceColor: '#4b4638',
+      includeAimingPoints: false,
+    }),
     roughness: 0.94,
   })
+  const departureAsphalt = new MeshStandardMaterial({ color: 0x4b4638, roughness: 0.94 })
   const surface = new Mesh(
     new BoxGeometry(width, departure.surfaceY, length),
-    [asphalt, asphalt, surfaceMaterial, asphalt, asphalt, asphalt],
+    [departureAsphalt, departureAsphalt, surfaceMaterial, departureAsphalt, departureAsphalt, departureAsphalt],
   )
   surface.castShadow = false
   surface.receiveShadow = true
   surface.position.set(0, departure.surfaceY / 2, -length / 2)
   group.add(surface)
+
+  groundBox(group, 50, 92, 43, -155, concrete, 0.09)
+  const hangar = box(24, 7, 18, buildingWall)
+  hangar.position.set(48, 3.55, -140)
+  const utilityShed = box(13, 4.5, 12, buildingDark)
+  utilityShed.position.set(43, 2.3, -195)
+  group.add(hangar, utilityShed)
   root.add(group)
 }
 
