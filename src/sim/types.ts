@@ -12,6 +12,7 @@ export type MissionPhase = 'planning' | 'enroute' | 'approach' | 'flare' | 'roll
 export type MissionOutcome = 'in_progress' | 'landed' | 'unsafe_touchdown' | 'fuel_exhausted' | 'crashed'
 
 export interface AutopilotState { readonly enabled: boolean; readonly headingDeg: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalMode: VerticalMode }
+export interface MotionState { readonly longitudinalAccelerationKtPerSecond: number; readonly verticalAccelerationFpmPerSecond: number; readonly turnRateDegPerSecond: number }
 export interface RouteWaypoint { readonly id: string; readonly name: string; readonly lat: number; readonly lon: number; readonly altitudeFt: number; readonly airspeedKt: number }
 export interface RouteState { readonly plan: RoutePlan; readonly destination: 'KPWK' | null; readonly runway: '16' | null; readonly waypoints: readonly RouteWaypoint[]; readonly activeWaypointIndex: number; readonly reason: string | null }
 
@@ -51,11 +52,12 @@ export interface FlightState {
   readonly elapsedSeconds: number; readonly fuelMinutesRemaining: number
   readonly controlOwner: ControlOwner; readonly handoffRequested: boolean; readonly agentMode: AgentMode
   readonly autopilot: AutopilotState
+  readonly motion: MotionState
   readonly route: RouteState; readonly scenario: ScenarioConditions
   readonly approval: HumanApprovalState; readonly mission: MissionNavigationState; readonly checkride: CheckrideState; readonly debrief: DebriefState
 }
 
-export interface PilotInput { readonly pitchDelta?: number; readonly bankDelta?: number }
+export interface PilotControls { readonly pitchAxis: number; readonly bankAxis: number }
 export interface TraceEvent { readonly id: number; readonly time: number; readonly elapsedSeconds: number; readonly actor: TraceActor; readonly action: string; readonly reason: string; readonly details: Readonly<Record<string, unknown>> }
 export interface Airport { readonly code: 'KPWK'; readonly name: string; readonly lat: number; readonly lon: number; readonly elevationFt: number }
 export interface MissionRunway { readonly id: string; readonly airport: Airport['code']; readonly thresholdLat: number; readonly thresholdLon: number; readonly farEndLat: number; readonly farEndLon: number; readonly headingDeg: number; readonly lengthFt: number; readonly widthFt: number; readonly elevationFt: number }

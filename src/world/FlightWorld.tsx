@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ACESFilmicToneMapping,
+  Box3,
   Color,
   Euler,
+  Group,
+  MathUtils,
+  Mesh,
   PCFShadowMap,
   PerspectiveCamera,
   Quaternion,
@@ -14,7 +18,7 @@ import {
 } from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { flightSimulator } from '../sim/flightSimulator'
-import { createAircraft } from './aircraft'
+import { createAircraft, createCrashEffects } from './aircraft'
 import { createAirportWorld, disposeScene } from './airportScene'
 import { stateToWorldVector, WORLD_RUNWAY } from './coordinates'
 
@@ -46,6 +50,7 @@ const chaseOffset = new Vector3(0, 6.2, 18)
 const chaseLookAhead = new Vector3(0, -4.5, -28)
 const cockpitOffset = new Vector3(0, 2.05, -2.35)
 const cockpitLookAhead = new Vector3(0, 1.9, -80)
+const crashOrigin = new Vector3(0, 1.2, -3.8)
 
 export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -96,7 +101,9 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
 
     const world = createAirportWorld(scene, Math.min(8, renderer.capabilities.getMaxAnisotropy()))
     const aircraft = createAircraft()
-    scene.add(aircraft)
+    const landingGear = aircraft.userData.landingGear as Group[]
+    const crashEffects = createCrashEffects()
+    scene.add(aircraft, crashEffects.root)
 
     const timer = new Timer()
     timer.connect(document)
@@ -105,12 +112,19 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     const currentAircraftPosition = new Vector3()
     const desiredCameraPosition = new Vector3()
     const desiredCameraTarget = new Vector3()
+    const dynamicChaseOffset = chaseOffset.clone()
+    const dynamicChaseLookAhead = chaseLookAhead.clone()
     const smoothedTarget = new Vector3()
+    const explosionPosition = new Vector3()
+    const aircraftBounds = new Box3()
+    const visiblePartBounds = new Box3()
     const attitude = new Euler(0, 0, 0, 'YXZ')
     const previousAttitudeQuaternion = new Quaternion()
     const currentAttitudeQuaternion = new Quaternion()
     const attitudeQuaternion = new Quaternion()
     let previousMode: FlightCameraMode | null = null
+    let smoothedAcceleration = 0
+    let crashWasActive = false
     let animationFrame = 0
     let disposed = false
     let statsPanel: import('stats-gl').default | null = null
@@ -151,46 +165,83 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       stateToWorldVector(previousState, previousAircraftPosition)
       stateToWorldVector(state, currentAircraftPosition)
       aircraftPosition.lerpVectors(previousAircraftPosition, currentAircraftPosition, interpolationAlpha)
-      aircraftPosition.y += WORLD_RUNWAY.surfaceY + 0.025
+      const crashLanding = state.debrief.landing?.safe === false ? state.debrief.landing : null
+      const groundY = crashLanding?.onRunway === false ? 0 : WORLD_RUNWAY.surfaceY
+      aircraftPosition.y += groundY + 0.01
       aircraft.position.copy(aircraftPosition)
 
+      const previousCrashed = previousState.debrief.landing?.safe === false
       attitude.set(
-        previousState.pitchDeg * DEG_TO_RAD,
+        (previousCrashed ? MathUtils.clamp(previousState.pitchDeg, -2, 2) : previousState.pitchDeg) * DEG_TO_RAD,
         -(previousState.headingDeg - RUNWAY_HEADING_DEG) * DEG_TO_RAD,
-        -previousState.bankDeg * DEG_TO_RAD,
+        -(previousCrashed ? MathUtils.clamp(previousState.bankDeg, -3, 3) : previousState.bankDeg) * DEG_TO_RAD,
       )
       previousAttitudeQuaternion.setFromEuler(attitude)
       attitude.set(
-        state.pitchDeg * DEG_TO_RAD,
+        (crashLanding ? MathUtils.clamp(state.pitchDeg, -2, 2) : state.pitchDeg) * DEG_TO_RAD,
         -(state.headingDeg - RUNWAY_HEADING_DEG) * DEG_TO_RAD,
-        -state.bankDeg * DEG_TO_RAD,
+        -(crashLanding ? MathUtils.clamp(state.bankDeg, -3, 3) : state.bankDeg) * DEG_TO_RAD,
       )
       currentAttitudeQuaternion.setFromEuler(attitude)
       attitudeQuaternion.slerpQuaternions(previousAttitudeQuaternion, currentAttitudeQuaternion, interpolationAlpha)
       aircraft.quaternion.copy(attitudeQuaternion)
+      for (const gear of landingGear) gear.visible = state.gearDown
+
+      if (crashLanding) {
+        aircraft.updateMatrixWorld(true)
+        aircraftBounds.makeEmpty()
+        aircraft.traverseVisible((part) => {
+          if (!(part instanceof Mesh) || !part.geometry) return
+          if (!part.geometry.boundingBox) part.geometry.computeBoundingBox()
+          if (!part.geometry.boundingBox) return
+          visiblePartBounds.copy(part.geometry.boundingBox).applyMatrix4(part.matrixWorld)
+          aircraftBounds.union(visiblePartBounds)
+        })
+        const penetration = groundY + 0.005 - aircraftBounds.min.y
+        if (penetration > 0) aircraft.position.y += penetration
+      }
+
+      const crashActive = Boolean(crashLanding)
+      if (crashActive && !crashWasActive) {
+        explosionPosition.copy(crashOrigin).applyQuaternion(attitudeQuaternion).add(aircraft.position)
+        crashEffects.start(explosionPosition)
+      } else if (!crashActive && crashWasActive) crashEffects.reset()
+      crashEffects.update(deltaSeconds, groundY)
+      crashWasActive = crashActive
       world.update(state, aircraftPosition, deltaSeconds)
 
       const mode = cameraModeRef.current
       aircraft.visible = mode !== 'cockpit'
-      if (previousMode !== mode) {
-        camera.fov = mode === 'cockpit' ? 70 : 56
+      const renderedAcceleration = MathUtils.lerp(
+        previousState.motion.longitudinalAccelerationKtPerSecond,
+        state.motion.longitudinalAccelerationKtPerSecond,
+        interpolationAlpha,
+      )
+      smoothedAcceleration = MathUtils.damp(smoothedAcceleration, MathUtils.clamp(renderedAcceleration, -8, 8), 3.5, deltaSeconds)
+      const accelerationCue = MathUtils.clamp(smoothedAcceleration / 5, -1, 1)
+      dynamicChaseOffset.set(0, 6.2, 18 + (accelerationCue >= 0 ? accelerationCue * 5 : accelerationCue * 3))
+      dynamicChaseLookAhead.set(0, -4.5, -28 - accelerationCue * 4)
+      const targetFov = mode === 'cockpit' ? 70 : mode === 'chase' ? 56 + accelerationCue * 4 : 56
+      const previousFov = camera.fov
+      camera.fov = previousMode !== mode ? targetFov : MathUtils.damp(camera.fov, targetFov, 4, deltaSeconds)
+      if (Math.abs(camera.fov - previousFov) > 0.01) {
         camera.updateProjectionMatrix()
       }
       if (mode === 'free') {
         if (previousMode !== 'free') {
-          desiredCameraPosition.copy(chaseOffset).applyQuaternion(attitudeQuaternion).add(aircraftPosition)
+          desiredCameraPosition.copy(chaseOffset).applyQuaternion(attitudeQuaternion).add(aircraft.position)
           camera.position.copy(desiredCameraPosition)
-          controls.target.copy(aircraftPosition)
+          controls.target.copy(aircraft.position)
           controls.enabled = true
         }
-        controls.target.lerp(aircraftPosition, 1 - Math.exp(-deltaSeconds * 2.2))
+        controls.target.lerp(aircraft.position, 1 - Math.exp(-deltaSeconds * 2.2))
         controls.update()
       } else {
         controls.enabled = false
-        const cameraOffset = mode === 'cockpit' ? cockpitOffset : chaseOffset
-        const cameraLookAhead = mode === 'cockpit' ? cockpitLookAhead : chaseLookAhead
-        desiredCameraPosition.copy(cameraOffset).applyQuaternion(attitudeQuaternion).add(aircraftPosition)
-        desiredCameraTarget.copy(cameraLookAhead).applyQuaternion(attitudeQuaternion).add(aircraftPosition)
+        const cameraOffset = mode === 'cockpit' ? cockpitOffset : dynamicChaseOffset
+        const cameraLookAhead = mode === 'cockpit' ? cockpitLookAhead : dynamicChaseLookAhead
+        desiredCameraPosition.copy(cameraOffset).applyQuaternion(attitudeQuaternion).add(aircraft.position)
+        desiredCameraTarget.copy(cameraLookAhead).applyQuaternion(attitudeQuaternion).add(aircraft.position)
 
         if (previousMode !== mode || mode === 'cockpit') {
           camera.position.copy(desiredCameraPosition)

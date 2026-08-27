@@ -301,7 +301,7 @@ function createRain() {
     const offset = index * 6
     const x = (random() - 0.5) * 220
     const y = random() * 95
-    const z = -35 - random() * 205
+    const z = -20 - random() * 220
     const length = 0.8 + random() * 0.8
     positions.set([x, y, z, x, y - length, z], offset)
   }

@@ -3,7 +3,7 @@ import type {
   CheckrideSeed, ControlOwner, DebriefEvent, EvidenceSource, FlightEvent,
   FlightEventType, FlightEventWaitInput, FlightEventWaitResult, FlightEvidence,
   FlightState, FlightStateListener, MissionBrief, MissionOutcome, MissionPhase,
-  PilotInput, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
+  PilotControls, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
   TraceEvent,
 } from './types'
 
@@ -140,6 +140,7 @@ const initialState = (seed: CheckrideSeed): FlightState => {
     pitchDeg: 0, bankDeg: 0, throttle: 0.62, flapsDeg: 0, gearDown: false,
     elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
     agentMode: 'idle', autopilot, route: initialRoute(), scenario,
+    motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0 }),
     approval: Object.freeze({ status: 'none', question: null, requestedAction: null }),
     mission: Object.freeze({ phase: 'planning', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, distanceToThresholdNm: distanceNm(start, KPWK_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, eventRevision: 0 }),
     checkride: Object.freeze({ seed, status: 'decision_required', objective: SHARED_AUTONOMY_MISSION.objective, deadlineSeconds: 300, fuelMinutesRemaining: fuel, alert: 'The engine is running rough. Weather, traffic, and a passenger problem complicate the return.', humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: Object.freeze({ total: 100 }), decision: null }),
@@ -163,6 +164,7 @@ class FlightSimulator {
   private bounceCount = 0
   private peakTouchdownImpactFpm = 0
   private crashDynamics: CrashDynamics | null = null
+  private pilotControls: PilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
   private readonly listeners = new Set<FlightStateListener>()
   private readonly waiters = new Set<EventWaiter>()
   private trace: readonly TraceEvent[] = Object.freeze([])
@@ -204,6 +206,7 @@ class FlightSimulator {
     this.bounceCount = 0
     this.peakTouchdownImpactFpm = 0
     this.crashDynamics = null
+    this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
     this.record('system', 'mission_started', `Emergency seed ${seed} started`, {})
     this.queueEvent('emergency_detected', this.state.checkride.alert!)
     this.previousState = this.state
@@ -235,6 +238,7 @@ class FlightSimulator {
   }
 
   transferControl = (owner: ControlOwner, actor: TraceActor = owner, reason = `${owner} took control`) => {
+    if (owner === 'agent') this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
     const autopilot = Object.freeze({ ...this.state.autopilot, enabled: owner === 'agent' })
     this.state = Object.freeze({ ...this.state, controlOwner: owner, handoffRequested: false, agentMode: owner === 'agent' ? 'thinking' : 'idle', autopilot })
     this.record(actor, 'control_transferred', reason, { owner })
@@ -242,11 +246,10 @@ class FlightSimulator {
     this.publish(this.state)
   }
 
-  applyPilotInput = (input: PilotInput, actor: TraceActor = 'human', reason = 'Pilot input') => {
+  setPilotControls = (input: PilotControls, actor: TraceActor = 'human', reason = 'Pilot controls') => {
     this.takePilotControl(reason)
-    this.state = Object.freeze({ ...this.state, pitchDeg: clamp(this.state.pitchDeg + (input.pitchDelta ?? 0), -12, 12), bankDeg: clamp(this.state.bankDeg + (input.bankDelta ?? 0), -35, 35) })
-    this.record(actor, 'pilot_input', reason, { ...input })
-    this.publish(this.state)
+    this.pilotControls = Object.freeze({ pitchAxis: clamp(input.pitchAxis, -1, 1), bankAxis: clamp(input.bankAxis, -1, 1) })
+    this.record(actor, 'pilot_controls', reason, { ...this.pilotControls })
   }
 
   setThrottle = (value: number, actor: TraceActor = 'human', reason = 'Set throttle') => {
@@ -404,14 +407,17 @@ class FlightSimulator {
       verticalSpeed = approach(verticalSpeed, desiredFpm, 420 * dt)
       pitch = approach(pitch, clamp(verticalSpeed / 130, -6, 7), 6 * dt)
     } else {
-      verticalSpeed = approach(verticalSpeed, pitch * 110, 300 * dt)
-      bank = approach(bank, 0, 3 * dt)
+      pitch = approach(pitch, this.pilotControls.pitchAxis * 55, 32 * dt)
+      bank = approach(bank, this.pilotControls.bankAxis * 60, 70 * dt)
+      const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch)), -4_500, 4_500)
+      verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, 1_200 * dt)
     }
 
     const drag = 0.36 + this.state.flapsDeg * 0.008 + (this.state.gearDown ? 0.12 : 0)
     const power = throttle * scenario.engine.maximumPower
-    airspeed = clamp(airspeed + (power * 8.5 - drag * 5.8 - Math.max(0, pitch) * 0.08) * dt, 0, 150)
-    const turnRate = airspeed > 20 ? 1_091 * Math.tan(radians(bank)) / airspeed : 0
+    const gravityAlongFlightPath = -Math.sin(radians(pitch)) * 5.5
+    airspeed = clamp(airspeed + (power * 8.5 - drag * 5.8 + gravityAlongFlightPath) * dt, 0, 150)
+    const turnRate = airspeed > 20 ? 1_091 * Math.tan(radians(clamp(bank, -60, 60))) / airspeed : 0
     heading = normalizeHeading(heading + turnRate * dt)
     const position = offsetPosition(this.state, heading, airspeed * dt / 3_600)
     let altitude = this.state.altitudeFt + verticalSpeed * dt / 60
@@ -467,7 +473,12 @@ class FlightSimulator {
     }
     if ((fuelMinutesRemaining <= 0 || elapsedSeconds >= SHARED_AUTONOMY_MISSION.deadlineSeconds) && outcome === 'in_progress') outcome = 'fuel_exhausted'
 
-    const partial = { ...this.state, ...position, altitudeFt: altitude, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed, headingDeg: heading, pitchDeg: pitch, bankDeg: bank, throttle, elapsedSeconds, fuelMinutesRemaining, route: routeUpdate.route } as FlightState
+    const motion = Object.freeze({
+      longitudinalAccelerationKtPerSecond: (airspeed - this.state.airspeedKt) / dt,
+      verticalAccelerationFpmPerSecond: (verticalSpeed - this.state.verticalSpeedFpm) / dt,
+      turnRateDegPerSecond: turnRate,
+    })
+    const partial = { ...this.state, ...position, altitudeFt: altitude, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed, headingDeg: heading, pitchDeg: pitch, bankDeg: bank, throttle, elapsedSeconds, fuelMinutesRemaining, motion, route: routeUpdate.route } as FlightState
     const mission = this.navigation(partial, phase, outcome, runway)
     const approachJustStabilized = mission.stableApproach && !this.state.mission.stableApproach
     const status = outcome === 'in_progress' ? 'in_progress' : outcome === 'landed' ? 'landed' : 'failed'
@@ -512,6 +523,11 @@ class FlightSimulator {
       elapsedSeconds,
       fuelMinutesRemaining,
       autopilot: Object.freeze({ ...this.state.autopilot, enabled: false }),
+      motion: Object.freeze({
+        longitudinalAccelerationKtPerSecond: (airspeed - this.state.airspeedKt) / dt,
+        verticalAccelerationFpmPerSecond: -this.state.verticalSpeedFpm / dt,
+        turnRateDegPerSecond: crash.rollDirection * 12,
+      }),
     } as FlightState
     const mission = this.navigation(partial, 'failed', outcome, runway)
     const status = finished ? 'failed' : 'in_progress'

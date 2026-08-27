@@ -225,6 +225,19 @@ export default function App() {
   const resetScenario = useCallback(() => flightSimulator.reset(), [])
 
   useEffect(() => {
+    const heldFlightKeys = new Set<string>()
+
+    const updatePilotControls = () => {
+      if (flightSimulator.getState().controlOwner !== 'human') {
+        heldFlightKeys.clear()
+        return
+      }
+      flightSimulator.setPilotControls({
+        pitchAxis: Number(heldFlightKeys.has('w')) - Number(heldFlightKeys.has('s')),
+        bankAxis: Number(heldFlightKeys.has('d')) - Number(heldFlightKeys.has('a')),
+      }, 'human', 'Pilot held controls')
+    }
+
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target
       if (target instanceof HTMLElement && target.matches('input, textarea, select, button, [contenteditable="true"]')) return
@@ -234,10 +247,10 @@ export default function App() {
       if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'f', 'g', 't'].includes(key)) event.preventDefault()
 
       if (current.controlOwner === 'human') {
-        if (key === 'w') flightSimulator.applyPilotInput({ pitchDelta: 1 }, 'human', 'Pilot input')
-        if (key === 's') flightSimulator.applyPilotInput({ pitchDelta: -1 }, 'human', 'Pilot input')
-        if (key === 'a') flightSimulator.applyPilotInput({ bankDelta: -3 }, 'human', 'Pilot input')
-        if (key === 'd') flightSimulator.applyPilotInput({ bankDelta: 3 }, 'human', 'Pilot input')
+        if (['w', 'a', 's', 'd'].includes(key) && !event.repeat) {
+          heldFlightKeys.add(key)
+          updatePilotControls()
+        }
         if (key === 'arrowup') flightSimulator.setThrottle(current.throttle + 0.05, 'human', 'Pilot throttle input')
         if (key === 'arrowdown') flightSimulator.setThrottle(current.throttle - 0.05, 'human', 'Pilot throttle input')
         if (key === 'g') flightSimulator.setGear(!current.gearDown, 'human', 'Pilot gear command')
@@ -250,8 +263,26 @@ export default function App() {
       if (key === 't' && (current.controlOwner === 'agent' || webMcpStatus === 'ready')) toggleHandoff()
     }
 
+    function handleKeyUp(event: KeyboardEvent) {
+      const key = event.key.toLowerCase()
+      if (!heldFlightKeys.delete(key)) return
+      updatePilotControls()
+    }
+
+    function releasePilotControls() {
+      if (heldFlightKeys.size === 0) return
+      heldFlightKeys.clear()
+      updatePilotControls()
+    }
+
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', releasePilotControls)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', releasePilotControls)
+    }
   }, [toggleHandoff, webMcpStatus])
 
   const webMcpLabels = {
