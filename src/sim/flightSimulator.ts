@@ -6,6 +6,14 @@ import type {
   PilotControls, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
   TraceEvent,
 } from './types'
+import {
+  KPWK_AIRPORT,
+  KPWK_RUNWAY_16,
+  NORTH_FIELD_AIRPORT,
+  NORTH_FIELD_RUNWAY_18,
+  NORTH_FIELD_START,
+  offsetPosition,
+} from './airfields.ts'
 
 const STEP = 1 / 60
 const SNAPSHOT_INTERVAL = 0.1
@@ -13,8 +21,7 @@ const MAX_FRAME = 0.25
 const MAX_WAIT_MS = 15_000
 const EARTH_RADIUS_NM = 3_440.065
 const FEET_PER_NM = 6_076.12
-const RUNWAY_HEADING = 159
-const KPWK_ELEVATION = 645
+const KPWK_ELEVATION = KPWK_RUNWAY_16.elevationFt
 const MAX_SAFE_TOUCHDOWN_FPM = 600
 const BOUNCE_THRESHOLD_FPM = 240
 const MAX_TOUCHDOWN_BANK_DEG = 18
@@ -28,23 +35,20 @@ const radians = (degrees: number) => degrees * Math.PI / 180
 const normalizeHeading = (degrees: number) => ((degrees % 360) + 360) % 360
 const headingError = (target: number, current: number) => ((target - current + 540) % 360) - 180
 
-const KPWK = Object.freeze({ code: 'KPWK' as const, name: 'Chicago Executive Airport', lat: 42.11255, lon: -87.89998, elevationFt: KPWK_ELEVATION })
-const KPWK_THRESHOLD = Object.freeze({ lat: 42.123329, lon: -87.907126 })
-const KPWK_FAR_END = Object.freeze({ lat: 42.110552, lon: -87.900405 })
+const KPWK_THRESHOLD = Object.freeze({ lat: KPWK_RUNWAY_16.thresholdLat, lon: KPWK_RUNWAY_16.thresholdLon })
 
 export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   id: 'SHARED-AUTONOMY-EMERGENCY-01',
   name: 'Rough running over Wheeling',
-  objective: 'Assess the emergency, choose a safe airport, and land within five minutes.',
-  start: 'Airborne on the runway 16 arrival at 1,700 feet and 105 knots.',
+  objective: 'Depart North Field, assess the emergency, and land at Chicago Executive within five minutes.',
+  start: 'Lined up on North Field runway 18 with the aircraft configured for takeoff.',
   deadlineSeconds: 300,
-  airports: Object.freeze([KPWK]),
-  runways: Object.freeze([
-    Object.freeze({ id: 'KPWK-16', airport: 'KPWK' as const, thresholdLat: KPWK_THRESHOLD.lat, thresholdLon: KPWK_THRESHOLD.lon, farEndLat: KPWK_FAR_END.lat, farEndLon: KPWK_FAR_END.lon, headingDeg: 159, lengthFt: 5_001, widthFt: 150, elevationFt: KPWK_ELEVATION }),
-  ]),
+  airports: Object.freeze([NORTH_FIELD_AIRPORT, KPWK_AIRPORT]),
+  runways: Object.freeze([NORTH_FIELD_RUNWAY_18, KPWK_RUNWAY_16]),
   availablePlans: Object.freeze(['return_kpwk'] as const),
   evidenceSources: Object.freeze(['weather', 'cockpit', 'traffic', 'passenger'] as const),
   successConditions: Object.freeze([
+    'Take off from North Field runway 18.',
     'Check at least two evidence sources before selecting a route.',
     'Reach final with gear down and at least 20 degrees of flaps.',
     'Touch down below 90 knots and 600 feet per minute.',
@@ -79,16 +83,6 @@ const evidenceFor = (scenario: ScenarioConditions): Readonly<Record<EvidenceSour
   passenger: Object.freeze({ source: 'passenger', headline: 'Cabin report', detail: scenario.passenger.summary, reliability: 'current' }),
 })
 
-const offsetPosition = (origin: { lat: number; lon: number }, bearing: number, distanceNm: number) => {
-  const angular = distanceNm / EARTH_RADIUS_NM
-  const bearingRad = radians(bearing)
-  const lat1 = radians(origin.lat)
-  const lon1 = radians(origin.lon)
-  const lat = Math.asin(Math.sin(lat1) * Math.cos(angular) + Math.cos(lat1) * Math.sin(angular) * Math.cos(bearingRad))
-  const lon = lon1 + Math.atan2(Math.sin(bearingRad) * Math.sin(angular) * Math.cos(lat1), Math.cos(angular) - Math.sin(lat1) * Math.sin(lat))
-  return Object.freeze({ lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI })
-}
-
 const distanceNm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
   const dLat = radians(b.lat - a.lat)
   const dLon = radians(b.lon - a.lon)
@@ -119,31 +113,40 @@ const waypoint = (id: string, name: string, position: { lat: number; lon: number
 
 const routeFor = (plan: RoutePlan): RouteState => {
   if (plan === 'return_kpwk') {
+    const reciprocalHeading = normalizeHeading(KPWK_RUNWAY_16.headingDeg + 180)
+    const baseLeg = offsetPosition(
+      offsetPosition(KPWK_THRESHOLD, reciprocalHeading, 1.45),
+      normalizeHeading(KPWK_RUNWAY_16.headingDeg - 90),
+      0.55,
+    )
     return Object.freeze({ plan, destination: 'KPWK', runway: '16', reason: null, activeWaypointIndex: 0, waypoints: Object.freeze([
-      waypoint('KPWK_FINAL', 'Runway 16 final', offsetPosition(KPWK_THRESHOLD, 339, 1.5), 1_165, 82),
-      waypoint('KPWK_TOUCHDOWN', 'Runway 16 touchdown', offsetPosition(KPWK_THRESHOLD, 159, 0.14), KPWK_ELEVATION, 70),
+      waypoint('NORTH_FIELD_CLIMB', 'North Field departure', offsetPosition(NORTH_FIELD_START, NORTH_FIELD_RUNWAY_18.headingDeg, 0.5), 1_000, 82),
+      waypoint('KPWK_BASE', 'Runway 16 base', baseLeg, 1_050, 82),
+      waypoint('KPWK_FINAL', 'Runway 16 final', offsetPosition(KPWK_THRESHOLD, reciprocalHeading, 1.05), 980, 78),
+      waypoint('KPWK_TOUCHDOWN', 'Runway 16 touchdown', offsetPosition(KPWK_THRESHOLD, KPWK_RUNWAY_16.headingDeg, 0.14), KPWK_ELEVATION, 70),
     ]) })
   }
   return Object.freeze({ plan, destination: null, runway: null, reason: null, activeWaypointIndex: 0, waypoints: Object.freeze([]) })
 }
 
-const initialAutopilot = (): AutopilotState => Object.freeze({ enabled: false, headingDeg: 159, altitudeFt: 1_700, airspeedKt: 105, verticalMode: 'level' })
+const initialAutopilot = (): AutopilotState => Object.freeze({ enabled: false, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg, altitudeFt: 1_200, airspeedKt: 82, verticalMode: 'climb' })
 const initialRoute = (): RouteState => Object.freeze({ plan: 'unassigned', destination: null, runway: null, waypoints: Object.freeze([]), activeWaypointIndex: 0, reason: null })
 
 const initialState = (seed: CheckrideSeed): FlightState => {
-  const start = offsetPosition(KPWK_THRESHOLD, 339, 3)
+  const start = NORTH_FIELD_START
   const scenario = scenarios[seed]
   const autopilot = initialAutopilot()
   const fuel = seed === 81 ? 6.5 : 8.5
   return Object.freeze({
-    ...start, altitudeFt: 1_700, airspeedKt: 105, verticalSpeedFpm: 0, headingDeg: 159,
-    pitchDeg: 0, bankDeg: 0, throttle: 0.62, flapsDeg: 0, gearDown: false,
+    ...start, altitudeFt: NORTH_FIELD_RUNWAY_18.elevationFt, airspeedKt: 0, verticalSpeedFpm: 0, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg,
+    pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: 10, gearDown: true,
     elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
     agentMode: 'idle', autopilot, route: initialRoute(), scenario,
     motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0 }),
+    aircraftPhase: 'takeoff_roll',
     approval: Object.freeze({ status: 'none', question: null, requestedAction: null }),
-    mission: Object.freeze({ phase: 'planning', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, distanceToThresholdNm: distanceNm(start, KPWK_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, eventRevision: 0 }),
-    checkride: Object.freeze({ seed, status: 'decision_required', objective: SHARED_AUTONOMY_MISSION.objective, deadlineSeconds: 300, fuelMinutesRemaining: fuel, alert: 'The engine is running rough. Weather, traffic, and a passenger problem complicate the return.', humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: Object.freeze({ total: 100 }), decision: null }),
+    mission: Object.freeze({ phase: 'preflight', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, distanceToThresholdNm: distanceNm(start, KPWK_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, eventRevision: 0 }),
+    checkride: Object.freeze({ seed, status: 'decision_required', objective: SHARED_AUTONOMY_MISSION.objective, deadlineSeconds: 300, fuelMinutesRemaining: fuel, alert: 'After departure, a rough engine, weather, traffic, and a passenger problem complicate the flight to KPWK.', humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: Object.freeze({ total: 100 }), decision: null }),
     debrief: Object.freeze({ status: 'in_progress', elapsedSeconds: 0, decision: 'unassigned', decisionReason: null, events: Object.freeze([]), landing: null }),
   })
 }
@@ -165,6 +168,7 @@ class FlightSimulator {
   private peakTouchdownImpactFpm = 0
   private crashDynamics: CrashDynamics | null = null
   private pilotControls: PilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+  private manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
   private readonly listeners = new Set<FlightStateListener>()
   private readonly waiters = new Set<EventWaiter>()
   private trace: readonly TraceEvent[] = Object.freeze([])
@@ -207,6 +211,7 @@ class FlightSimulator {
     this.peakTouchdownImpactFpm = 0
     this.crashDynamics = null
     this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+    this.manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
     this.record('system', 'mission_started', `Emergency seed ${seed} started`, {})
     this.queueEvent('emergency_detected', this.state.checkride.alert!)
     this.previousState = this.state
@@ -238,7 +243,10 @@ class FlightSimulator {
   }
 
   transferControl = (owner: ControlOwner, actor: TraceActor = owner, reason = `${owner} took control`) => {
-    if (owner === 'agent') this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+    this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+    this.manualAttitudeTarget = owner === 'human'
+      ? { pitchDeg: this.state.pitchDeg, bankDeg: this.state.bankDeg }
+      : { pitchDeg: 0, bankDeg: 0 }
     const autopilot = Object.freeze({ ...this.state.autopilot, enabled: owner === 'agent' })
     this.state = Object.freeze({ ...this.state, controlOwner: owner, handoffRequested: false, agentMode: owner === 'agent' ? 'thinking' : 'idle', autopilot })
     this.record(actor, 'control_transferred', reason, { owner })
@@ -250,6 +258,28 @@ class FlightSimulator {
     this.takePilotControl(reason)
     this.pilotControls = Object.freeze({ pitchAxis: clamp(input.pitchAxis, -1, 1), bankAxis: clamp(input.bankAxis, -1, 1) })
     this.record(actor, 'pilot_controls', reason, { ...this.pilotControls })
+  }
+
+  releasePilotControls = () => {
+    this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+  }
+
+  levelPilotAttitude = (actor: TraceActor = 'human', reason = 'Pilot leveled the aircraft') => {
+    if (actor === 'human') this.takePilotControl(reason)
+    this.releasePilotControls()
+    this.manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
+    this.record(actor, 'pilot_attitude_target', reason, { pitchDeg: 0, bankDeg: 0 })
+  }
+
+  beginTakeoff = (actor: TraceActor = 'human', reason = 'Takeoff briefing acknowledged') => {
+    if (this.state.mission.phase !== 'preflight') return this.receipt(false, 'Takeoff has already started.')
+    this.state = Object.freeze({
+      ...this.state,
+      mission: Object.freeze({ ...this.state.mission, phase: 'takeoff' }),
+    })
+    this.record(actor, 'takeoff_started', reason, { runway: NORTH_FIELD_RUNWAY_18.id })
+    this.publish(this.state)
+    return this.receipt(true, `Cleared for takeoff on ${NORTH_FIELD_RUNWAY_18.id}.`)
   }
 
   setThrottle = (value: number, actor: TraceActor = 'human', reason = 'Set throttle') => {
@@ -382,6 +412,7 @@ class FlightSimulator {
 
   private advance(dt: number) {
     if (this.state.mission.outcome !== 'in_progress') return
+    if (this.state.mission.phase === 'preflight') return
     if (this.crashDynamics) {
       this.advanceCrash(dt)
       return
@@ -395,20 +426,30 @@ class FlightSimulator {
       throttle = 0
       verticalSpeed = 0
     } else if (this.state.controlOwner === 'agent' && this.state.autopilot.enabled) {
-      const target = this.state.autopilot
-      bank = approach(bank, clamp(headingError(target.headingDeg, heading) * 0.65, -25, 25), 18 * dt)
-      throttle = approach(throttle, clamp(0.52 + (target.airspeedKt - airspeed) * 0.025, 0.25, 1), 0.35 * dt)
-      const altitudeError = target.altitudeFt - this.state.altitudeFt
-      const desiredFpm = target.verticalMode === 'approach'
-        ? clamp(-target.airspeedKt * 5.3 + altitudeError * 3, -700, -120)
-        : target.verticalMode === 'level'
-          ? clamp(altitudeError * 2, -400, 400)
-          : clamp(altitudeError * 2.5, -850, 700)
-      verticalSpeed = approach(verticalSpeed, desiredFpm, 420 * dt)
-      pitch = approach(pitch, clamp(verticalSpeed / 130, -6, 7), 6 * dt)
+      if (this.state.aircraftPhase === 'takeoff_roll') {
+        bank = approach(bank, clamp(headingError(NORTH_FIELD_RUNWAY_18.headingDeg, heading) * 0.65, -12, 12), 24 * dt)
+        throttle = approach(throttle, 1, 0.55 * dt)
+        const rotating = airspeed >= 55
+        verticalSpeed = approach(verticalSpeed, rotating ? 650 : 0, 520 * dt)
+        pitch = approach(pitch, rotating ? 7 : 0, 7 * dt)
+      } else {
+        const target = this.state.autopilot
+        bank = approach(bank, clamp(headingError(target.headingDeg, heading) * 0.65, -25, 25), 18 * dt)
+        throttle = approach(throttle, clamp(0.52 + (target.airspeedKt - airspeed) * 0.025, 0.25, 1), 0.35 * dt)
+        const altitudeError = target.altitudeFt - this.state.altitudeFt
+        const desiredFpm = target.verticalMode === 'approach'
+          ? clamp(-target.airspeedKt * 5.3 + altitudeError * 3, -700, 400)
+          : target.verticalMode === 'level'
+            ? clamp(altitudeError * 2, -400, 400)
+            : clamp(altitudeError * 2.5, -850, 700)
+        verticalSpeed = approach(verticalSpeed, desiredFpm, 420 * dt)
+        pitch = approach(pitch, clamp(verticalSpeed / 130, -6, 7), 6 * dt)
+      }
     } else {
-      pitch = approach(pitch, this.pilotControls.pitchAxis * 55, 32 * dt)
-      bank = approach(bank, this.pilotControls.bankAxis * 60, 70 * dt)
+      this.manualAttitudeTarget.pitchDeg = clamp(this.manualAttitudeTarget.pitchDeg + this.pilotControls.pitchAxis * 32 * dt, -55, 55)
+      this.manualAttitudeTarget.bankDeg = clamp(this.manualAttitudeTarget.bankDeg + this.pilotControls.bankAxis * 70 * dt, -60, 60)
+      pitch = approach(pitch, this.manualAttitudeTarget.pitchDeg, 32 * dt)
+      bank = approach(bank, this.manualAttitudeTarget.bankDeg, 70 * dt)
       const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch)), -4_500, 4_500)
       verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, 1_200 * dt)
     }
@@ -432,8 +473,22 @@ class FlightSimulator {
     let outcome: MissionOutcome = 'in_progress'
     let landing = this.state.debrief.landing
     let touchdownJustOccurred = false
+    let aircraftPhase = this.state.aircraftPhase
+    let departedJustNow = false
 
-    if (altitude <= runway.elevation && verticalSpeed <= 0) {
+    if (aircraftPhase === 'takeoff_roll') {
+      phase = 'takeoff'
+      if (airspeed < 55 || pitch <= 1) {
+        altitude = NORTH_FIELD_RUNWAY_18.elevationFt
+        verticalSpeed = 0
+      } else if (altitude > NORTH_FIELD_RUNWAY_18.elevationFt + 5) {
+        aircraftPhase = 'airborne'
+        phase = routeUpdate.route.plan === 'unassigned' ? 'planning' : 'enroute'
+        departedJustNow = true
+      }
+    }
+
+    if (aircraftPhase !== 'takeoff_roll' && altitude <= runway.elevation && verticalSpeed <= 0) {
       altitude = runway.elevation
       const impactFpm = Math.abs(verticalSpeed)
       this.peakTouchdownImpactFpm = Math.max(this.peakTouchdownImpactFpm, impactFpm)
@@ -453,6 +508,7 @@ class FlightSimulator {
         bank *= 0.55
         phase = 'flare'
       } else if (safeContact) {
+        aircraftPhase = 'landing_roll'
         phase = 'rollout'
         verticalSpeed = 0
         pitch = approach(pitch, 0, 10 * dt)
@@ -461,8 +517,12 @@ class FlightSimulator {
           landing = Object.freeze({ runway: runway.id, sinkRateFpm: Math.round(this.peakTouchdownImpactFpm), airspeedKt: Math.round(airspeed), centerlineErrorFt: Math.round(Math.abs(frame.crossNm) * FEET_PER_NM), touchdownDistanceFt: Math.round(frame.alongNm * FEET_PER_NM), bounces: this.bounceCount, onRunway: true, safe: true })
           touchdownJustOccurred = true
         }
-        if (airspeed < 5) outcome = 'landed'
+        if (airspeed < 5) {
+          aircraftPhase = 'stopped'
+          outcome = 'landed'
+        }
       } else {
+        aircraftPhase = 'crash_slide'
         const crashOutcome = onRunway ? 'unsafe_touchdown' : 'crashed'
         landing = Object.freeze({ runway: runway.id, sinkRateFpm: Math.round(impactFpm), airspeedKt: Math.round(airspeed), centerlineErrorFt: Math.round(Math.abs(frame.crossNm) * FEET_PER_NM), touchdownDistanceFt: Math.round(frame.alongNm * FEET_PER_NM), bounces: this.bounceCount, onRunway, safe: false })
         this.crashDynamics = { elapsedSeconds: 0, outcome: crashOutcome, rollDirection: frame.crossNm < 0 ? -1 : 1 }
@@ -478,7 +538,7 @@ class FlightSimulator {
       verticalAccelerationFpmPerSecond: (verticalSpeed - this.state.verticalSpeedFpm) / dt,
       turnRateDegPerSecond: turnRate,
     })
-    const partial = { ...this.state, ...position, altitudeFt: altitude, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed, headingDeg: heading, pitchDeg: pitch, bankDeg: bank, throttle, elapsedSeconds, fuelMinutesRemaining, motion, route: routeUpdate.route } as FlightState
+    const partial = { ...this.state, ...position, altitudeFt: altitude, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed, headingDeg: heading, pitchDeg: pitch, bankDeg: bank, throttle, elapsedSeconds, fuelMinutesRemaining, motion, aircraftPhase, route: routeUpdate.route } as FlightState
     const mission = this.navigation(partial, phase, outcome, runway)
     const approachJustStabilized = mission.stableApproach && !this.state.mission.stableApproach
     const status = outcome === 'in_progress' ? 'in_progress' : outcome === 'landed' ? 'landed' : 'failed'
@@ -493,6 +553,7 @@ class FlightSimulator {
       agentMode: status === 'in_progress' ? this.state.agentMode : 'complete',
     })
     if (approachJustStabilized) this.queueEvent('approach_stable', `${runway.id} approach is stable.`)
+    if (departedJustNow) this.addDebrief(this.state.controlOwner, `Departed ${NORTH_FIELD_RUNWAY_18.id}`)
     if (touchdownJustOccurred) this.queueEvent('touchdown', `Touchdown on ${runway.id}.`)
     if (outcome !== 'in_progress') this.finish(outcome)
   }
@@ -523,6 +584,7 @@ class FlightSimulator {
       elapsedSeconds,
       fuelMinutesRemaining,
       autopilot: Object.freeze({ ...this.state.autopilot, enabled: false }),
+      aircraftPhase: 'crash_slide',
       motion: Object.freeze({
         longitudinalAccelerationKtPerSecond: (airspeed - this.state.airspeedKt) / dt,
         verticalAccelerationFpmPerSecond: -this.state.verticalSpeedFpm / dt,
@@ -561,7 +623,13 @@ class FlightSimulator {
   }
 
   private runway() {
-    return { threshold: KPWK_THRESHOLD, heading: RUNWAY_HEADING, elevation: KPWK_ELEVATION, lengthFt: 5_001, id: 'KPWK 16' }
+    return {
+      threshold: KPWK_THRESHOLD,
+      heading: KPWK_RUNWAY_16.headingDeg,
+      elevation: KPWK_RUNWAY_16.elevationFt,
+      lengthFt: KPWK_RUNWAY_16.lengthFt,
+      id: 'KPWK 16',
+    }
   }
 
   private glidepathAltitude(position: { lat: number; lon: number }, threshold: { lat: number; lon: number }, elevation: number) {
@@ -592,6 +660,8 @@ class FlightSimulator {
   private takePilotControl(reason: string) {
     if (this.state.controlOwner === 'human') return
     const autopilot = Object.freeze({ ...this.state.autopilot, enabled: false })
+    this.releasePilotControls()
+    this.manualAttitudeTarget = { pitchDeg: this.state.pitchDeg, bankDeg: this.state.bankDeg }
     this.state = Object.freeze({ ...this.state, controlOwner: 'human', agentMode: 'idle', autopilot })
     this.addDebrief('human', 'Pilot overrode the copilot')
     this.record('human', 'human_override', reason, {})

@@ -8,8 +8,9 @@ export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
 export interface FlightEvidence { readonly source: EvidenceSource; readonly headline: string; readonly detail: string; readonly reliability: EvidenceReliability }
 export type RoutePlan = 'unassigned' | 'return_kpwk'
 export type VerticalMode = 'climb' | 'level' | 'descend' | 'approach'
-export type MissionPhase = 'planning' | 'enroute' | 'approach' | 'flare' | 'rollout' | 'complete' | 'failed'
+export type MissionPhase = 'preflight' | 'takeoff' | 'planning' | 'enroute' | 'approach' | 'flare' | 'rollout' | 'complete' | 'failed'
 export type MissionOutcome = 'in_progress' | 'landed' | 'unsafe_touchdown' | 'fuel_exhausted' | 'crashed'
+export type AircraftPhase = 'takeoff_roll' | 'airborne' | 'landing_roll' | 'stopped' | 'crash_slide'
 
 export interface AutopilotState { readonly enabled: boolean; readonly headingDeg: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalMode: VerticalMode }
 export interface MotionState { readonly longitudinalAccelerationKtPerSecond: number; readonly verticalAccelerationFpmPerSecond: number; readonly turnRateDegPerSecond: number }
@@ -53,13 +54,14 @@ export interface FlightState {
   readonly controlOwner: ControlOwner; readonly handoffRequested: boolean; readonly agentMode: AgentMode
   readonly autopilot: AutopilotState
   readonly motion: MotionState
+  readonly aircraftPhase: AircraftPhase
   readonly route: RouteState; readonly scenario: ScenarioConditions
   readonly approval: HumanApprovalState; readonly mission: MissionNavigationState; readonly checkride: CheckrideState; readonly debrief: DebriefState
 }
 
 export interface PilotControls { readonly pitchAxis: number; readonly bankAxis: number }
 export interface TraceEvent { readonly id: number; readonly time: number; readonly elapsedSeconds: number; readonly actor: TraceActor; readonly action: string; readonly reason: string; readonly details: Readonly<Record<string, unknown>> }
-export interface Airport { readonly code: 'KPWK'; readonly name: string; readonly lat: number; readonly lon: number; readonly elevationFt: number }
+export interface Airport { readonly code: 'KPWK' | 'KNFD'; readonly name: string; readonly lat: number; readonly lon: number; readonly elevationFt: number }
 export interface MissionRunway { readonly id: string; readonly airport: Airport['code']; readonly thresholdLat: number; readonly thresholdLon: number; readonly farEndLat: number; readonly farEndLon: number; readonly headingDeg: number; readonly lengthFt: number; readonly widthFt: number; readonly elevationFt: number }
 export interface MissionBrief { readonly id: string; readonly name: string; readonly objective: string; readonly start: string; readonly deadlineSeconds: number; readonly airports: readonly Airport[]; readonly runways: readonly MissionRunway[]; readonly availablePlans: readonly RoutePlan[]; readonly evidenceSources: readonly EvidenceSource[]; readonly successConditions: readonly string[] }
 

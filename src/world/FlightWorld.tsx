@@ -102,6 +102,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     const world = createAirportWorld(scene, Math.min(8, renderer.capabilities.getMaxAnisotropy()))
     const aircraft = createAircraft()
     const landingGear = aircraft.userData.landingGear as Group[]
+    const flaps = aircraft.userData.flaps as Group[]
     const crashEffects = createCrashEffects()
     scene.add(aircraft, crashEffects.root)
 
@@ -124,6 +125,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     const attitudeQuaternion = new Quaternion()
     let previousMode: FlightCameraMode | null = null
     let smoothedAcceleration = 0
+    let visualFlapRadians = 0
     let crashWasActive = false
     let animationFrame = 0
     let disposed = false
@@ -186,6 +188,8 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       attitudeQuaternion.slerpQuaternions(previousAttitudeQuaternion, currentAttitudeQuaternion, interpolationAlpha)
       aircraft.quaternion.copy(attitudeQuaternion)
       for (const gear of landingGear) gear.visible = state.gearDown
+      visualFlapRadians = MathUtils.damp(visualFlapRadians, state.flapsDeg * DEG_TO_RAD, 4.5, deltaSeconds)
+      for (const flap of flaps) flap.rotation.x = visualFlapRadians
 
       if (crashLanding) {
         aircraft.updateMatrixWorld(true)

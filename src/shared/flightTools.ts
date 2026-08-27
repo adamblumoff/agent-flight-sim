@@ -47,7 +47,7 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_emergency', title: 'Start emergency flight', readOnly: false,
-    description: 'Start a reproducible airborne emergency and take copilot control. The aircraft keeps flying while you inspect evidence and choose a plan.',
+    description: 'Start a reproducible departure from North Field and take copilot control. The aircraft takes off while you inspect evidence and choose the KPWK arrival plan.',
     inputSchema: { type: 'object', properties: { seed: { type: 'number', enum: checkrideSeeds, default: 17 } }, additionalProperties: false },
   },
   {

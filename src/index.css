@@ -129,6 +129,108 @@ summary:focus-visible {
     linear-gradient(90deg, rgb(8 10 7 / 22%) 0%, transparent 28%, transparent 62%, rgb(8 10 7 / 38%) 100%);
 }
 
+.takeoff-briefing {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(8 10 8 / 62%);
+  backdrop-filter: blur(7px);
+}
+
+.takeoff-briefing-card {
+  width: min(520px, 100%);
+  padding: 28px;
+  border: 1px solid rgb(244 239 222 / 19%);
+  border-radius: 18px;
+  background: rgb(23 24 21 / 96%);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 46%);
+  color: var(--cream);
+}
+
+.takeoff-briefing-card > p:first-child {
+  margin: 0;
+  color: var(--green);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.takeoff-briefing h1 {
+  margin: 9px 0 10px;
+  font-size: clamp(24px, 4vw, 34px);
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+
+#takeoff-briefing-copy {
+  margin: 0;
+  color: var(--cream-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.takeoff-briefing ol {
+  display: grid;
+  gap: 9px;
+  margin: 21px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.takeoff-briefing li {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  gap: 11px;
+  color: rgb(244 239 222 / 82%);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.takeoff-briefing kbd {
+  display: inline-grid;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0 6px;
+  place-items: center;
+  border: 1px solid rgb(244 239 222 / 18%);
+  border-bottom-color: rgb(244 239 222 / 32%);
+  border-radius: 6px;
+  background: rgb(244 239 222 / 7%);
+  color: var(--cream);
+  font: 600 10px/1 "Kode Mono Variable", monospace;
+}
+
+.takeoff-briefing li span kbd {
+  display: inline-grid;
+  min-height: 22px;
+  vertical-align: middle;
+}
+
+.takeoff-briefing-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 17px;
+  border-top: 1px solid rgb(244 239 222 / 10%);
+}
+
+.takeoff-briefing-actions > span {
+  max-width: 250px;
+  color: rgb(244 239 222 / 52%);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.takeoff-briefing-actions button {
+  flex: 0 0 auto;
+}
+
 .flight-header {
   position: absolute;
   z-index: 10;
@@ -1030,6 +1132,23 @@ summary:focus-visible {
 }
 
 @media (max-width: 480px) {
+  .takeoff-briefing {
+    padding: 12px;
+  }
+
+  .takeoff-briefing-card {
+    padding: 21px 18px;
+  }
+
+  .takeoff-briefing-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .takeoff-briefing-actions > span {
+    max-width: none;
+  }
+
   .flight-brand span {
     display: none;
   }

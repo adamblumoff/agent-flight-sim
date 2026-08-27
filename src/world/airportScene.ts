@@ -26,7 +26,7 @@ import {
   Vector3,
 } from 'three'
 import type { FlightState } from '../sim/types'
-import { waypointToWorldVector, WORLD_RUNWAY } from './coordinates'
+import { waypointToWorldVector, WORLD_DEPARTURE_RUNWAY, WORLD_RUNWAY } from './coordinates'
 
 const runway = WORLD_RUNWAY
 const runwayLength = runway.lengthFt * 0.3048
@@ -88,14 +88,21 @@ function createTerrainMaterial(anisotropy: number) {
   return new MeshStandardMaterial({ map: texture, color: 0xb7c0a8, roughness: 0.98 })
 }
 
-function createRunwayTexture(anisotropy: number) {
+function createRunwayTexture(
+  anisotropy: number,
+  widthMeters = runwayWidth,
+  lengthMeters = runwayLength,
+  nearNumber = '16',
+  farNumber = '34',
+  seed = 16,
+) {
   const canvas = document.createElement('canvas')
   canvas.width = 512
   canvas.height = 4_096
   const context = canvas.getContext('2d')!
-  const random = seededRandom(16)
-  const xToPixel = (x: number) => (x / runwayWidth + 0.5) * canvas.width
-  const zToPixel = (z: number) => (1 + z / runwayLength) * canvas.height
+  const random = seededRandom(seed)
+  const xToPixel = (x: number) => (x / widthMeters + 0.5) * canvas.width
+  const zToPixel = (z: number) => (1 + z / lengthMeters) * canvas.height
   const drawMarking = (x: number, z: number, width: number, depth: number) => {
     const left = xToPixel(x - width / 2)
     const right = xToPixel(x + width / 2)
@@ -115,13 +122,16 @@ function createRunwayTexture(anisotropy: number) {
   context.globalAlpha = 1
   context.fillStyle = '#e5e3d7'
 
-  for (let z = -235; z > -runwayLength + 210; z -= 62) drawMarking(0, z, 0.85, 27)
-  for (const end of [-48, -runwayLength + 48]) {
-    for (let x = -17.5; x <= 17.5; x += 5) drawMarking(x, end, 2.1, 24)
+  for (let z = -190; z > -lengthMeters + 170; z -= 62) drawMarking(0, z, 0.85, 27)
+  const thresholdHalfWidth = Math.max(6, widthMeters / 2 - 5)
+  for (const end of [-42, -lengthMeters + 42]) {
+    for (let x = -thresholdHalfWidth; x <= thresholdHalfWidth; x += 5) drawMarking(x, end, 2.1, 21)
   }
-  for (const z of [-325, -390, -runwayLength + 325, -runwayLength + 390]) {
-    drawMarking(-8.6, z, 3.2, 42)
-    drawMarking(8.6, z, 3.2, 42)
+  const aimingOffset = Math.min(325, lengthMeters * 0.28)
+  for (const z of [-aimingOffset, -aimingOffset - 65, -lengthMeters + aimingOffset, -lengthMeters + aimingOffset + 65]) {
+    const markingOffset = Math.min(8.6, widthMeters * 0.22)
+    drawMarking(-markingOffset, z, 3.2, 36)
+    drawMarking(markingOffset, z, 3.2, 36)
   }
 
   const drawRunwayNumber = (text: string, z: number, rotation: number) => {
@@ -134,8 +144,8 @@ function createRunwayTexture(anisotropy: number) {
     context.fillText(text, 0, 0)
     context.restore()
   }
-  drawRunwayNumber('16', -132, Math.PI)
-  drawRunwayNumber('34', -runwayLength + 132, 0)
+  drawRunwayNumber(nearNumber, -112, Math.PI)
+  drawRunwayNumber(farNumber, -lengthMeters + 112, 0)
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
@@ -219,6 +229,29 @@ function addRunway(root: Group, anisotropy: number) {
       for (const lights of lightMeshes) lights.visible = opacity > 0.01
     },
   }
+}
+
+function addDepartureRunway(root: Group, anisotropy: number) {
+  const departure = WORLD_DEPARTURE_RUNWAY
+  const length = departure.lengthFt * 0.3048
+  const width = departure.widthFt * 0.3048
+  const group = new Group()
+  group.name = 'North Field runway 18'
+  group.position.set(departure.x, 0, departure.z)
+  group.rotation.y = -departure.headingOffsetDeg * Math.PI / 180
+  const surfaceMaterial = new MeshStandardMaterial({
+    map: createRunwayTexture(anisotropy, width, length, departure.nearNumber, departure.farNumber, 18),
+    roughness: 0.94,
+  })
+  const surface = new Mesh(
+    new BoxGeometry(width, departure.surfaceY, length),
+    [asphalt, asphalt, surfaceMaterial, asphalt, asphalt, asphalt],
+  )
+  surface.castShadow = false
+  surface.receiveShadow = true
+  surface.position.set(0, departure.surfaceY / 2, -length / 2)
+  group.add(surface)
+  root.add(group)
 }
 
 function addAirport(root: Group) {
@@ -340,6 +373,7 @@ export function createAirportWorld(scene: Scene, anisotropy = 1) {
   terrain.receiveShadow = true
   root.add(terrain)
   const runwayLights = addRunway(root, anisotropy)
+  addDepartureRunway(root, anisotropy)
   addAirport(root)
 
   const sky = createSky()

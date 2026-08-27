@@ -1,16 +1,17 @@
 import type { FlightState } from '../sim/types'
 import type { Vector3 } from 'three'
+import { KPWK_RUNWAY_16, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
 
 export const FEET_TO_METERS = 0.3048
 export const NM_TO_METERS = 1_852
 
 export const WORLD_RUNWAY = Object.freeze({
-  thresholdLat: 42.12332888888889,
-  thresholdLon: -87.90712641666667,
-  headingDeg: 159,
-  lengthFt: 5_001,
-  widthFt: 150,
-  elevationFt: 645,
+  thresholdLat: KPWK_RUNWAY_16.thresholdLat,
+  thresholdLon: KPWK_RUNWAY_16.thresholdLon,
+  headingDeg: KPWK_RUNWAY_16.headingDeg,
+  lengthFt: KPWK_RUNWAY_16.lengthFt,
+  widthFt: KPWK_RUNWAY_16.widthFt,
+  elevationFt: KPWK_RUNWAY_16.elevationFt,
   surfaceY: 0.12,
 })
 
@@ -29,6 +30,27 @@ export function positionToWorld(lat: number, lon: number, altitudeFt: number) {
     z: -alongNm * NM_TO_METERS,
   }
 }
+
+const departureThreshold = positionToWorld(
+  NORTH_FIELD_RUNWAY_18.thresholdLat,
+  NORTH_FIELD_RUNWAY_18.thresholdLon,
+  NORTH_FIELD_RUNWAY_18.elevationFt,
+)
+
+export const WORLD_DEPARTURE_RUNWAY = Object.freeze({
+  thresholdLat: NORTH_FIELD_RUNWAY_18.thresholdLat,
+  thresholdLon: NORTH_FIELD_RUNWAY_18.thresholdLon,
+  headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg,
+  lengthFt: NORTH_FIELD_RUNWAY_18.lengthFt,
+  widthFt: NORTH_FIELD_RUNWAY_18.widthFt,
+  elevationFt: NORTH_FIELD_RUNWAY_18.elevationFt,
+  surfaceY: 0.12,
+  x: departureThreshold.x,
+  z: departureThreshold.z,
+  headingOffsetDeg: NORTH_FIELD_RUNWAY_18.headingDeg - KPWK_RUNWAY_16.headingDeg,
+  nearNumber: '18',
+  farNumber: '36',
+})
 
 export const stateToWorld = (state: FlightState) =>
   positionToWorld(state.lat, state.lon, state.altitudeFt)

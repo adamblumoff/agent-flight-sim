@@ -26,8 +26,9 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     const seed = input.seed ?? 17
     if (!seedSet.has(seed)) throw new TypeError('seed must be 17, 42, or 81')
     flightSimulator.reset(seed as CheckrideSeed)
+    flightSimulator.beginTakeoff('agent', 'Copilot acknowledged the takeoff briefing')
     flightSimulator.transferControl('agent', 'agent', 'Copilot started the emergency mission')
-    return receipt(`Emergency seed ${seed} is airborne`, 'automation', { seed: seed as CheckrideSeed, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
+    return receipt(`Emergency seed ${seed} is rolling from North Field`, 'automation', { seed: seed as CheckrideSeed, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
   },
   get_mission_brief: async () => receipt('Mission brief read', 'neutral', { brief: flightSimulator.getMissionBrief() }),
   get_flight_state: async () => receipt('Live flight state read', 'neutral', {

@@ -68,9 +68,26 @@ export function createAircraft() {
   nose.rotation.x = -Math.PI / 2
   nose.position.set(0, 1.4, -3.9)
 
-  const wings = mesh(new BoxGeometry(10.8, 0.14, 1.42), bodyMaterial)
-  wings.position.set(0, 1.32, -0.55)
+  const wings = mesh(new BoxGeometry(10.8, 0.14, 1), bodyMaterial)
+  wings.position.set(0, 1.32, -0.75)
   wings.rotation.x = -0.035
+
+  const outerWingPanels = [-4.35, 4.35].map((x) => {
+    const panel = mesh(new BoxGeometry(2.1, 0.12, 0.56), bodyMaterial)
+    panel.position.set(x, 1.31, 0.03)
+    return panel
+  })
+
+  const flaps = [-2.15, 2.15].map((x) => {
+    const pivot = new Group()
+    pivot.name = 'Flap'
+    pivot.position.set(x, 1.31, -0.25)
+    const panel = mesh(new BoxGeometry(2.2, 0.11, 0.56), bodyMaterial)
+    panel.position.z = 0.28
+    pivot.add(panel)
+    return pivot
+  })
+  aircraft.userData.flaps = flaps
 
   const wingStripe = mesh(new BoxGeometry(10.3, 0.04, 0.28), accentMaterial)
   wingStripe.position.set(0, 1.4, -0.8)
@@ -104,6 +121,8 @@ export function createAircraft() {
     fuselage,
     nose,
     wings,
+    ...outerWingPanels,
+    ...flaps,
     wingStripe,
     tailplane,
     fin,

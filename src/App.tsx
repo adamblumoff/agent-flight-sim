@@ -78,6 +78,8 @@ function deriveObservations(state: FlightState): readonly CopilotObservation[] {
 }
 
 function deriveRecommendation(state: FlightState): string {
+  if (state.mission.phase === 'preflight') return 'Depart North Field runway 18, then continue to KPWK runway 16.'
+  if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
   if (state.approval.status === 'pending') {
     return state.approval.requestedAction ?? 'Hold the current flight path until you decide.'
   }
@@ -92,6 +94,12 @@ function deriveRecommendation(state: FlightState): string {
 }
 
 function derivePlan(state: FlightState): readonly string[] {
+  if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
+    return [
+      'Take off from North Field runway 18 and climb through 1,000 feet.',
+      'Assess the emergency, then continue to KPWK runway 16.',
+    ]
+  }
   if (state.route.plan === 'unassigned') {
     return [
       'Confirm weather, engine, passenger, and traffic conditions.',
@@ -112,6 +120,8 @@ function derivePlan(state: FlightState): readonly string[] {
 }
 
 function deriveAction(state: FlightState): string {
+  if (state.mission.phase === 'preflight') return 'Ready on North Field runway 18.'
+  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return 'Accelerating on runway 18. Rotate near 60 knots.'
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
@@ -128,6 +138,8 @@ function deriveAction(state: FlightState): string {
 }
 
 function deriveHeadline(state: FlightState): string {
+  if (state.mission.phase === 'preflight') return 'North Field to KPWK'
+  if (state.mission.phase === 'takeoff') return 'Departing runway 18'
   if (state.approval.status === 'pending') return 'Holding for your decision'
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') return 'Assessing the emergency'
   if (state.agentMode === 'flying') {
@@ -193,6 +205,7 @@ export default function App() {
   )
   const { status: webMcpStatus, activities } = useWebMcp()
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
+  const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
     message: 'Loading the flight world.',
@@ -222,7 +235,19 @@ export default function App() {
     )
   }, [])
 
-  const resetScenario = useCallback(() => flightSimulator.reset(), [])
+  const resetScenario = useCallback(() => {
+    flightSimulator.reset()
+    setShowTakeoffBrief(true)
+  }, [])
+
+  const beginTakeoff = useCallback(() => {
+    flightSimulator.beginTakeoff('human', 'Pilot started the North Field departure')
+    setShowTakeoffBrief(false)
+  }, [])
+
+  useEffect(() => {
+    if (state.mission.phase !== 'preflight') setShowTakeoffBrief(false)
+  }, [state.mission.phase])
 
   useEffect(() => {
     const heldFlightKeys = new Set<string>()
@@ -230,6 +255,7 @@ export default function App() {
     const updatePilotControls = () => {
       if (flightSimulator.getState().controlOwner !== 'human') {
         heldFlightKeys.clear()
+        flightSimulator.releasePilotControls()
         return
       }
       flightSimulator.setPilotControls({
@@ -239,12 +265,13 @@ export default function App() {
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (showTakeoffBrief) return
       const target = event.target
-      if (target instanceof HTMLElement && target.matches('input, textarea, select, button, [contenteditable="true"]')) return
+      if (target instanceof HTMLElement && target.matches('input:not([type="range"]), textarea, select, [contenteditable="true"]')) return
 
       const current = flightSimulator.getState()
       const key = event.key.toLowerCase()
-      if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'f', 'g', 't'].includes(key)) event.preventDefault()
+      if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'f', 'g', 't', 'x'].includes(key)) event.preventDefault()
 
       if (current.controlOwner === 'human') {
         if (['w', 'a', 's', 'd'].includes(key) && !event.repeat) {
@@ -254,6 +281,7 @@ export default function App() {
         if (key === 'arrowup') flightSimulator.setThrottle(current.throttle + 0.05, 'human', 'Pilot throttle input')
         if (key === 'arrowdown') flightSimulator.setThrottle(current.throttle - 0.05, 'human', 'Pilot throttle input')
         if (key === 'g') flightSimulator.setGear(!current.gearDown, 'human', 'Pilot gear command')
+        if (key === 'x') flightSimulator.levelPilotAttitude('human', 'Pilot pressed the level-flight shortcut')
         if (key === 'f') {
           const index = flapSettings.indexOf(current.flapsDeg as (typeof flapSettings)[number])
           flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Pilot flap command')
@@ -270,20 +298,26 @@ export default function App() {
     }
 
     function releasePilotControls() {
-      if (heldFlightKeys.size === 0) return
       heldFlightKeys.clear()
-      updatePilotControls()
+      flightSimulator.releasePilotControls()
+    }
+
+    function releaseHiddenControls() {
+      if (document.visibilityState === 'hidden') releasePilotControls()
     }
 
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
     window.addEventListener('blur', releasePilotControls)
+    document.addEventListener('visibilitychange', releaseHiddenControls)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', releasePilotControls)
+      document.removeEventListener('visibilitychange', releaseHiddenControls)
+      flightSimulator.releasePilotControls()
     }
-  }, [toggleHandoff, webMcpStatus])
+  }, [showTakeoffBrief, toggleHandoff, webMcpStatus])
 
   const webMcpLabels = {
     registering: 'Connecting',
@@ -292,8 +326,11 @@ export default function App() {
     error: 'Connection failed',
   } as const
   const ownershipMode = deriveOwnershipMode(state, webMcpStatus === 'ready')
-  const destination = state.route.destination ?? 'Route pending'
-  const routeDetail = state.route.destination === null
+  const isDeparture = state.mission.phase === 'preflight' || state.mission.phase === 'takeoff'
+  const destination = isDeparture ? 'KPWK' : state.route.destination ?? 'Route pending'
+  const routeDetail = isDeparture
+    ? 'Depart NF18 · Land RWY16'
+    : state.route.destination === null
     ? 'Decision needed'
     : state.route.runway
       ? `Runway ${state.route.runway}`
@@ -308,12 +345,39 @@ export default function App() {
       </Suspense>
       <div className="scene-shade" />
 
+      {showTakeoffBrief && state.mission.phase === 'preflight' ? (
+        <section
+          className="takeoff-briefing"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="takeoff-briefing-title"
+          aria-describedby="takeoff-briefing-copy"
+        >
+          <div className="takeoff-briefing-card">
+            <p>Flight briefing</p>
+            <h1 id="takeoff-briefing-title">Take off here. Land at KPWK.</h1>
+            <p id="takeoff-briefing-copy">
+              You are lined up on North Field runway 18. Depart, climb through 1,000 feet, then continue to Chicago Executive runway 16.
+            </p>
+            <ol>
+              <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
+              <li><kbd>W</kbd><span>At 60 knots, raise the nose. Release the key when the pitch looks right.</span></li>
+              <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
+            </ol>
+            <div className="takeoff-briefing-actions">
+              <span>You can hand control to the copilot once airborne.</span>
+              <Button autoFocus onClick={beginTakeoff}>Begin takeoff</Button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <header className="flight-header">
         <div className="flight-brand">
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
             <strong>Flightdeck</strong>
-            <span>N417FS · emergency checkride</span>
+            <span>N417FS · North Field to KPWK</span>
           </div>
         </div>
 
