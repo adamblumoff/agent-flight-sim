@@ -1,5 +1,4 @@
 import {
-  AdditiveBlending,
   AmbientLight,
   BoxGeometry,
   BufferAttribute,
@@ -14,13 +13,12 @@ import {
   InstancedMesh,
   Line,
   LineBasicMaterial,
+  LineSegments,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
-  Points,
-  PointsMaterial,
   Scene,
   ShaderMaterial,
   SphereGeometry,
@@ -170,12 +168,13 @@ function groundBox(
 }
 
 function addRunway(root: Group, anisotropy: number) {
+  const runwayMaterial = new MeshStandardMaterial({ map: createRunwayTexture(anisotropy), roughness: 0.92 })
   const runwaySurface = new Mesh(
-    new PlaneGeometry(runwayWidth, runwayLength),
-    new MeshStandardMaterial({ map: createRunwayTexture(anisotropy), roughness: 0.92 }),
+    new BoxGeometry(runwayWidth, runway.surfaceY, runwayLength),
+    [asphalt, asphalt, runwayMaterial, asphalt, asphalt, asphalt],
   )
-  runwaySurface.rotation.x = -Math.PI / 2
-  runwaySurface.position.set(0, 0.006, -runwayLength / 2)
+  runwaySurface.castShadow = false
+  runwaySurface.position.set(0, runway.surfaceY / 2, -runwayLength / 2)
   runwaySurface.receiveShadow = true
   root.add(runwaySurface)
 
@@ -295,21 +294,23 @@ function createSky() {
 }
 
 function createRain() {
-  const count = 620
-  const positions = new Float32Array(count * 3)
+  const count = 380
+  const random = seededRandom(19_743)
+  const positions = new Float32Array(count * 6)
   for (let index = 0; index < count; index += 1) {
-    positions[index * 3] = (Math.random() - 0.5) * 180
-    positions[index * 3 + 1] = Math.random() * 115
-    positions[index * 3 + 2] = (Math.random() - 0.5) * 220
+    const offset = index * 6
+    const x = (random() - 0.5) * 220
+    const y = random() * 95
+    const z = -35 - random() * 205
+    const length = 0.8 + random() * 0.8
+    positions.set([x, y, z, x, y - length, z], offset)
   }
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new BufferAttribute(positions, 3))
-  const rain = new Points(geometry, new PointsMaterial({
+  const rain = new LineSegments(geometry, new LineBasicMaterial({
     color: 0xc9d8dc,
-    size: 0.36,
     transparent: true,
-    opacity: 0.55,
-    blending: AdditiveBlending,
+    opacity: 0.26,
     depthWrite: false,
   }))
   rain.frustumCulled = false
@@ -376,7 +377,7 @@ export function createAirportWorld(scene: Scene, anisotropy = 1) {
     const weatherKey = `${weather}:${visibility}:${state.scenario.weather.ceilingFt}`
     if (currentWeather === weatherKey) return
     currentWeather = weatherKey
-    rain.visible = weather === 'low' || weather === 'rain'
+    rain.visible = weather === 'rain'
     const fogFar = Math.min(6_500, Math.max(1_200, visibility * 1_609.34))
     const fogNear = Math.max(100, fogFar * 0.08)
     if (weather === 'low' || weather === 'rain') {
@@ -407,11 +408,16 @@ export function createAirportWorld(scene: Scene, anisotropy = 1) {
     sun.target.position.set(shadowCenterX, 0, shadowCenterZ)
 
     if (rain.visible) {
-      rain.position.set(aircraftPosition.x, Math.max(aircraftPosition.y - 30, 0), aircraftPosition.z)
+      rain.position.set(aircraftPosition.x, Math.max(aircraftPosition.y - 24, 0), aircraftPosition.z)
+      rain.rotation.y = -(state.headingDeg - runway.headingDeg) * Math.PI / 180
       const positions = rain.geometry.getAttribute('position') as BufferAttribute
-      for (let index = 0; index < positions.count; index += 1) {
-        const y = positions.getY(index) - deltaSeconds * 72
-        positions.setY(index, y < 0 ? 115 : y)
+      for (let index = 0; index < positions.count; index += 2) {
+        const top = positions.getY(index)
+        const length = top - positions.getY(index + 1)
+        const nextTop = top - deltaSeconds * 72
+        const wrappedTop = nextTop < 0 ? 95 : nextTop
+        positions.setY(index, wrappedTop)
+        positions.setY(index + 1, wrappedTop - length)
       }
       positions.needsUpdate = true
     }
@@ -432,7 +438,7 @@ export function createAirportWorld(scene: Scene, anisotropy = 1) {
 
 export function disposeScene(scene: Scene) {
   scene.traverse((object) => {
-    if (!(object instanceof Mesh || object instanceof Points || object instanceof Line)) return
+    if (!(object instanceof Mesh || object instanceof Line)) return
     object.geometry.dispose()
     const materials = Array.isArray(object.material) ? object.material : [object.material]
     for (const material of materials) {

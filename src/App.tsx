@@ -141,7 +141,9 @@ function deriveDebrief(state: FlightState): CopilotDebrief | null {
 
   const landing = state.debrief.landing
   const landingSummary = landing
-    ? `${landing.safe ? 'Stable' : 'Unsafe'} touchdown on runway ${landing.runway} at ${Math.abs(Math.round(landing.sinkRateFpm))} fpm, ${Math.round(landing.centerlineErrorFt)} ft from centerline.`
+    ? landing.onRunway
+      ? `${landing.safe ? 'Stable' : 'Unsafe'} touchdown on runway ${landing.runway} at ${Math.abs(Math.round(landing.sinkRateFpm))} fpm${landing.bounces ? ` after ${landing.bounces} ${landing.bounces === 1 ? 'bounce' : 'bounces'}` : ''}, ${Math.round(landing.centerlineErrorFt)} ft from centerline.`
+      : `The aircraft hit the ground outside ${landing.runway} at ${Math.abs(Math.round(landing.sinkRateFpm))} fpm and ${Math.round(landing.airspeedKt)} kt.`
     : state.debrief.decisionReason ?? 'The flight ended before a landing result was recorded.'
 
   return {

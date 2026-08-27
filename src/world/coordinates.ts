@@ -11,6 +11,7 @@ export const WORLD_RUNWAY = Object.freeze({
   lengthFt: 5_001,
   widthFt: 150,
   elevationFt: 645,
+  surfaceY: 0.12,
 })
 
 const heading = (WORLD_RUNWAY.headingDeg * Math.PI) / 180

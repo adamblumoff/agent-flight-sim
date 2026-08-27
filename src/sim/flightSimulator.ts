@@ -15,6 +15,12 @@ const EARTH_RADIUS_NM = 3_440.065
 const FEET_PER_NM = 6_076.12
 const RUNWAY_HEADING = 159
 const KPWK_ELEVATION = 645
+const MAX_SAFE_TOUCHDOWN_FPM = 600
+const BOUNCE_THRESHOLD_FPM = 240
+const MAX_TOUCHDOWN_BANK_DEG = 18
+const MAX_TOUCHDOWN_SPEED_KT = 90
+const MAX_BOUNCES = 2
+const CRASH_SLIDE_SECONDS = 2.5
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 const approach = (value: number, target: number, change: number) => value < target ? Math.min(value + change, target) : Math.max(value - change, target)
@@ -142,6 +148,7 @@ const initialState = (seed: CheckrideSeed): FlightState => {
 }
 
 interface EventWaiter { readonly afterRevision: number; readonly events: ReadonlySet<FlightEventType>; readonly resolve: (result: FlightEventWaitResult) => void; readonly timeout: ReturnType<typeof setTimeout> }
+interface CrashDynamics { elapsedSeconds: number; readonly outcome: 'unsafe_touchdown' | 'crashed'; readonly rollDirection: -1 | 1 }
 
 class FlightSimulator {
   private state = initialState(17)
@@ -153,6 +160,9 @@ class FlightSimulator {
   private animationFrame: number | null = null
   private traceId = 1
   private eventRevision = 0
+  private bounceCount = 0
+  private peakTouchdownImpactFpm = 0
+  private crashDynamics: CrashDynamics | null = null
   private readonly listeners = new Set<FlightStateListener>()
   private readonly waiters = new Set<EventWaiter>()
   private trace: readonly TraceEvent[] = Object.freeze([])
@@ -191,6 +201,9 @@ class FlightSimulator {
     this.events = Object.freeze([])
     this.trace = Object.freeze([])
     this.accumulator = 0
+    this.bounceCount = 0
+    this.peakTouchdownImpactFpm = 0
+    this.crashDynamics = null
     this.record('system', 'mission_started', `Emergency seed ${seed} started`, {})
     this.queueEvent('emergency_detected', this.state.checkride.alert!)
     this.previousState = this.state
@@ -366,6 +379,10 @@ class FlightSimulator {
 
   private advance(dt: number) {
     if (this.state.mission.outcome !== 'in_progress') return
+    if (this.crashDynamics) {
+      this.advanceCrash(dt)
+      return
+    }
     const scenario = this.state.scenario
     let { headingDeg: heading, bankDeg: bank, pitchDeg: pitch, throttle, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed } = this.state
 
@@ -412,17 +429,41 @@ class FlightSimulator {
 
     if (altitude <= runway.elevation && verticalSpeed <= 0) {
       altitude = runway.elevation
-      if (onRunway && this.state.gearDown && airspeed <= 90 && Math.abs(verticalSpeed) <= 600) {
+      const impactFpm = Math.abs(verticalSpeed)
+      this.peakTouchdownImpactFpm = Math.max(this.peakTouchdownImpactFpm, impactFpm)
+      const safeContact = onRunway
+        && this.state.gearDown
+        && airspeed <= MAX_TOUCHDOWN_SPEED_KT
+        && impactFpm <= MAX_SAFE_TOUCHDOWN_FPM
+        && Math.abs(bank) <= MAX_TOUCHDOWN_BANK_DEG
+        && pitch >= -6
+
+      if (safeContact && impactFpm > BOUNCE_THRESHOLD_FPM && this.bounceCount < MAX_BOUNCES) {
+        this.bounceCount += 1
+        altitude = runway.elevation + 0.15
+        verticalSpeed = impactFpm * (this.bounceCount === 1 ? 0.36 : 0.22)
+        airspeed *= 0.97
+        pitch = Math.max(pitch, 1.5)
+        bank *= 0.55
+        phase = 'flare'
+      } else if (safeContact) {
         phase = 'rollout'
         verticalSpeed = 0
         pitch = approach(pitch, 0, 10 * dt)
         airspeed = Math.max(0, airspeed - (3.5 + (1 - throttle) * 7) * dt)
         if (!landing) {
-          landing = Object.freeze({ runway: runway.id, sinkRateFpm: Math.round(Math.abs(this.state.verticalSpeedFpm)), airspeedKt: Math.round(this.state.airspeedKt), centerlineErrorFt: Math.round(Math.abs(frame.crossNm) * FEET_PER_NM), touchdownDistanceFt: Math.round(frame.alongNm * FEET_PER_NM), safe: true })
+          landing = Object.freeze({ runway: runway.id, sinkRateFpm: Math.round(this.peakTouchdownImpactFpm), airspeedKt: Math.round(airspeed), centerlineErrorFt: Math.round(Math.abs(frame.crossNm) * FEET_PER_NM), touchdownDistanceFt: Math.round(frame.alongNm * FEET_PER_NM), bounces: this.bounceCount, onRunway: true, safe: true })
           touchdownJustOccurred = true
         }
         if (airspeed < 5) outcome = 'landed'
-      } else outcome = onRunway ? 'unsafe_touchdown' : 'crashed'
+      } else {
+        const crashOutcome = onRunway ? 'unsafe_touchdown' : 'crashed'
+        landing = Object.freeze({ runway: runway.id, sinkRateFpm: Math.round(impactFpm), airspeedKt: Math.round(airspeed), centerlineErrorFt: Math.round(Math.abs(frame.crossNm) * FEET_PER_NM), touchdownDistanceFt: Math.round(frame.alongNm * FEET_PER_NM), bounces: this.bounceCount, onRunway, safe: false })
+        this.crashDynamics = { elapsedSeconds: 0, outcome: crashOutcome, rollDirection: frame.crossNm < 0 ? -1 : 1 }
+        throttle = 0
+        verticalSpeed = 0
+        phase = 'failed'
+      }
     }
     if ((fuelMinutesRemaining <= 0 || elapsedSeconds >= SHARED_AUTONOMY_MISSION.deadlineSeconds) && outcome === 'in_progress') outcome = 'fuel_exhausted'
 
@@ -443,6 +484,48 @@ class FlightSimulator {
     if (approachJustStabilized) this.queueEvent('approach_stable', `${runway.id} approach is stable.`)
     if (touchdownJustOccurred) this.queueEvent('touchdown', `Touchdown on ${runway.id}.`)
     if (outcome !== 'in_progress') this.finish(outcome)
+  }
+
+  private advanceCrash(dt: number) {
+    const crash = this.crashDynamics!
+    crash.elapsedSeconds += dt
+    const runway = this.runway()
+    const airspeed = Math.max(0, this.state.airspeedKt - 64 * dt)
+    const heading = normalizeHeading(this.state.headingDeg + crash.rollDirection * 12 * dt)
+    const position = offsetPosition(this.state, heading, airspeed * dt / 3_600)
+    const elapsedSeconds = this.state.elapsedSeconds + dt
+    const fuelMinutesRemaining = Math.max(0, this.state.fuelMinutesRemaining - dt / 60 * 0.65)
+    const pitch = approach(this.state.pitchDeg, -14, 28 * dt)
+    const bank = approach(this.state.bankDeg, crash.rollDirection * 68, 62 * dt)
+    const finished = crash.elapsedSeconds >= CRASH_SLIDE_SECONDS || airspeed < 3
+    const outcome: MissionOutcome = finished ? crash.outcome : 'in_progress'
+    const partial = {
+      ...this.state,
+      ...position,
+      altitudeFt: runway.elevation,
+      airspeedKt: airspeed,
+      verticalSpeedFpm: 0,
+      headingDeg: heading,
+      pitchDeg: pitch,
+      bankDeg: bank,
+      throttle: 0,
+      elapsedSeconds,
+      fuelMinutesRemaining,
+      autopilot: Object.freeze({ ...this.state.autopilot, enabled: false }),
+    } as FlightState
+    const mission = this.navigation(partial, 'failed', outcome, runway)
+    const status = finished ? 'failed' : 'in_progress'
+    this.state = Object.freeze({
+      ...partial,
+      mission,
+      checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, status: finished ? 'complete' : this.state.checkride.status, score: finished ? Object.freeze({ total: 35 }) : this.state.checkride.score }),
+      debrief: Object.freeze({ ...this.state.debrief, status, elapsedSeconds }),
+      agentMode: finished ? 'complete' : this.state.agentMode,
+    })
+    if (finished) {
+      this.crashDynamics = null
+      this.finish(crash.outcome)
+    }
   }
 
   private advanceRoute(position: { lat: number; lon: number }, altitudeFt: number): { route: RouteState; autopilot: AutopilotState; phase: MissionPhase } {

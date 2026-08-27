@@ -16,7 +16,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { flightSimulator } from '../sim/flightSimulator'
 import { createAircraft } from './aircraft'
 import { createAirportWorld, disposeScene } from './airportScene'
-import { stateToWorldVector } from './coordinates'
+import { stateToWorldVector, WORLD_RUNWAY } from './coordinates'
 
 export type FlightCameraMode = 'chase' | 'cockpit' | 'free'
 
@@ -151,7 +151,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       stateToWorldVector(previousState, previousAircraftPosition)
       stateToWorldVector(state, currentAircraftPosition)
       aircraftPosition.lerpVectors(previousAircraftPosition, currentAircraftPosition, interpolationAlpha)
-      aircraftPosition.y += 0.025
+      aircraftPosition.y += WORLD_RUNWAY.surfaceY + 0.025
       aircraft.position.copy(aircraftPosition)
 
       attitude.set(

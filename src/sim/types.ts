@@ -24,7 +24,7 @@ export interface ScenarioConditions {
 
 export type ApprovalStatus = 'none' | 'pending' | 'approved' | 'denied'
 export interface HumanApprovalState { readonly status: ApprovalStatus; readonly question: string | null; readonly requestedAction: string | null }
-export interface LandingResult { readonly runway: string; readonly sinkRateFpm: number; readonly airspeedKt: number; readonly centerlineErrorFt: number; readonly touchdownDistanceFt: number; readonly safe: boolean }
+export interface LandingResult { readonly runway: string; readonly sinkRateFpm: number; readonly airspeedKt: number; readonly centerlineErrorFt: number; readonly touchdownDistanceFt: number; readonly bounces: number; readonly onRunway: boolean; readonly safe: boolean }
 export interface DebriefEvent { readonly elapsedSeconds: number; readonly actor: TraceActor; readonly summary: string }
 export interface DebriefState { readonly status: 'in_progress' | 'landed' | 'failed'; readonly elapsedSeconds: number; readonly decision: RoutePlan; readonly decisionReason: string | null; readonly events: readonly DebriefEvent[]; readonly landing: LandingResult | null }
 
