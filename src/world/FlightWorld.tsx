@@ -3,6 +3,7 @@ import {
   ACESFilmicToneMapping,
   Color,
   Euler,
+  PCFShadowMap,
   PerspectiveCamera,
   Quaternion,
   Scene,
@@ -78,6 +79,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     renderer.toneMapping = ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.08
     renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = PCFShadowMap
     renderer.domElement.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;'
     container.append(renderer.domElement)
 
@@ -135,9 +137,6 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       )
       attitudeQuaternion.setFromEuler(attitude)
       aircraft.quaternion.copy(attitudeQuaternion)
-      const propeller = aircraft.userData.propeller as { rotation: { z: number } }
-      propeller.rotation.z += deltaSeconds * (8 + state.throttle * 55)
-
       world.update(state, deltaSeconds)
 
       const mode = cameraModeRef.current

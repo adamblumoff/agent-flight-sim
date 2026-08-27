@@ -1,10 +1,12 @@
 import {
   BoxGeometry,
   CapsuleGeometry,
+  CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
+  MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
   SphereGeometry,
@@ -32,7 +34,6 @@ const metalMaterial = new MeshStandardMaterial({ color: 0x9fa9ac, metalness: 0.7
 function mesh(geometry: ConstructorParameters<typeof Mesh>[0], material: ConstructorParameters<typeof Mesh>[1]) {
   const result = new Mesh(geometry, material)
   result.castShadow = true
-  result.receiveShadow = true
   return result
 }
 
@@ -85,8 +86,11 @@ export function createAircraft() {
   const spinner = mesh(new SphereGeometry(0.22, 12, 8), accentMaterial)
   spinner.scale.z = 1.3
   spinner.position.set(0, 1.4, -4.76)
-  const propeller = mesh(new BoxGeometry(0.11, 3.15, 0.08), metalMaterial)
-  propeller.position.set(0, 1.4, -4.82)
+  const propellerDisc = new Mesh(
+    new CircleGeometry(1.56, 32),
+    new MeshBasicMaterial({ color: 0xaeb8ba, transparent: true, opacity: 0.16, depthWrite: false }),
+  )
+  propellerDisc.position.set(0, 1.4, -4.82)
 
   aircraft.add(
     fuselage,
@@ -99,12 +103,11 @@ export function createAircraft() {
     sideWindowLeft,
     sideWindowRight,
     spinner,
-    propeller,
+    propellerDisc,
     wheel(-1.45, 0.35),
     wheel(1.45, 0.35),
     wheel(0, -2.8, 0.78),
   )
 
-  aircraft.userData.propeller = propeller
   return aircraft
 }

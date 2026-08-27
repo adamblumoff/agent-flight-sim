@@ -105,9 +105,11 @@ function groundBox(
   z: number,
   material: MeshStandardMaterial,
   height = 0.08,
+  baseY = 0,
 ) {
   const result = box(width, height, depth, material)
-  result.position.set(x, height / 2, z)
+  result.castShadow = false
+  result.position.set(x, baseY + height / 2, z)
   group.add(result)
   return result
 }
@@ -129,7 +131,7 @@ function textMarking(text: string, width: number, height: number) {
   })
   const marking = new Mesh(new PlaneGeometry(width, height), material)
   marking.rotation.x = -Math.PI / 2
-  marking.position.y = 0.12
+  marking.position.y = 0.126
   return marking
 }
 
@@ -137,14 +139,14 @@ function addRunway(root: Group) {
   groundBox(root, runwayWidth, runwayLength, 0, -runwayLength / 2, asphalt, 0.12)
 
   for (let z = -235; z > -runwayLength + 210; z -= 62) {
-    groundBox(root, 0.85, 27, 0, z, paint, 0.04)
+    groundBox(root, 0.85, 27, 0, z, paint, 0.012, 0.12)
   }
   for (const end of [-48, -runwayLength + 48]) {
-    for (let x = -17.5; x <= 17.5; x += 5) groundBox(root, 2.1, 24, x, end, paint, 0.04)
+    for (let x = -17.5; x <= 17.5; x += 5) groundBox(root, 2.1, 24, x, end, paint, 0.012, 0.12)
   }
   for (const z of [-325, -390, -runwayLength + 325, -runwayLength + 390]) {
-    groundBox(root, 3.2, 42, -8.6, z, paint, 0.04)
-    groundBox(root, 3.2, 42, 8.6, z, paint, 0.04)
+    groundBox(root, 3.2, 42, -8.6, z, paint, 0.012, 0.12)
+    groundBox(root, 3.2, 42, 8.6, z, paint, 0.012, 0.12)
   }
 
   const runway16 = textMarking('16', 22, 11)
@@ -187,7 +189,7 @@ function addAirport(root: Group) {
   for (const z of [-265, -610, -990, -1_270]) {
     groundBox(root, 180, 19, -68, z, concrete)
     groundBox(root, 165, 19, 66, z - 36, concrete)
-    groundBox(root, 118, 0.8, -65, z, yellowPaint, 0.04)
+    groundBox(root, 118, 0.8, -65, z, yellowPaint, 0.012, 0.08)
   }
 
   const buildings = [
@@ -312,14 +314,19 @@ export function createAirportWorld(scene: Scene) {
   sun.position.set(-950, 1_300, 620)
   sun.castShadow = true
   sun.shadow.mapSize.set(1_024, 1_024)
-  sun.shadow.camera.left = -210
-  sun.shadow.camera.right = 210
-  sun.shadow.camera.top = 210
-  sun.shadow.camera.bottom = -210
+  sun.shadow.camera.left = -180
+  sun.shadow.camera.right = 180
+  sun.shadow.camera.top = 180
+  sun.shadow.camera.bottom = -180
   sun.shadow.camera.near = 10
   sun.shadow.camera.far = 3_000
+  sun.shadow.bias = -0.0001
+  sun.shadow.normalBias = 0.06
+  sun.shadow.camera.updateProjectionMatrix()
   scene.add(sun)
   scene.add(sun.target)
+
+  const shadowTexelSize = (sun.shadow.camera.right - sun.shadow.camera.left) / sun.shadow.mapSize.width
 
   let currentWeather = ''
   const setWeather = (state: FlightState) => {
@@ -354,8 +361,10 @@ export function createAirportWorld(scene: Scene) {
     setWeather(state)
     const aircraftPosition = stateToWorld(state)
     sky.position.set(aircraftPosition.x, 0, aircraftPosition.z)
-    sun.position.set(aircraftPosition.x - 950, 1_300, aircraftPosition.z + 620)
-    sun.target.position.set(aircraftPosition.x, 0, aircraftPosition.z)
+    const shadowCenterX = Math.round(aircraftPosition.x / shadowTexelSize) * shadowTexelSize
+    const shadowCenterZ = Math.round(aircraftPosition.z / shadowTexelSize) * shadowTexelSize
+    sun.position.set(shadowCenterX - 950, 1_300, shadowCenterZ + 620)
+    sun.target.position.set(shadowCenterX, 0, shadowCenterZ)
 
     if (rain.visible) {
       rain.position.set(aircraftPosition.x, Math.max(aircraftPosition.y - 30, 0), aircraftPosition.z)
