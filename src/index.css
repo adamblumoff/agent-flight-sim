@@ -677,6 +677,7 @@ summary:focus-visible {
 
 .flight-clock,
 .score-meter,
+.wind-meter,
 .emergency-timer {
   display: flex;
   align-items: center;
@@ -693,6 +694,7 @@ summary:focus-visible {
 
 .flight-clock svg,
 .score-meter svg,
+.wind-meter svg,
 .emergency-timer svg {
   width: 14px;
   height: 14px;
@@ -700,6 +702,7 @@ summary:focus-visible {
 
 .flight-clock span,
 .score-meter span,
+.wind-meter span,
 .emergency-timer span {
   color: rgb(244 239 222 / 68%);
   font-size: 8px;
@@ -710,6 +713,7 @@ summary:focus-visible {
 
 .flight-clock strong,
 .score-meter strong,
+.wind-meter strong,
 .emergency-timer strong {
   min-width: 31px;
   color: var(--cream);
@@ -725,6 +729,28 @@ summary:focus-visible {
 
 .score-meter {
   border-color: rgb(154 209 168 / 28%);
+}
+
+.wind-meter {
+  border-color: rgb(153 190 205 / 28%);
+  color: rgb(176 216 224);
+}
+
+.wind-meter strong {
+  min-width: auto;
+  white-space: nowrap;
+}
+
+.wind-meter small {
+  color: var(--amber);
+  font: 600 8px/1 "Kode Mono Variable", monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wind-meter[data-turbulence="moderate"] {
+  border-color: rgb(226 183 111 / 52%);
+  background: rgb(38 31 20 / 90%);
 }
 
 .emergency-timer {

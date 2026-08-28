@@ -1,7 +1,7 @@
 import '@fontsource-variable/sora'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy } from 'lucide-react'
+import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Wind } from 'lucide-react'
 import {
   CopilotPanel,
   type CopilotDebrief,
@@ -374,6 +374,11 @@ export default function App() {
   const missionSecondsRemaining = state.checkride.deadlineSeconds - state.elapsedSeconds
   const missionOvertime = missionSecondsRemaining < 0
   const lastDeduction = state.checkride.score.deductions.at(-1)
+  const windDirection = state.scenario.weather.windDirectionDeg.toString().padStart(3, '0')
+  const longitudinalWind = state.motion.headwindKt >= 0
+    ? `${Math.round(state.motion.headwindKt)} kt headwind`
+    : `${Math.round(Math.abs(state.motion.headwindKt))} kt tailwind`
+  const windTitle = `Wind from ${windDirection}° at ${state.scenario.weather.windSpeedKt} kt · ${longitudinalWind} · ${Math.round(Math.abs(state.motion.crosswindKt))} kt crosswind${state.motion.turbulenceLevel === 'none' ? '' : ` · ${state.motion.turbulenceLevel} turbulence`}`
 
   return (
     <main className="app-shell">
@@ -442,6 +447,12 @@ export default function App() {
           <Trophy aria-hidden="true" />
           <span>Score</span>
           <strong>{state.checkride.score.total}</strong>
+        </div>
+        <div className="wind-meter" title={windTitle} aria-label={windTitle} data-turbulence={state.motion.turbulenceLevel}>
+          <Wind aria-hidden="true" />
+          <span>Wind</span>
+          <strong>{windDirection}° / {state.scenario.weather.windSpeedKt} kt</strong>
+          {state.motion.turbulenceLevel !== 'none' ? <small>{state.motion.turbulenceLevel}</small> : null}
         </div>
         {state.checkride.decisionSecondsRemaining !== null ? (
           <div className="emergency-timer" data-urgent={state.checkride.decisionSecondsRemaining <= 30} role="timer" aria-live="polite">

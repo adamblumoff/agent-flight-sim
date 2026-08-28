@@ -23,6 +23,7 @@ export interface MotionState {
   readonly crosswindKt: number
   readonly angleOfAttackDeg: number
   readonly stalled: boolean
+  readonly turbulenceLevel: 'none' | 'light' | 'moderate'
 }
 export interface ImpactState { readonly revision: number; readonly severity: 'hard' | 'destructive'; readonly sinkRateFpm: number; readonly airspeedKt: number; readonly bankDeg: number; readonly pitchDeg: number; readonly onRunway: boolean; readonly rollDirection: -1 | 1 }
 export type ConfigurationStage = 'takeoff' | 'positive_rate' | 'climb_cleanup' | 'base' | 'final' | 'landing' | 'complete'

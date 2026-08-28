@@ -8,7 +8,7 @@ import type {
 } from './types'
 import { checkpointCaptureRadiusNm } from './checkpoints.ts'
 import { A380_ENVELOPE } from './a380Envelope.ts'
-import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, windCorrectedHeadingDeg } from './aerodynamics.ts'
+import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from './aerodynamics.ts'
 import {
   KPWK_AIRPORT,
   KPWK_RUNWAY_16,
@@ -45,8 +45,12 @@ const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 22
 const PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND = 420
 const EMERGENCY_TRIGGER_SECONDS = 45
 const EMERGENCY_DECISION_SECONDS = 45
-const MISSION_DEADLINE_SECONDS = 8 * 60
+const MISSION_DEADLINE_SECONDS = 9 * 60
 const ROUTE_BANK_DEG = 22
+const MAX_EMERGENCY_TURN_FIXES = 3
+const LANDING_ROLL_BASE_DRAG_KT_PER_SECOND = 1.4
+const LANDING_ROLL_IDLE_BRAKING_KT_PER_SECOND = 2.6
+const LANDING_ROLL_THRUST_KT_PER_SECOND = 4.8
 const PASSENGER_INJURY_DRAW: Readonly<Record<CheckrideSeed, number>> = Object.freeze({ 17: 0.72, 42: 0.56, 81: 0.42 })
 
 const isDestructiveImpact = ({
@@ -80,6 +84,12 @@ const coordinatedTurnRadiusNm = (airspeedKt: number, bankDeg: number) => {
   const speedMetersPerSecond = airspeedKt * 0.514_444
   return speedMetersPerSecond ** 2 / (9.81 * Math.tan(radians(bankDeg))) / 1_852
 }
+
+export const landingRollAccelerationKtPerSecond = (throttle: number, maximumPower: number) => (
+  throttle * maximumPower * LANDING_ROLL_THRUST_KT_PER_SECOND
+  - LANDING_ROLL_BASE_DRAG_KT_PER_SECOND
+  - (1 - throttle) * LANDING_ROLL_IDLE_BRAKING_KT_PER_SECOND
+)
 
 const initialScore = (): FlightState['checkride']['score'] => Object.freeze({ total: 100, deductions: Object.freeze([]) })
 
@@ -171,7 +181,7 @@ const LAKESIDE_THRESHOLD = Object.freeze({ lat: LAKESIDE_RUNWAY_22.thresholdLat,
 export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   id: 'SHARED-AUTONOMY-EMERGENCY-01',
   name: 'Rough running over Wheeling',
-  objective: 'Depart North Field, assess the emergency, and land at Chicago Executive within eight minutes.',
+  objective: 'Depart North Field, assess the emergency, and land at Chicago Executive within nine minutes.',
   start: 'Lined up on North Field runway 18 with the aircraft configured for takeoff.',
   deadlineSeconds: MISSION_DEADLINE_SECONDS,
   airports: Object.freeze([NORTH_FIELD_AIRPORT, LAKESIDE_AIRPORT, KPWK_AIRPORT]),
@@ -299,9 +309,9 @@ const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDe
     const intercepts: RouteWaypoint[] = []
     if (diversionDistanceNm > 1.6) {
       const stabilizationLead = offsetPosition(origin, currentHeadingDeg, 1.8)
-      intercepts.push(waypoint('KPWK_STABILIZE', 'KPWK stabilization leg', 'enroute', stabilizationLead, 1_500, A380_ENVELOPE.emergencyTurnSpeedKt, 0.16))
+      intercepts.push(waypoint('KPWK_TURN_1', 'KPWK turn 1', 'enroute', stabilizationLead, 1_500, A380_ENVELOPE.emergencyTurnSpeedKt, 0.18))
     } else if (diversionDistanceNm > 0.8) {
-      intercepts.push(waypoint('KPWK_DIVERT', 'KPWK emergency intercept', 'enroute', offsetPosition(origin, diversionBearingDeg, diversionDistanceNm * 0.55), 1_500, A380_ENVELOPE.emergencyTurnSpeedKt, 0.16))
+      intercepts.push(waypoint('KPWK_TURN_1', 'KPWK turn 1', 'enroute', offsetPosition(origin, diversionBearingDeg, diversionDistanceNm * 0.55), 1_500, A380_ENVELOPE.emergencyTurnSpeedKt, 0.18))
     }
     return Object.freeze({ plan, destination: 'KPWK', runway: '16', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), waypoints: Object.freeze([
       ...intercepts,
@@ -368,7 +378,7 @@ const initialState = (seed: CheckrideSeed): FlightState => {
     pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: A380_ENVELOPE.takeoffFlapsDeg, gearDown: true,
     elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
     agentMode: 'idle', autopilot, route: initialRoute(), scenario,
-    motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0, groundSpeedKt: 0, trackDeg: NORTH_FIELD_RUNWAY_18.headingDeg, headwindKt: NORMAL_DEPARTURE_SCENARIO.weather.windSpeedKt, crosswindKt: 0, angleOfAttackDeg: 0, stalled: false }),
+    motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0, groundSpeedKt: 0, trackDeg: NORTH_FIELD_RUNWAY_18.headingDeg, headwindKt: NORMAL_DEPARTURE_SCENARIO.weather.windSpeedKt, crosswindKt: 0, angleOfAttackDeg: 0, stalled: false, turbulenceLevel: 'none' }),
     impact: null,
     aircraftPhase: 'takeoff_roll',
     approval: Object.freeze({ status: 'none', question: null, requestedAction: null }),
@@ -715,7 +725,6 @@ class FlightSimulator {
     if (this.state.debrief.landing) {
       bank = approach(bank, 0, 60 * dt)
       pitch = approach(pitch, 0, 10 * dt)
-      throttle = 0
       verticalSpeed = 0
     } else if (this.fuelExhausted && this.state.aircraftPhase === 'airborne') {
       throttle = 0
@@ -785,6 +794,12 @@ class FlightSimulator {
       bank = approach(bank, this.manualAttitudeTarget.bankDeg, PILOT_BANK_RESPONSE_DEG_PER_SECOND * dt)
       const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch)), -4_500, 4_500)
       verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND * dt)
+    }
+
+    const turbulence = turbulenceFor(scenario.weather, this.state.elapsedSeconds + dt, this.state.checkride.seed)
+    if (this.state.aircraftPhase === 'airborne' && turbulence.level !== 'none') {
+      verticalSpeed += turbulence.verticalAccelerationFpmPerSecond * dt
+      bank = clamp(bank + turbulence.rollRateDegPerSecond * dt, -60, 60)
     }
 
     const power = throttle * scenario.engine.maximumPower
@@ -870,7 +885,9 @@ class FlightSimulator {
         phase = 'rollout'
         verticalSpeed = 0
         pitch = approach(pitch, 0, 10 * dt)
-        airspeed = Math.max(0, airspeed - (3.5 + (1 - throttle) * 7) * dt)
+        if (this.state.controlOwner === 'agent') throttle = approach(throttle, 0, 0.8 * dt)
+        const rolloutAcceleration = landingRollAccelerationKtPerSecond(throttle, scenario.engine.maximumPower)
+        airspeed = Math.max(0, airspeed + rolloutAcceleration * dt)
         if (!landing) {
           landing = Object.freeze({ runway: runway.id, sinkRateFpm: Math.round(this.peakTouchdownImpactFpm), airspeedKt: Math.round(airspeed), centerlineErrorFt: Math.round(Math.abs(frame.crossNm) * FEET_PER_NM), touchdownDistanceFt: Math.round(frame.alongNm * FEET_PER_NM), bounces: this.bounceCount, onRunway: true, safe: true })
           touchdownJustOccurred = true
@@ -938,6 +955,7 @@ class FlightSimulator {
       crosswindKt: this.state.aircraftPhase === 'airborne' ? wind.crosswindKt : 0,
       angleOfAttackDeg: stall.angleOfAttackDeg,
       stalled: stall.severity >= 0.18,
+      turbulenceLevel: this.state.aircraftPhase === 'airborne' ? turbulence.level : 'none',
     })
     const passengerSafety = passengerSafetyFor(
       this.state.passengerSafety,
@@ -963,7 +981,7 @@ class FlightSimulator {
       score = withScoreDeduction(score, 'decision-timeout', elapsedSeconds, 15, 'Emergency route decision exceeded 45 seconds')
     }
     if (elapsedSeconds >= this.state.checkride.deadlineSeconds && outcome === 'in_progress') {
-      score = withScoreDeduction(score, 'mission-overtime', elapsedSeconds, 12, 'Mission exceeded the eight-minute operating window')
+      score = withScoreDeduction(score, 'mission-overtime', elapsedSeconds, 12, 'Mission exceeded the nine-minute operating window')
     }
     // Ignore the brief acceleration transient at rotation; handling penalties
     // start once the wide-body is established above the departure surface.
@@ -1108,6 +1126,7 @@ class FlightSimulator {
         crosswindKt: 0,
         angleOfAttackDeg: 0,
         stalled: false,
+        turbulenceLevel: 'none',
       }),
     } as FlightState
     const mission = this.navigation(partial, 'failed', outcome, runway)
@@ -1139,19 +1158,20 @@ class FlightSimulator {
     let waypoints = route.waypoints
     let index = reached ? Math.min(route.activeWaypointIndex + 1, waypoints.length - 1) : route.activeWaypointIndex
 
-    if (reached && route.plan === 'return_kpwk' && (active.id === 'KPWK_STABILIZE' || active.id.startsWith('KPWK_TURN_'))) {
+    if (reached && route.plan === 'return_kpwk' && active.id.startsWith('KPWK_TURN_')) {
       const baseIndex = waypoints.findIndex((candidate) => candidate.kind === 'base')
       const baseWaypoint = waypoints[baseIndex]
       const completedWaypoints = waypoints.slice(0, route.activeWaypointIndex + 1)
       const approachWaypoints = waypoints.slice(baseIndex)
       const courseErrorDeg = headingError(bearingDeg(position, baseWaypoint), headingDeg)
-      if (Math.abs(courseErrorDeg) > 12) {
-        const turnStepDeg = clamp(courseErrorDeg, -30, 30)
+      const completedTurnFixes = completedWaypointIds.filter((id) => id.startsWith('KPWK_TURN_')).length
+      if (Math.abs(courseErrorDeg) > 12 && completedTurnFixes < MAX_EMERGENCY_TURN_FIXES) {
+        const turnStepDeg = clamp(courseErrorDeg, -45, 45)
         const plannedTurnSpeedKt = Math.max(this.state.airspeedKt, A380_ENVELOPE.emergencyTurnSpeedKt)
         const radiusNm = coordinatedTurnRadiusNm(plannedTurnSpeedKt, ROUTE_BANK_DEG)
         const chordNm = 2 * radiusNm * Math.sin(radians(Math.abs(turnStepDeg)) / 2)
         const turnPosition = offsetPosition(position, normalizeHeading(headingDeg + turnStepDeg / 2), chordNm)
-        const turnNumber = completedWaypointIds.filter((id) => id.startsWith('KPWK_TURN_')).length + 1
+        const turnNumber = completedTurnFixes + 1
         const turnWaypoint = waypoint(
           `KPWK_TURN_${turnNumber}`,
           `KPWK turn ${turnNumber}`,

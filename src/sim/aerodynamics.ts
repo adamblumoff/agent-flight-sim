@@ -19,6 +19,14 @@ export interface StallResponse {
   readonly sinkRateFpm: number
 }
 
+export type TurbulenceLevel = 'none' | 'light' | 'moderate'
+
+export interface TurbulenceResponse {
+  readonly level: TurbulenceLevel
+  readonly verticalAccelerationFpmPerSecond: number
+  readonly rollRateDegPerSecond: number
+}
+
 interface WindVector {
   readonly northKt: number
   readonly eastKt: number
@@ -40,6 +48,51 @@ function windVectorFor(
   return Object.freeze({
     northKt: Math.cos(windToRad) * windSpeedKt - Math.sin(windToRad) * crossGustKt,
     eastKt: Math.sin(windToRad) * windSpeedKt + Math.cos(windToRad) * crossGustKt,
+  })
+}
+
+const unitNoise = (value: number) => {
+  const raw = Math.sin(value * 12.9898 + 78.233) * 43_758.5453
+  return raw - Math.floor(raw)
+}
+
+/** Deterministic, intermittent turbulence so a seed remains replayable through WebMCP. */
+export function turbulenceFor(
+  weather: ScenarioConditions['weather'],
+  elapsedSeconds: number,
+  seed: CheckrideSeed,
+): TurbulenceResponse {
+  const cycleSeconds = 27
+  const cycle = Math.floor(elapsedSeconds / cycleSeconds)
+  const phaseSeconds = elapsedSeconds - cycle * cycleSeconds
+  const weatherIntensity = clamp(
+    (weather.windSpeedKt - 4) / 20 + (weather.summary.toLowerCase().includes('rain') ? 0.18 : 0),
+    0,
+    1,
+  )
+  const occurrence = unitNoise(seed * 17 + cycle * 31)
+  const startsAt = 4 + unitNoise(seed * 23 + cycle * 19) * 9
+  const duration = 4 + unitNoise(seed * 29 + cycle * 13) * 5
+  const active = occurrence < 0.3 + weatherIntensity * 0.45
+    && phaseSeconds >= startsAt
+    && phaseSeconds <= startsAt + duration
+  if (!active) return Object.freeze({ level: 'none', verticalAccelerationFpmPerSecond: 0, rollRateDegPerSecond: 0 })
+
+  const localPhase = (phaseSeconds - startsAt) / duration
+  const envelope = Math.sin(localPhase * Math.PI)
+  const intensity = envelope * (0.42 + weatherIntensity * 0.58) * (0.8 + occurrence * 0.4)
+  const verticalAccelerationFpmPerSecond = intensity * (
+    Math.sin(elapsedSeconds * 2.7 + seed) * 210
+    + Math.sin(elapsedSeconds * 5.9 + seed * 0.37) * 85
+  )
+  const rollRateDegPerSecond = intensity * (
+    Math.sin(elapsedSeconds * 1.9 + seed * 0.61) * 2.1
+    + Math.sin(elapsedSeconds * 4.1 + seed) * 0.7
+  )
+  return Object.freeze({
+    level: intensity >= 0.62 ? 'moderate' : 'light',
+    verticalAccelerationFpmPerSecond,
+    rollRateDegPerSecond,
   })
 }
 

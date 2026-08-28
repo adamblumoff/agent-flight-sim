@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { flightSimulator } from '../src/sim/flightSimulator.ts'
-import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, windCorrectedHeadingDeg } from '../src/sim/aerodynamics.ts'
+import { flightSimulator, landingRollAccelerationKtPerSecond } from '../src/sim/flightSimulator.ts'
+import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from '../src/sim/aerodynamics.ts'
 
 const headwind = groundMotionFor(170, 180, { visibilityMiles: 10, ceilingFt: 6_500, windDirectionDeg: 180, windSpeedKt: 12, summary: 'Test wind' }, 0, 17)
 assert.ok(headwind.groundSpeedKt < 170)
@@ -13,8 +13,16 @@ assert.ok(Math.abs(((correctedMotion.trackDeg - desiredTrackDeg + 540) % 360) - 
 assert.ok(airborneDragKtPerSecond(230, 30, true, 0) > airborneDragKtPerSecond(230, 0, false, 0))
 assert.ok(airborneDragKtPerSecond(230, 0, false, 0) > airborneDragKtPerSecond(140, 0, false, 0))
 assert.ok(stallResponseFor(100, 18, 0, 0, 0).severity > 0.5)
+const turbulenceSamples = Array.from({ length: 180 }, (_, second) => turbulenceFor(correctionWeather, second, 42))
+assert.ok(turbulenceSamples.some((sample) => sample.level !== 'none'))
+assert.ok(turbulenceSamples.every((sample) => Math.abs(sample.verticalAccelerationFpmPerSecond) < 300))
+assert.ok(landingRollAccelerationKtPerSecond(1, 1) > 0)
+assert.ok(landingRollAccelerationKtPerSecond(0, 1) < 0)
 
 flightSimulator.reset(17)
+assert.equal(flightSimulator.getState().checkride.score.total, 100)
+assert.deepEqual(flightSimulator.getState().checkride.score.deductions, [])
+assert.equal(flightSimulator.getState().checkride.deadlineSeconds, 540)
 flightSimulator.transferControl('agent', 'agent', 'Simulation smoke test')
 assert.equal(flightSimulator.getState().mission.phase, 'preflight')
 assert.equal(flightSimulator.getState().route.plan, 'unassigned')
@@ -49,6 +57,7 @@ assert.equal(reroute.accepted, true)
 assert.equal(reroute.state.route.destination, 'KPWK')
 assert.equal(reroute.state.checkride.decisionSecondsRemaining, null)
 assert.equal(reroute.state.route.completedWaypointIds.length, 0)
+assert.equal(reroute.state.mission.nextFix, 'KPWK_TURN_1')
 
 flightSimulator.reset(17)
 flightSimulator.setRoute('continue_klak', 'Pilot filed the route before applying power.', 'human')
@@ -130,7 +139,7 @@ flightSimulator.reset(17)
 flightSimulator.transferControl('agent', 'agent', 'Full mission smoke test')
 flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
 flightSimulator.beginTakeoff('agent', 'Begin full mission departure')
-for (let elapsed = 0; elapsed < 420 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
   const state = flightSimulator.getState()
   if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
     flightSimulator.inspectEvidence('weather')
@@ -161,6 +170,7 @@ if (completedMission.mission.outcome !== 'landed') {
 assert.equal(completedMission.mission.outcome, 'landed')
 assert.equal(completedMission.debrief.landing?.safe, true)
 assert.ok(completedMission.route.completedWaypointIds.includes('KPWK_TOUCHDOWN'))
+assert.ok(completedMission.route.completedWaypointIds.filter((id) => id.startsWith('KPWK_TURN_')).length <= 3)
 assert.equal(completedMission.passengerSafety.status, 'comfortable')
 assert.ok(completedMission.elapsedSeconds > 300)
 assert.ok(completedMission.elapsedSeconds < completedMission.checkride.deadlineSeconds)
@@ -172,6 +182,7 @@ console.log(JSON.stringify({
   timerExpiredScore: timerExpired.state.checkride.score.total,
   reroute: reroute.state.mission.nextFix,
   passengerSafety,
+  emergencyTurnFixes: completedMission.route.completedWaypointIds.filter((id) => id.startsWith('KPWK_TURN_')).length,
   missionElapsedSeconds: completedMission.elapsedSeconds,
   missionRemainingSeconds: completedMission.checkride.deadlineSeconds - completedMission.elapsedSeconds,
   landing: completedMission.debrief.landing,
