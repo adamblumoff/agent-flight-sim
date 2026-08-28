@@ -52,6 +52,13 @@ function mesh(geometry: ConstructorParameters<typeof Mesh>[0], material: Constru
   return result
 }
 
+function curvedWindow(length: number, z: number, thetaStart: number, thetaLength: number) {
+  const window = mesh(new CylinderGeometry(0.675, 0.675, length, 18, 1, true, thetaStart, thetaLength), glassMaterial)
+  window.rotation.x = Math.PI / 2
+  window.position.set(0, 1.4, z)
+  return window
+}
+
 function wheel(x: number, z: number, scale = 1) {
   const assembly = new Group()
   assembly.name = 'Landing gear'
@@ -113,14 +120,9 @@ export function createAircraft(): AircraftRig {
   finAssembly.rotation.x = -0.28
   finAssembly.add(mesh(new BoxGeometry(0.14, 1.75, 1.45), accentMaterial))
 
-  const windshield = mesh(new BoxGeometry(1.02, 0.61, 0.08), glassMaterial)
-  windshield.position.set(0, 1.82, -1.92)
-  windshield.rotation.x = -0.22
-
-  const sideWindowLeft = mesh(new BoxGeometry(0.07, 0.54, 1.2), glassMaterial)
-  sideWindowLeft.position.set(-0.65, 1.83, -1.05)
-  const sideWindowRight = sideWindowLeft.clone()
-  sideWindowRight.position.x = 0.65
+  const windshield = curvedWindow(0.72, -1.9, 2.28, 1.72)
+  const sideWindowLeft = curvedWindow(1.08, -1.03, 4, 0.55)
+  const sideWindowRight = curvedWindow(1.08, -1.03, 1.73, 0.55)
 
   const propellerAssembly = new Group()
   propellerAssembly.name = 'Propeller'
