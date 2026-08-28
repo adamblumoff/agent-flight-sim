@@ -3,6 +3,7 @@ import type {
   ControlOwner, EvidenceSource, FlightEventType, FlightEventWaitResult, FlightEvidence,
   FlightState, MissionBrief, RoutePlan,
 } from '../sim/types'
+import { A380_ENVELOPE } from '../sim/a380Envelope'
 
 type JsonSchema = Readonly<Record<string, unknown>>
 export type ToolReceiptTone = 'neutral' | 'success' | 'warning' | 'critical' | 'automation'
@@ -72,17 +73,17 @@ export const flightToolDefinitions = [
   },
   {
     name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
-    description: 'Begin the takeoff roll after the continue_klak preflight route has been filed. This explicitly authorizes the copilot to advance the throttle and rotate.',
+    description: 'Begin the takeoff roll after the continue_klak preflight route has been filed. Advance takeoff thrust and rotate near 170 kt.',
     inputSchema: { type: 'object', properties: { reason: { type: 'string', minLength: 1 } }, required: ['reason'], additionalProperties: false },
   },
   {
     name: 'set_autopilot_targets', title: 'Set autopilot targets', readOnly: false,
     description: 'Adjust intent-level heading, altitude, speed, or vertical mode. Use this for a deliberate correction, not continuous stick inputs.',
-    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: 645, maximum: 4000 }, airspeedKt: { type: 'number', minimum: 65, maximum: 140 }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
+    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: 645, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: A380_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
   },
   {
     name: 'configure_aircraft', title: 'Configure aircraft', readOnly: false,
-    description: 'Set landing gear and flaps for the current procedure stage. Read state.procedure first: premature or out-of-sequence settings are rejected, and configuration_required events announce each transition.',
+    description: 'Set A380-style landing gear and simplified flap detents: 10° represents CONF 1+F, 20° represents CONF 3, and 30° represents FULL. Read state.procedure first; out-of-sequence settings are rejected.',
     inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0, 10, 20, 30] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
   },
   {

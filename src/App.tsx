@@ -14,6 +14,7 @@ import {
 import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
+import { A380_ENVELOPE } from './sim/a380Envelope'
 import { flightSimulator } from './sim/flightSimulator'
 import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
@@ -147,7 +148,7 @@ function derivePlan(state: FlightState): readonly string[] {
 
 function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
-  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return 'Accelerating on runway 18. Rotate near 55 knots.'
+  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return `Accelerating on runway 18. Rotate near ${A380_ENVELOPE.rotateSpeedKt} knots.`
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
@@ -393,7 +394,7 @@ export default function App() {
             </p>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
-              <li><kbd>W</kbd><span>At 55 knots, hold for a smooth rotation. Control inputs ramp in and ease out.</span></li>
+              <li><kbd>W</kbd><span>Near {A380_ENVELOPE.rotateSpeedKt} knots, hold for a smooth rotation. Control inputs ramp in and ease out.</span></li>
               <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">

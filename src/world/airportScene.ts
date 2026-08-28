@@ -36,6 +36,7 @@ const TERRAIN_SIZE_METERS = 24_000
 const TERRAIN_SNAP_METERS = 4_000
 
 const asphalt = new MeshStandardMaterial({ color: 0x282d2e, roughness: 0.92 })
+const runwayShoulder = new MeshStandardMaterial({ color: 0x3d4241, roughness: 0.96 })
 const concrete = new MeshStandardMaterial({ color: 0x777973, roughness: 0.88 })
 const yellowPaint = new MeshStandardMaterial({ color: 0xc69c42, roughness: 0.8 })
 const buildingWall = new MeshStandardMaterial({ color: 0x9a9c91, roughness: 0.82 })
@@ -193,6 +194,7 @@ function groundBox(
 }
 
 function addRunway(root: Group, anisotropy: number) {
+  groundBox(root, runwayWidth + 15, runwayLength, 0, -runwayLength / 2, runwayShoulder, runway.surfaceY * 0.65)
   const runwayMaterial = new MeshStandardMaterial({ map: createRunwayTexture(anisotropy), roughness: 0.92 })
   const runwaySurface = new Mesh(
     new BoxGeometry(runwayWidth, runway.surfaceY, runwayLength),
@@ -271,6 +273,7 @@ function addRemoteRunway(
     roughness: 0.94,
   })
   const remoteAsphalt = new MeshStandardMaterial({ color: style.surfaceColor, roughness: 0.94 })
+  groundBox(group, width + 15, length, 0, -length / 2, runwayShoulder, remote.surfaceY * 0.65)
   const surface = new Mesh(
     new BoxGeometry(width, remote.surfaceY, length),
     [remoteAsphalt, remoteAsphalt, surfaceMaterial, remoteAsphalt, remoteAsphalt, remoteAsphalt],
@@ -281,30 +284,30 @@ function addRemoteRunway(
   group.add(surface)
 
   if (style.buildings) {
-    groundBox(group, 50, 92, 43, -155, concrete, 0.09)
-    const hangar = box(24, 7, 18, buildingWall)
-    hangar.position.set(48, 3.55, -140)
-    const utilityShed = box(13, 4.5, 12, buildingDark)
-    utilityShed.position.set(43, 2.3, -195)
+    groundBox(group, 210, 320, 132, -390, concrete, 0.09)
+    const hangar = box(112, 31, 72, buildingWall)
+    hangar.position.set(138, 15.55, -365)
+    const utilityShed = box(36, 13, 32, buildingDark)
+    utilityShed.position.set(112, 6.55, -485)
     group.add(hangar, utilityShed)
   }
   root.add(group)
 }
 
 function addAirport(root: Group) {
-  groundBox(root, 95, runwayLength * 0.82, -112, -runwayLength * 0.52, concrete)
-  groundBox(root, 62, 580, 98, -runwayLength * 0.5, concrete)
-  for (const z of [-265, -610, -990, -1_270]) {
-    groundBox(root, 180, 19, -68, z, concrete)
-    groundBox(root, 165, 19, 66, z - 36, concrete)
-    groundBox(root, 118, 0.8, -65, z, yellowPaint, 0.012, 0.08)
+  groundBox(root, 230, runwayLength * 0.86, -205, -runwayLength * 0.52, concrete)
+  groundBox(root, 175, 1_050, 182, -runwayLength * 0.48, concrete)
+  for (const z of [-360, -860, -1_420, -2_050]) {
+    groundBox(root, 250, 30, -98, z, concrete)
+    groundBox(root, 235, 30, 102, z - 54, concrete)
+    groundBox(root, 170, 0.8, -92, z, yellowPaint, 0.012, 0.08)
   }
 
   const buildings = [
-    [-176, -240, 64, 20, 42], [-186, -335, 82, 17, 48], [-170, -460, 58, 14, 34],
-    [-183, -740, 75, 18, 46], [-166, -880, 52, 13, 30], [-176, -1_090, 74, 18, 42],
-    [168, -325, 58, 15, 38], [176, -470, 75, 17, 42], [170, -690, 50, 13, 32],
-    [180, -940, 70, 19, 44], [165, -1_155, 48, 14, 30],
+    [-262, -300, 118, 31, 72], [-275, -470, 142, 29, 82], [-252, -680, 105, 27, 64],
+    [-270, -1_030, 132, 32, 78], [-248, -1_260, 96, 25, 58], [-266, -1_610, 128, 30, 72],
+    [250, -390, 112, 29, 70], [268, -640, 138, 31, 78], [248, -960, 98, 26, 60],
+    [270, -1_360, 130, 33, 76], [242, -1_720, 92, 24, 56],
   ] as const
   for (const [x, z, width, height, depth] of buildings) {
     const hangar = box(width, height, depth, x < 0 ? buildingWall : buildingDark)
@@ -312,10 +315,10 @@ function addAirport(root: Group) {
     root.add(hangar)
   }
 
-  const tower = box(8, 42, 8, buildingDark)
-  tower.position.set(-145, 21, -570)
-  const cab = box(15, 7, 15, buildingWall)
-  cab.position.set(-145, 44, -570)
+  const tower = box(11, 48, 11, buildingDark)
+  tower.position.set(-188, 24, -820)
+  const cab = box(20, 8, 20, buildingWall)
+  cab.position.set(-188, 52, -820)
   root.add(tower, cab)
 }
 

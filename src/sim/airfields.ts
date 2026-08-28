@@ -1,4 +1,5 @@
 import type { Airport, MissionRunway } from './types'
+import { A380_ENVELOPE } from './a380Envelope.ts'
 
 const EARTH_RADIUS_NM = 3_440.065
 const radians = (degrees: number) => degrees * Math.PI / 180
@@ -21,22 +22,27 @@ export const KPWK_AIRPORT: Airport = Object.freeze({
   elevationFt: 645,
 })
 
+const KPWK_RUNWAY_LENGTH_FT = 9_000
+const KPWK_RUNWAY_THRESHOLD = Object.freeze({ lat: 42.123329, lon: -87.907126 })
+const KPWK_RUNWAY_FAR_END = offsetPosition(KPWK_RUNWAY_THRESHOLD, 159, KPWK_RUNWAY_LENGTH_FT / 6_076.12)
+
 export const KPWK_RUNWAY_16: MissionRunway = Object.freeze({
   id: 'KPWK-16',
   airport: 'KPWK',
-  thresholdLat: 42.123329,
-  thresholdLon: -87.907126,
-  farEndLat: 42.110552,
-  farEndLon: -87.900405,
+  thresholdLat: KPWK_RUNWAY_THRESHOLD.lat,
+  thresholdLon: KPWK_RUNWAY_THRESHOLD.lon,
+  farEndLat: KPWK_RUNWAY_FAR_END.lat,
+  farEndLon: KPWK_RUNWAY_FAR_END.lon,
   headingDeg: 159,
-  lengthFt: 5_001,
-  widthFt: 150,
+  lengthFt: KPWK_RUNWAY_LENGTH_FT,
+  widthFt: A380_ENVELOPE.standardRunwayWidthFt,
   elevationFt: KPWK_AIRPORT.elevationFt,
 })
 
-const northFieldReference = offsetPosition({ lat: KPWK_RUNWAY_16.thresholdLat, lon: KPWK_RUNWAY_16.thresholdLon }, 339, 0.9)
-const northFieldThreshold = offsetPosition(northFieldReference, 249, 0.38)
-const northFieldFarEnd = offsetPosition(northFieldThreshold, 180, 2_600 / 6_076.12)
+const NORTH_FIELD_RUNWAY_LENGTH_FT = 10_000
+const northFieldReference = offsetPosition({ lat: KPWK_RUNWAY_16.thresholdLat, lon: KPWK_RUNWAY_16.thresholdLon }, 339, 2.2)
+const northFieldThreshold = offsetPosition(northFieldReference, 249, 0.72)
+const northFieldFarEnd = offsetPosition(northFieldThreshold, 180, NORTH_FIELD_RUNWAY_LENGTH_FT / 6_076.12)
 
 export const NORTH_FIELD_AIRPORT: Airport = Object.freeze({
   code: 'KNFD',
@@ -54,8 +60,8 @@ export const NORTH_FIELD_RUNWAY_18: MissionRunway = Object.freeze({
   farEndLat: northFieldFarEnd.lat,
   farEndLon: northFieldFarEnd.lon,
   headingDeg: 180,
-  lengthFt: 2_600,
-  widthFt: 75,
+  lengthFt: NORTH_FIELD_RUNWAY_LENGTH_FT,
+  widthFt: A380_ENVELOPE.standardRunwayWidthFt,
   elevationFt: NORTH_FIELD_AIRPORT.elevationFt,
 })
 
@@ -66,7 +72,8 @@ export const NORTH_FIELD_START = offsetPosition(
 )
 
 const lakesideThreshold = offsetPosition(NORTH_FIELD_START, 28, 12.5)
-const lakesideFarEnd = offsetPosition(lakesideThreshold, 220, 4_400 / 6_076.12)
+const LAKESIDE_RUNWAY_LENGTH_FT = 9_500
+const lakesideFarEnd = offsetPosition(lakesideThreshold, 220, LAKESIDE_RUNWAY_LENGTH_FT / 6_076.12)
 
 export const LAKESIDE_AIRPORT: Airport = Object.freeze({
   code: 'KLAK',
@@ -84,7 +91,7 @@ export const LAKESIDE_RUNWAY_22: MissionRunway = Object.freeze({
   farEndLat: lakesideFarEnd.lat,
   farEndLon: lakesideFarEnd.lon,
   headingDeg: 220,
-  lengthFt: 4_400,
-  widthFt: 100,
+  lengthFt: LAKESIDE_RUNWAY_LENGTH_FT,
+  widthFt: A380_ENVELOPE.standardRunwayWidthFt,
   elevationFt: LAKESIDE_AIRPORT.elevationFt,
 })

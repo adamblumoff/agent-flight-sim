@@ -1,9 +1,9 @@
 import {
   DoubleSide,
+  CylinderGeometry,
   Group,
   Mesh,
-  MeshBasicMaterial,
-  SphereGeometry,
+  MeshStandardMaterial,
   Vector3,
 } from 'three'
 import { checkpointCaptureRadiusNm } from '../sim/checkpoints'
@@ -15,11 +15,14 @@ export function createCheckpointOrb() {
   root.name = 'Active checkpoint'
   root.renderOrder = 2
 
-  const shellGeometry = new SphereGeometry(1, 28, 18)
-  const shell = new Mesh(shellGeometry, new MeshBasicMaterial({
+  const shellGeometry = new CylinderGeometry(1, 1, 4_000, 32, 1, true)
+  const shell = new Mesh(shellGeometry, new MeshStandardMaterial({
     color: 0xf2c75c,
     depthWrite: false,
-    opacity: 0.18,
+    emissive: 0x5e4712,
+    emissiveIntensity: 0.35,
+    opacity: 0.11,
+    roughness: 0.72,
     side: DoubleSide,
     transparent: true,
   }))
@@ -36,10 +39,10 @@ export function createCheckpointOrb() {
       if (!root.visible || !waypoint) return
 
       waypointToWorldVector(waypoint, position)
-      root.position.copy(position)
-      const radiusMeters = checkpointCaptureRadiusNm(waypoint, state.controlOwner) * NM_TO_METERS
+      root.position.set(position.x, 0, position.z)
+      const radiusMeters = checkpointCaptureRadiusNm(waypoint, state.controlOwner) * NM_TO_METERS * 0.4
       const pulse = 1 + Math.sin(elapsedSeconds * 1.5) * 0.015
-      root.scale.setScalar(radiusMeters * pulse)
+      root.scale.set(radiusMeters * pulse, 1, radiusMeters * pulse)
     },
   }
 }
