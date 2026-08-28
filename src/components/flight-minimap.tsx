@@ -1,27 +1,48 @@
-import type { FlightState } from '../sim/types'
-import { KPWK_RUNWAY_16, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { GripHorizontal } from 'lucide-react'
+import { KPWK_RUNWAY_16, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
+import type { FlightState, MissionRunway } from '../sim/types'
 
 const WIDTH = 240
 const HEIGHT = 164
 const PADDING = 18
 
 interface MapPoint { readonly lat: number; readonly lon: number }
+interface PanelPosition { readonly x: number; readonly y: number }
+interface DragOrigin { readonly pointerX: number; readonly pointerY: number; readonly panelX: number; readonly panelY: number }
+
+const runwayPoints = (runway: MissionRunway): readonly MapPoint[] => [
+  { lat: runway.thresholdLat, lon: runway.thresholdLon },
+  { lat: runway.farEndLat, lon: runway.farEndLon },
+]
+
+const initialPanelPosition = (): PanelPosition => typeof window !== 'undefined' && window.innerWidth <= 760
+  ? { x: 12, y: 158 }
+  : { x: 20, y: 76 }
+
+const clampPanelPosition = (panel: HTMLElement | null, x: number, y: number): PanelPosition => {
+  const bounds = panel?.getBoundingClientRect()
+  const width = bounds?.width ?? 238
+  const height = bounds?.height ?? 230
+  return {
+    x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - width - 8)),
+    y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - height - 8)),
+  }
+}
 
 export function FlightMinimap({ state }: { readonly state: FlightState }) {
+  const panelRef = useRef<HTMLElement>(null)
+  const dragOriginRef = useRef<DragOrigin | null>(null)
+  const [panelPosition, setPanelPosition] = useState<PanelPosition>(initialPanelPosition)
   const routePoints = state.route.waypoints
-  const boundsPoints: readonly MapPoint[] = [
-    { lat: NORTH_FIELD_RUNWAY_18.thresholdLat, lon: NORTH_FIELD_RUNWAY_18.thresholdLon },
-    { lat: NORTH_FIELD_RUNWAY_18.farEndLat, lon: NORTH_FIELD_RUNWAY_18.farEndLon },
-    { lat: KPWK_RUNWAY_16.thresholdLat, lon: KPWK_RUNWAY_16.thresholdLon },
-    { lat: KPWK_RUNWAY_16.farEndLat, lon: KPWK_RUNWAY_16.farEndLon },
-    ...routePoints,
-  ]
+  const destinationRunway = state.route.destination === 'KLAK' ? LAKESIDE_RUNWAY_22 : KPWK_RUNWAY_16
+  const visibleRunways = state.route.destination === 'KLAK'
+    ? [NORTH_FIELD_RUNWAY_18, LAKESIDE_RUNWAY_22]
+    : [NORTH_FIELD_RUNWAY_18, KPWK_RUNWAY_16]
+  const boundsPoints: readonly MapPoint[] = [state, ...visibleRunways.flatMap(runwayPoints), ...routePoints]
   const referenceLatitude = boundsPoints.reduce((sum, point) => sum + point.lat, 0) / boundsPoints.length
   const longitudeScale = Math.cos(referenceLatitude * Math.PI / 180)
-  const projected = boundsPoints.map((point) => ({
-    x: point.lon * longitudeScale,
-    y: -point.lat,
-  }))
+  const projected = boundsPoints.map((point) => ({ x: point.lon * longitudeScale, y: -point.lat }))
   const minX = Math.min(...projected.map((point) => point.x))
   const maxX = Math.max(...projected.map((point) => point.x))
   const minY = Math.min(...projected.map((point) => point.y))
@@ -34,39 +55,79 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
     x: PADDING + (point.lon * longitudeScale - minX) * scale,
     y: PADDING + (-point.lat - minY) * scale,
   })
-  const aircraftPosition = mapPoint(state)
-  const aircraft = {
-    x: Math.min(WIDTH - PADDING, Math.max(PADDING, aircraftPosition.x)),
-    y: Math.min(HEIGHT - PADDING, Math.max(PADDING, aircraftPosition.y)),
-  }
-  const northFieldStart = mapPoint({ lat: NORTH_FIELD_RUNWAY_18.thresholdLat, lon: NORTH_FIELD_RUNWAY_18.thresholdLon })
-  const northFieldEnd = mapPoint({ lat: NORTH_FIELD_RUNWAY_18.farEndLat, lon: NORTH_FIELD_RUNWAY_18.farEndLon })
-  const kpwkStart = mapPoint({ lat: KPWK_RUNWAY_16.thresholdLat, lon: KPWK_RUNWAY_16.thresholdLon })
-  const kpwkEnd = mapPoint({ lat: KPWK_RUNWAY_16.farEndLat, lon: KPWK_RUNWAY_16.farEndLon })
-  const fullRoute = routePoints.map(mapPoint)
-  const activeWaypointIndex = state.route.activeWaypointIndex
-  const activeRoute = routePoints.length === 0
-    ? []
-    : [
-        activeWaypointIndex === 0 ? northFieldEnd : mapPoint(routePoints[activeWaypointIndex - 1]),
-        mapPoint(routePoints[activeWaypointIndex]),
-      ]
-  const pointsAttribute = (points: readonly { x: number; y: number }[]) =>
-    points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ')
+  const aircraft = mapPoint(state)
   const activeWaypoint = routePoints[state.route.activeWaypointIndex]
+  const activeFix = activeWaypoint ? mapPoint(activeWaypoint) : null
+  const mappedRoute = routePoints.map(mapPoint)
   const status = state.mission.phase === 'complete'
-    ? 'Arrived at KPWK'
+    ? `Arrived at ${state.route.destination ?? 'destination'}`
     : activeWaypoint
       ? `${activeWaypoint.name}${state.mission.distanceToNextFixNm === null ? '' : ` · ${state.mission.distanceToNextFixNm.toFixed(1)} NM`}`
       : 'Route pending'
+  const routeProgress = routePoints.length === 0
+    ? 'No active leg'
+    : `Leg ${Math.min(state.route.activeWaypointIndex + 1, routePoints.length)} / ${routePoints.length}`
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const origin = dragOriginRef.current
+      if (!origin) return
+      setPanelPosition(clampPanelPosition(panelRef.current, origin.panelX + event.clientX - origin.pointerX, origin.panelY + event.clientY - origin.pointerY))
+    }
+    const end = () => { dragOriginRef.current = null }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+  }, [])
+
+  const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragOriginRef.current = { pointerX: event.clientX, pointerY: event.clientY, panelX: panelPosition.x, panelY: panelPosition.y }
+  }
+
+  const endDrag = () => { dragOriginRef.current = null }
+
+  const moveWithKeyboard = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const movement: Readonly<Record<string, readonly [number, number]>> = {
+      ArrowLeft: [-12, 0], ArrowRight: [12, 0], ArrowUp: [0, -12], ArrowDown: [0, 12],
+    }
+    const delta = movement[event.key]
+    if (!delta) return
+    event.preventDefault()
+    setPanelPosition((current) => clampPanelPosition(panelRef.current, current.x + delta[0], current.y + delta[1]))
+  }
 
   return (
-    <aside className="flight-minimap" aria-label={`Route map. ${status}.`}>
+    <aside
+      ref={panelRef}
+      className="flight-minimap"
+      style={{ left: panelPosition.x, top: panelPosition.y }}
+      aria-label={`Movable route map. ${status}. ${routeProgress}.`}
+    >
       <div className="minimap-heading">
-        <span>Navigation</span>
-        <strong>{status}</strong>
+        <div>
+          <span>Navigation</span>
+          <strong>{status}</strong>
+        </div>
+        <button
+          type="button"
+          className="minimap-drag-handle"
+          aria-label="Move navigation map. Use arrow keys or drag."
+          title="Drag to move map"
+          onPointerDown={beginDrag}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onKeyDown={moveWithKeyboard}
+        >
+          <GripHorizontal aria-hidden="true" />
+        </button>
       </div>
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-hidden="true">
+      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={activeWaypoint ? `Aircraft tracking ${activeWaypoint.name}` : 'No active route'}>
         <defs>
           <linearGradient id="minimap-surface" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="#172019" />
@@ -76,6 +137,9 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
             <stop offset="0" stopColor="#9ad1a8" stopOpacity="0.07" />
             <stop offset="1" stopColor="#9ad1a8" stopOpacity="0" />
           </radialGradient>
+          <marker id="minimap-active-head" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M 0 0 L 8 4 L 0 8 Z" />
+          </marker>
         </defs>
         <rect className="minimap-surface" x="0" y="0" width={WIDTH} height={HEIGHT} rx="10" />
         <circle className="minimap-range" cx={WIDTH / 2} cy={HEIGHT / 2} r="66" />
@@ -84,30 +148,39 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
           <path d="M 0 -8 L 3 1 L 0 0 L -3 1 Z" />
           <text x="0" y="9">N</text>
         </g>
-        <line className="minimap-runway minimap-runway-departure" x1={northFieldStart.x} y1={northFieldStart.y} x2={northFieldEnd.x} y2={northFieldEnd.y} />
-        <line className="minimap-runway minimap-runway-arrival" x1={kpwkStart.x} y1={kpwkStart.y} x2={kpwkEnd.x} y2={kpwkEnd.y} />
-        <text className="minimap-label" x={northFieldStart.x + 6} y={northFieldStart.y - 5}>NF 18</text>
-        <text className="minimap-label" x={kpwkStart.x + 6} y={kpwkStart.y - 5}>KPWK 16</text>
-        {fullRoute.length > 1 ? <polyline className="minimap-route-history" points={pointsAttribute(fullRoute)} /> : null}
-        {activeRoute.length > 1 ? <polyline className="minimap-route-active" points={pointsAttribute(activeRoute)} /> : null}
-        {fullRoute.map((point, index) => (
-          <circle
-            key={routePoints[index].id}
-            className={index === state.route.activeWaypointIndex ? 'minimap-fix minimap-fix-active' : 'minimap-fix'}
-            cx={point.x}
-            cy={point.y}
-            r={index === state.route.activeWaypointIndex ? 3.2 : 2.2}
-          />
-        ))}
+        {visibleRunways.map((runway) => {
+          const start = mapPoint({ lat: runway.thresholdLat, lon: runway.thresholdLon })
+          const end = mapPoint({ lat: runway.farEndLat, lon: runway.farEndLon })
+          const isDeparture = runway.id === NORTH_FIELD_RUNWAY_18.id
+          return (
+            <g key={runway.id}>
+              <line className={`minimap-runway ${isDeparture ? 'minimap-runway-departure' : 'minimap-runway-arrival'}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
+              <text className="minimap-label" x={start.x + 6} y={start.y - 5}>{runway.airport} {runway.id.split('-')[1]}</text>
+            </g>
+          )
+        })}
+        {activeFix ? <line className="minimap-route-active" x1={aircraft.x} y1={aircraft.y} x2={activeFix.x} y2={activeFix.y} markerEnd="url(#minimap-active-head)" /> : null}
+        {mappedRoute.map((point, index) => {
+          const waypoint = routePoints[index]
+          const complete = state.route.completedWaypointIds.includes(waypoint.id)
+          const active = index === state.route.activeWaypointIndex
+          return (
+            <g key={waypoint.id}>
+              <circle className={`minimap-fix${active ? ' minimap-fix-active' : ''}${complete ? ' minimap-fix-complete' : ''}`} cx={point.x} cy={point.y} r={active ? 3.2 : 2.2} />
+              {active ? <text className="minimap-fix-label" x={point.x + 5} y={point.y - 5}>{index + 1}</text> : null}
+            </g>
+          )
+        })}
         <g className="minimap-aircraft" transform={`translate(${aircraft.x} ${aircraft.y}) rotate(${state.headingDeg})`}>
           <circle r="6.5" />
           <path d="M 0 -6.5 L 3.5 4.5 L 0 2.8 L -3.5 4.5 Z" />
         </g>
       </svg>
       <div className="minimap-footer">
-        <span>{state.route.destination ?? 'Awaiting route'}</span>
+        <span>{state.route.destination ?? 'Awaiting route'} · {routeProgress}</span>
         <strong>{state.route.destination ? `${state.mission.distanceToThresholdNm.toFixed(1)} NM` : '—'}</strong>
       </div>
+      <span className="sr-only">Destination runway {destinationRunway.id}.</span>
     </aside>
   )
 }

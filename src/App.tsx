@@ -1,7 +1,7 @@
 import '@fontsource-variable/sora'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import { Eye, Glasses, MapPin, Orbit, Plane } from 'lucide-react'
+import { Eye, Glasses, MapPin, Orbit, Plane, Timer } from 'lucide-react'
 import {
   CopilotPanel,
   type CopilotDebrief,
@@ -34,6 +34,7 @@ const cameraOptions: ReadonlyArray<{
 
 const routePlanLabels: Record<RoutePlan, string> = {
   unassigned: 'Route pending',
+  continue_klak: 'Lakeside Municipal',
   return_kpwk: 'Return to KPWK',
 }
 
@@ -67,8 +68,12 @@ function deriveObservations(state: FlightState): readonly CopilotObservation[] {
     },
     {
       label: 'Passenger',
-      value: passenger.summary,
-      tone: passenger.condition === 'critical' ? 'critical' : passenger.condition === 'urgent' ? 'caution' : 'normal',
+      value: `${passenger.summary} ${state.passengerSafety.summary} · ${state.passengerSafety.loadFactorG.toFixed(2)} G · ${state.passengerSafety.jerkGPerSecond.toFixed(2)} G/s jerk`,
+      tone: state.passengerSafety.status === 'injured' || passenger.condition === 'critical'
+        ? 'critical'
+        : state.passengerSafety.status === 'distressed' || state.passengerSafety.status === 'uneasy' || passenger.condition === 'urgent'
+          ? 'caution'
+          : 'normal',
     },
     {
       label: 'Traffic',
@@ -79,7 +84,7 @@ function deriveObservations(state: FlightState): readonly CopilotObservation[] {
 }
 
 function deriveRecommendation(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return 'Depart North Field runway 18 and monitor for the enroute brief.'
+  if (state.mission.phase === 'preflight') return 'File the Lakeside Municipal runway 22 route before beginning the takeoff roll.'
   if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
   if (!state.procedure.compliant) return state.procedure.instruction
   if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
@@ -99,8 +104,8 @@ function deriveRecommendation(state: FlightState): string {
 function derivePlan(state: FlightState): readonly string[] {
   if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
     return [
-      'Take off from North Field runway 18 and climb through 1,000 feet.',
-      'Clean up the aircraft and monitor for the enroute brief.',
+      'File and fly the Lakeside Municipal runway 22 route, about ten minutes away.',
+      'Take off from North Field runway 18, clean up the aircraft, and monitor for changes.',
     ]
   }
   if (state.route.plan === 'unassigned') {
@@ -136,7 +141,7 @@ function derivePlan(state: FlightState): readonly string[] {
 }
 
 function deriveAction(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return 'Ready on North Field runway 18.'
+  if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
   if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return 'Accelerating on runway 18. Rotate near 55 knots.'
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
@@ -156,7 +161,7 @@ function deriveAction(state: FlightState): string {
 }
 
 function deriveHeadline(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return 'North Field departure'
+  if (state.mission.phase === 'preflight') return 'Preflight route required'
   if (state.mission.phase === 'takeoff') return 'Departing runway 18'
   if (state.checkride.status === 'armed') return 'Normal departure'
   if (state.approval.status === 'pending') return 'Holding for your decision'
@@ -260,7 +265,7 @@ export default function App() {
   }, [])
 
   const beginTakeoff = useCallback(() => {
-    flightSimulator.beginTakeoff('human', 'Pilot started the North Field departure')
+    flightSimulator.setRoute('continue_klak', 'Pilot filed the normal route to Lakeside Municipal runway 22 before departure.', 'human')
     setShowTakeoffBrief(false)
   }, [])
 
@@ -345,16 +350,13 @@ export default function App() {
     error: 'Connection failed',
   } as const
   const ownershipMode = deriveOwnershipMode(state, webMcpStatus === 'ready')
-  const awaitingScenario = state.checkride.status === 'armed'
-  const destination = awaitingScenario ? 'Departure' : state.route.destination ?? 'Route pending'
-  const routeDetail = awaitingScenario
-    ? 'North Field 18 · Await enroute brief'
-    : state.route.destination === null
+  const destination = state.route.destination ?? 'Route pending'
+  const routeDetail = state.route.destination === null
     ? 'Decision needed'
-    : state.route.runway
-      ? `Runway ${state.route.runway}`
-      : state.mission.nextFix && state.mission.distanceToNextFixNm !== null
-        ? `${state.mission.nextFix} · ${state.mission.distanceToNextFixNm.toFixed(1)} NM`
+    : state.mission.nextFix && state.mission.distanceToNextFixNm !== null
+      ? `${state.mission.nextFix} · ${state.mission.distanceToNextFixNm.toFixed(1)} NM`
+      : state.route.runway
+        ? `Runway ${state.route.runway}`
         : routePlanLabels[state.route.plan]
 
   return (
@@ -376,7 +378,7 @@ export default function App() {
             <p>Flight briefing</p>
             <h1 id="takeoff-briefing-title">Fly the North Field departure.</h1>
             <p id="takeoff-briefing-copy">
-              You are lined up on North Field runway 18. Depart, climb through 1,000 feet, clean up the aircraft, and monitor for the enroute brief.
+              You are lined up on North Field runway 18. First file the normal route to Lakeside Municipal runway 22, about ten minutes away. Conditions may force the route to change after departure.
             </p>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
@@ -384,8 +386,8 @@ export default function App() {
               <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
-              <span>You can hand control to the copilot once airborne.</span>
-              <Button autoFocus onClick={beginTakeoff}>Begin takeoff</Button>
+              <span>Filing the preflight route starts the takeoff roll.</span>
+              <Button autoFocus onClick={beginTakeoff}>File route &amp; take off</Button>
             </div>
           </div>
         </section>
@@ -410,6 +412,14 @@ export default function App() {
 
         <OwnershipControl mode={ownershipMode} onClick={toggleHandoff} />
       </header>
+
+      {state.checkride.decisionSecondsRemaining !== null ? (
+        <div className="emergency-timer" data-urgent={state.checkride.decisionSecondsRemaining <= 10} role="timer" aria-live="polite">
+          <Timer aria-hidden="true" />
+          <span>Emergency route decision</span>
+          <strong>0:{Math.ceil(state.checkride.decisionSecondsRemaining).toString().padStart(2, '0')}</strong>
+        </div>
+      ) : null}
 
       <FlightMinimap state={state} />
 

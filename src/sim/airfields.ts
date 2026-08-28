@@ -64,3 +64,27 @@ export const NORTH_FIELD_START = offsetPosition(
   NORTH_FIELD_RUNWAY_18.headingDeg,
   0.08,
 )
+
+const lakesideThreshold = offsetPosition(NORTH_FIELD_START, 28, 12.5)
+const lakesideFarEnd = offsetPosition(lakesideThreshold, 220, 4_400 / 6_076.12)
+
+export const LAKESIDE_AIRPORT: Airport = Object.freeze({
+  code: 'KLAK',
+  name: 'Lakeside Municipal',
+  lat: lakesideThreshold.lat,
+  lon: lakesideThreshold.lon,
+  elevationFt: 720,
+})
+
+export const LAKESIDE_RUNWAY_22: MissionRunway = Object.freeze({
+  id: 'KLAK-22',
+  airport: 'KLAK',
+  thresholdLat: lakesideThreshold.lat,
+  thresholdLon: lakesideThreshold.lon,
+  farEndLat: lakesideFarEnd.lat,
+  farEndLon: lakesideFarEnd.lon,
+  headingDeg: 220,
+  lengthFt: 4_400,
+  widthFt: 100,
+  elevationFt: LAKESIDE_AIRPORT.elevationFt,
+})

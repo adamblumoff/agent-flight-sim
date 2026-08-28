@@ -10,15 +10,15 @@ export interface FlightToolReceipt<T> { readonly ok: true; readonly summary: str
 
 export const checkrideSeeds = [17, 42, 81] as const satisfies readonly CheckrideSeed[]
 export const evidenceSources = ['weather', 'cockpit', 'traffic', 'passenger'] as const satisfies readonly EvidenceSource[]
-export const routePlans = ['return_kpwk'] as const satisfies readonly RoutePlan[]
-export const flightEventValues = ['handoff_requested', 'emergency_detected', 'plan_updated', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
+export const routePlans = ['continue_klak', 'return_kpwk'] as const satisfies readonly RoutePlan[]
+export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'plan_updated', 'checkpoint_reached', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
 export interface FlightToolArguments {
   start_flight: { readonly seed?: CheckrideSeed }
   get_mission_brief: Record<string, never>
   get_flight_state: Record<string, never>
   inspect_flight_evidence: { readonly source?: EvidenceSource }
-  set_route: { readonly plan: 'return_kpwk'; readonly reason: string }
+  set_route: { readonly plan: 'continue_klak' | 'return_kpwk'; readonly reason: string }
   set_autopilot_targets: AutopilotTargetsInput
   configure_aircraft: AircraftConfigurationInput
   request_human_approval: { readonly question: string; readonly requested_action: string; readonly reason: string }
@@ -47,7 +47,7 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_flight', title: 'Start flight', readOnly: false,
-    description: 'Start a reproducible normal departure from North Field and take copilot control. Maintain the departure and wait for emergency_detected; only then inspect the changed evidence and build the KPWK route.',
+    description: 'Start a reproducible mission on North Field runway 18 and take copilot control. The aircraft remains stopped until set_route files the continue_klak preflight route.',
     inputSchema: { type: 'object', properties: { seed: { type: 'number', enum: checkrideSeeds, default: 17 } }, additionalProperties: false },
   },
   {
@@ -65,7 +65,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'set_route', title: 'Choose route', readOnly: false,
-    description: 'Commit to the KPWK runway 16 return after inspecting at least two reports. The deterministic autopilot loads and flies the route.',
+    description: 'Before takeoff, file continue_klak to Lakeside Municipal runway 22; this starts the takeoff roll. After emergency_detected, inspect at least two reports and replace it with return_kpwk. Each captured checkpoint emits checkpoint_reached.',
     inputSchema: { type: 'object', properties: { plan: { type: 'string', enum: routePlans }, reason: { type: 'string', minLength: 1 } }, required: ['plan', 'reason'], additionalProperties: false },
   },
   {

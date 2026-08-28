@@ -26,9 +26,8 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     const seed = input.seed ?? 17
     if (!seedSet.has(seed)) throw new TypeError('seed must be 17, 42, or 81')
     flightSimulator.reset(seed as CheckrideSeed)
-    flightSimulator.beginTakeoff('agent', 'Copilot acknowledged the takeoff briefing')
     flightSimulator.transferControl('agent', 'agent', 'Copilot started the emergency mission')
-    return receipt(`Normal departure seed ${seed} is rolling from North Field`, 'automation', { seed: seed as CheckrideSeed, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
+    return receipt(`Mission seed ${seed} is ready for a preflight route on North Field runway 18`, 'automation', { seed: seed as CheckrideSeed, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
   },
   get_mission_brief: async () => receipt('Mission brief read', 'neutral', { brief: flightSimulator.getMissionBrief() }),
   get_flight_state: async () => receipt('Live flight state read', 'neutral', {
@@ -43,7 +42,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     return receipt(input.source ? `${input.source} report read` : 'All evidence read', 'neutral', { evidence, inspectedSources: flightSimulator.getState().checkride.inspectedSources })
   },
   set_route: async (input) => {
-    if (!routeSet.has(input.plan)) throw new TypeError('plan must be return_kpwk')
+    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kpwk')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
     return action(flightSimulator.setRoute(input.plan as RoutePlan, input.reason.trim(), 'agent'))
   },

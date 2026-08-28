@@ -474,17 +474,23 @@ summary:focus-visible {
   background: linear-gradient(145deg, rgb(28 31 26 / 88%), rgb(15 18 15 / 82%));
   box-shadow: 0 16px 44px rgb(0 0 0 / 28%), inset 0 1px rgb(255 255 255 / 3%);
   color: var(--cream);
-  pointer-events: none;
+  pointer-events: auto;
   backdrop-filter: blur(16px) saturate(110%);
 }
 
 .minimap-heading {
   display: flex;
   min-width: 0;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 1px 2px 8px;
+}
+
+.minimap-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
 }
 
 .minimap-heading span {
@@ -499,9 +505,40 @@ summary:focus-visible {
   overflow: hidden;
   color: rgb(244 239 222 / 76%);
   font: 500 8px/1.2 "Kode Mono Variable", monospace;
-  text-align: right;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.minimap-drag-handle {
+  display: grid;
+  width: 30px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgb(244 239 222 / 42%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.minimap-drag-handle:hover,
+.minimap-drag-handle:focus-visible {
+  border-color: rgb(244 239 222 / 12%);
+  background: rgb(244 239 222 / 7%);
+  color: var(--cream);
+  outline: none;
+}
+
+.minimap-drag-handle:active {
+  cursor: grabbing;
+}
+
+.minimap-drag-handle svg {
+  width: 15px;
+  height: 15px;
 }
 
 .flight-minimap svg {
@@ -512,6 +549,7 @@ summary:focus-visible {
   border: 1px solid rgb(244 239 222 / 7%);
   border-radius: 11px;
   background: #0b100c;
+  pointer-events: none;
 }
 
 .minimap-surface {
@@ -548,22 +586,20 @@ summary:focus-visible {
   stroke: #d8d7ce;
 }
 
-.minimap-route-history,
 .minimap-route-active {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.minimap-route-history {
-  stroke: rgb(139 196 155 / 24%);
-  stroke-width: 1.2;
-}
-
 .minimap-route-active {
   stroke: var(--green);
   stroke-dasharray: 5 4;
   stroke-width: 1.55;
+}
+
+#minimap-active-head path {
+  fill: var(--green);
 }
 
 .minimap-fix {
@@ -575,6 +611,16 @@ summary:focus-visible {
 .minimap-fix-active {
   fill: var(--green);
   stroke: #eef1df;
+}
+
+.minimap-fix-complete {
+  fill: rgb(139 196 155 / 42%);
+  stroke: rgb(139 196 155 / 68%);
+}
+
+.minimap-fix-label {
+  fill: var(--cream);
+  font: 650 6px/1 "Kode Mono Variable", monospace;
 }
 
 .minimap-aircraft {
@@ -615,6 +661,62 @@ summary:focus-visible {
 .minimap-footer strong {
   color: rgb(244 239 222 / 72%);
   font-weight: 600;
+}
+
+.emergency-timer {
+  position: absolute;
+  z-index: 10;
+  top: 76px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid rgb(226 183 111 / 35%);
+  border-radius: 999px;
+  background: rgb(31 27 19 / 88%);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 24%);
+  color: var(--amber);
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.emergency-timer svg {
+  width: 14px;
+  height: 14px;
+}
+
+.emergency-timer span {
+  color: rgb(244 239 222 / 68%);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.emergency-timer strong {
+  min-width: 31px;
+  color: var(--cream);
+  font: 600 10px/1 "Kode Mono Variable", monospace;
+  text-align: right;
+}
+
+.emergency-timer[data-urgent="true"] {
+  border-color: rgb(231 128 104 / 50%);
+  background: rgb(48 24 21 / 92%);
+  color: var(--red);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .instrument-console {
