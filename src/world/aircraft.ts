@@ -8,7 +8,6 @@ import {
   Float32BufferAttribute,
   Group,
   InstancedMesh,
-  LatheGeometry,
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
@@ -18,7 +17,6 @@ import {
   PointLight,
   SphereGeometry,
   TorusGeometry,
-  Vector2,
   Vector3,
 } from 'three'
 
@@ -36,41 +34,80 @@ export interface AircraftRig {
 }
 
 const bodyMaterial = new MeshPhysicalMaterial({
-  color: 0xe8eceb,
-  metalness: 0.18,
-  roughness: 0.42,
-  clearcoat: 0.55,
-  clearcoatRoughness: 0.3,
+  color: 0xf5f8f7,
+  metalness: 0.08,
+  roughness: 0.3,
+  clearcoat: 0.8,
+  clearcoatRoughness: 0.2,
   side: DoubleSide,
 })
-const accentMaterial = new MeshStandardMaterial({ color: 0x13354b, metalness: 0.12, roughness: 0.38 })
-const windowMaterial = new MeshBasicMaterial({ color: 0x172c39, side: DoubleSide })
-const liveryMaterial = new MeshBasicMaterial({ color: 0x13354b, side: DoubleSide })
-const rubberMaterial = new MeshStandardMaterial({ color: 0x111314, roughness: 0.88 })
-const metalMaterial = new MeshStandardMaterial({ color: 0x9fa9ac, metalness: 0.78, roughness: 0.25 })
+const accentMaterial = new MeshStandardMaterial({ color: 0x123b58, metalness: 0.15, roughness: 0.32 })
+const windowMaterial = new MeshBasicMaterial({ color: 0x071c29, side: DoubleSide })
+const liveryMaterial = new MeshBasicMaterial({ color: 0x176b91, side: DoubleSide })
+const doorMaterial = new MeshBasicMaterial({ color: 0x7f989d, side: DoubleSide, transparent: true, opacity: 0.72 })
+const rubberMaterial = new MeshStandardMaterial({ color: 0x0d1011, roughness: 0.9 })
+const metalMaterial = new MeshStandardMaterial({ color: 0x98a5aa, metalness: 0.82, roughness: 0.24 })
+const fanMaterial = new MeshStandardMaterial({ color: 0x172329, metalness: 0.7, roughness: 0.3, side: DoubleSide })
 
 function mesh(geometry: ConstructorParameters<typeof Mesh>[0], material: ConstructorParameters<typeof Mesh>[1]) {
   const result = new Mesh(geometry, material)
   result.castShadow = true
+  result.receiveShadow = true
   return result
 }
 
-function landingGear(x: number, z: number, scale = 1, twin = false) {
-  const assembly = new Group()
-  assembly.name = 'Landing gear'
-  const tireCenterY = 0.54 * scale
-  const strutLength = 1.35 * scale
-  const wheelOffsets = twin ? [-0.32, 0.32] : [0]
-  for (const wheelOffset of wheelOffsets) {
-    const tire = mesh(new TorusGeometry(0.41 * scale, 0.13 * scale, 8, 20), rubberMaterial)
-    tire.rotation.y = Math.PI / 2
-    tire.position.set(x + wheelOffset * scale, tireCenterY, z)
-    assembly.add(tire)
+interface FuselageStation {
+  readonly z: number
+  readonly radiusX: number
+  readonly radiusY: number
+  readonly centerY: number
+}
+
+const fuselageStations: readonly FuselageStation[] = [
+  { z: -36.35, radiusX: 0.08, radiusY: 0.08, centerY: 6.85 },
+  { z: -35.95, radiusX: 0.72, radiusY: 0.58, centerY: 6.95 },
+  { z: -35.35, radiusX: 1.45, radiusY: 1.2, centerY: 7.08 },
+  { z: -34.55, radiusX: 2.15, radiusY: 1.95, centerY: 7.2 },
+  { z: -33.45, radiusX: 2.82, radiusY: 2.75, centerY: 7.32 },
+  { z: -31.85, radiusX: 3.35, radiusY: 3.42, centerY: 7.4 },
+  { z: -29.2, radiusX: 3.55, radiusY: 3.68, centerY: 7.42 },
+  { z: -14, radiusX: 3.56, radiusY: 3.68, centerY: 7.4 },
+  { z: 14, radiusX: 3.56, radiusY: 3.66, centerY: 7.38 },
+  { z: 23.5, radiusX: 3.48, radiusY: 3.5, centerY: 7.48 },
+  { z: 29.5, radiusX: 2.92, radiusY: 3.05, centerY: 7.65 },
+  { z: 33.6, radiusX: 1.65, radiusY: 1.75, centerY: 7.8 },
+  { z: 36.35, radiusX: 0.08, radiusY: 0.08, centerY: 7.9 },
+]
+
+function fuselageGeometry() {
+  const radialSegments = 48
+  const positions: number[] = []
+  const indices: number[] = []
+  for (const station of fuselageStations) {
+    for (let segment = 0; segment < radialSegments; segment += 1) {
+      const angle = segment / radialSegments * Math.PI * 2
+      positions.push(
+        Math.cos(angle) * station.radiusX,
+        station.centerY + Math.sin(angle) * station.radiusY,
+        station.z,
+      )
+    }
   }
-  const strut = mesh(new CylinderGeometry(0.06, 0.06, strutLength, 10), metalMaterial)
-  strut.position.set(x, tireCenterY + strutLength / 2, z)
-  assembly.add(strut)
-  return assembly
+  for (let station = 0; station < fuselageStations.length - 1; station += 1) {
+    for (let segment = 0; segment < radialSegments; segment += 1) {
+      const next = (segment + 1) % radialSegments
+      const a = station * radialSegments + segment
+      const b = station * radialSegments + next
+      const c = (station + 1) * radialSegments + segment
+      const d = (station + 1) * radialSegments + next
+      indices.push(a, c, b, b, c, d)
+    }
+  }
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  return geometry
 }
 
 function slabGeometry(points: readonly (readonly [number, number])[], thickness: number) {
@@ -93,55 +130,83 @@ function slabGeometry(points: readonly (readonly [number, number])[], thickness:
   return geometry
 }
 
-function engine(name: AircraftBreakawayPart['name'], x: number, z: number) {
-  const assembly = new Group()
-  assembly.name = name
-  assembly.position.set(x, 1.35, z)
-  const nacelle = mesh(new CylinderGeometry(0.43, 0.52, 1.55, 24, 1, false), bodyMaterial)
-  nacelle.rotation.x = Math.PI / 2
-  const intake = mesh(new TorusGeometry(0.45, 0.065, 8, 24), metalMaterial)
-  intake.position.z = -0.79
-  const fan = new Mesh(new CircleGeometry(0.38, 24), new MeshStandardMaterial({ color: 0x182126, metalness: 0.6, roughness: 0.35 }))
-  fan.position.z = -0.8
-  const pylon = mesh(new BoxGeometry(0.16, 0.62, 0.88), accentMaterial)
-  pylon.position.set(0, 0.5, 0.14)
-  pylon.rotation.x = -0.08
-  const spinner = mesh(new CylinderGeometry(0.025, 0.1, 0.24, 14), metalMaterial)
-  spinner.rotation.x = Math.PI / 2
-  spinner.position.z = -0.86
-  assembly.add(nacelle, intake, fan, pylon, spinner)
-  return assembly
+function verticalSlabGeometry(points: readonly (readonly [number, number])[], thickness: number) {
+  const half = thickness / 2
+  const positions = points.flatMap(([y, z]) => [half, y, z, -half, y, z])
+  const indices: number[] = []
+  for (let index = 1; index < points.length - 1; index += 1) {
+    indices.push(0, (index + 1) * 2, index * 2)
+    indices.push(1, index * 2 + 1, (index + 1) * 2 + 1)
+  }
+  for (let index = 0; index < points.length; index += 1) {
+    const next = (index + 1) % points.length
+    indices.push(index * 2, next * 2, index * 2 + 1)
+    indices.push(next * 2, next * 2 + 1, index * 2 + 1)
+  }
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  return geometry
 }
 
-function fuselageGeometry() {
-  const geometry = new LatheGeometry([
-    new Vector2(0.05, -9.85),
-    new Vector2(0.58, -9.5),
-    new Vector2(1.12, -8.7),
-    new Vector2(1.42, -7.25),
-    new Vector2(1.48, -4.7),
-    new Vector2(1.49, 3.8),
-    new Vector2(1.38, 6.25),
-    new Vector2(1.03, 7.65),
-    new Vector2(0.48, 8.55),
-    new Vector2(0.04, 9.8),
-  ], 32)
-  geometry.rotateX(Math.PI / 2)
+function taperedTubeGeometry(stations: readonly (readonly [number, number])[], radialSegments = 40) {
+  const positions: number[] = []
+  const indices: number[] = []
+  for (const [z, radius] of stations) {
+    for (let segment = 0; segment < radialSegments; segment += 1) {
+      const angle = segment / radialSegments * Math.PI * 2
+      positions.push(Math.cos(angle) * radius, Math.sin(angle) * radius, z)
+    }
+  }
+  for (let station = 0; station < stations.length - 1; station += 1) {
+    for (let segment = 0; segment < radialSegments; segment += 1) {
+      const next = (segment + 1) % radialSegments
+      const a = station * radialSegments + segment
+      const b = station * radialSegments + next
+      const c = (station + 1) * radialSegments + segment
+      const d = (station + 1) * radialSegments + next
+      indices.push(a, c, b, b, c, d)
+    }
+  }
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+function trapezoidPanelGeometry(widthTop: number, widthBottom: number, height: number) {
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute([
+    -widthBottom / 2, -height / 2, 0,
+    widthBottom / 2, -height / 2, 0,
+    widthTop / 2, height / 2, 0,
+    -widthTop / 2, height / 2, 0,
+  ], 3))
+  geometry.setIndex([0, 1, 2, 0, 2, 3])
   geometry.computeVertexNormals()
   return geometry
 }
 
 function passengerWindows() {
-  const zPositions = Array.from({ length: 48 }, (_, index) => -6.1 + index * 0.26)
-  const rows = [2.45, 2.92]
-  const windows = new InstancedMesh(new PlaneGeometry(0.11, 0.07), windowMaterial, zPositions.length * rows.length * 2)
+  const zPositions = Array.from({ length: 64 }, (_, index) => -27.2 + index * 0.84)
+  const rows = [
+    { y: 6.7, x: 3.49, doors: [-27.2, -11.7, 7.8, 24.2] },
+    { y: 9.05, x: 3.08, doors: [-25.8, -8.5, 10.5, 22.8] },
+  ]
+  const rowPositions = rows.map((row) => zPositions.filter(
+    (z) => row.doors.every((doorZ) => Math.abs(z - doorZ) > 0.7),
+  ))
+  const instanceCount = rowPositions.reduce((count, positions) => count + positions.length * 2, 0)
+  const windows = new InstancedMesh(new PlaneGeometry(0.42, 0.25), windowMaterial, instanceCount)
   const transform = new Object3D()
   let index = 0
   for (const side of [-1, 1]) {
-    for (const y of rows) {
-      for (const z of zPositions) {
-        const surfaceX = 1.01 - Math.abs(y - 2.62) * 0.12
-        transform.position.set(side * surfaceX, y, z)
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex]
+      for (const z of rowPositions[rowIndex]) {
+        transform.position.set(side * row.x, row.y, z)
         transform.rotation.set(0, side * Math.PI / 2, 0)
         transform.updateMatrix()
         windows.setMatrixAt(index, transform.matrix)
@@ -153,112 +218,229 @@ function passengerWindows() {
   return windows
 }
 
-function cockpitWindows() {
-  return ([-1, 1] as const).flatMap((side) => {
-    const window = new Mesh(new PlaneGeometry(0.38, 0.22), windowMaterial)
-    window.position.set(side * 0.26, 2.83, -9.12)
-    window.rotation.y = side * 0.18
-    const sideWindow = new Mesh(new PlaneGeometry(0.42, 0.2), windowMaterial)
-    sideWindow.position.set(side * 0.985, 2.82, -7.22)
-    sideWindow.rotation.y = side * Math.PI / 2
-    return [window, sideWindow]
+function sidePanel(width: number, height: number, x: number, y: number, z: number, side: -1 | 1, material = doorMaterial) {
+  const panel = new Mesh(new PlaneGeometry(width, height), material)
+  panel.position.set(side * x, y, z)
+  panel.rotation.y = side * Math.PI / 2
+  return panel
+}
+
+function fuselageDetails() {
+  const details = new Group()
+  details.name = 'Flush fuselage details'
+  details.add(passengerWindows())
+
+  for (const side of [-1, 1] as const) {
+    details.add(sidePanel(51, 0.12, 3.535, 7.7, -0.8, side, liveryMaterial))
+    for (const z of [-27.2, -11.7, 7.8, 24.2]) details.add(sidePanel(0.78, 1.62, 3.545, 6.85, z, side))
+    for (const z of [-25.8, -8.5, 10.5, 22.8]) details.add(sidePanel(0.7, 1.35, 3.02, 9.15, z, side))
+
+    const frontWindow = new Mesh(trapezoidPanelGeometry(1.05, 1.35, 0.68), windowMaterial)
+    frontWindow.position.set(side * 0.72, 9.05, -34.72)
+    frontWindow.rotation.set(-0.06, side * -0.2, side * -0.08)
+    const sideWindow = sidePanel(1.2, 0.58, 2.74, 9.18, -32.55, side, windowMaterial)
+    sideWindow.rotation.z = side * -0.05
+    details.add(frontWindow, sideWindow)
+  }
+
+  return details
+}
+
+function engine(name: AircraftBreakawayPart['name'], x: number, y: number, z: number) {
+  const assembly = new Group()
+  assembly.name = name
+  assembly.position.set(x, y, z)
+
+  const nacelle = mesh(taperedTubeGeometry([
+    [-2.52, 1.62],
+    [-2.28, 1.72],
+    [-1.15, 1.68],
+    [0.45, 1.5],
+    [1.55, 1.2],
+    [2.35, 0.88],
+  ]), bodyMaterial)
+  const intake = mesh(new TorusGeometry(1.54, 0.16, 10, 32), metalMaterial)
+  intake.position.z = -2.34
+  const fan = new Mesh(new CircleGeometry(1.38, 32), fanMaterial)
+  fan.position.z = -2.36
+  const spinner = mesh(new CylinderGeometry(0.06, 0.27, 0.55, 18), metalMaterial)
+  spinner.rotation.x = Math.PI / 2
+  spinner.position.z = -2.48
+  const exhaust = mesh(new CylinderGeometry(0.58, 0.9, 1.2, 24), metalMaterial)
+  exhaust.rotation.x = Math.PI / 2
+  exhaust.position.z = 2.45
+  const pylon = mesh(slabGeometry([
+    [-0.35, -1.4],
+    [0.35, -1.4],
+    [0.28, 1.15],
+    [-0.22, 1.5],
+  ], 0.34), accentMaterial)
+  pylon.rotation.z = Math.PI / 2
+  pylon.position.y = 2.05
+
+  const fanBlades = new Group()
+  fanBlades.position.z = -2.39
+  for (let blade = 0; blade < 14; blade += 1) {
+    const bladeMesh = new Mesh(new BoxGeometry(0.08, 1.05, 0.035), metalMaterial)
+    bladeMesh.position.y = 0.52
+    bladeMesh.rotation.z = blade / 14 * Math.PI * 2
+    fanBlades.add(bladeMesh)
+  }
+
+  assembly.add(nacelle, intake, fan, fanBlades, spinner, exhaust, pylon)
+  return assembly
+}
+
+function wheel(x: number, z: number, radius: number) {
+  const tire = mesh(new TorusGeometry(radius, radius * 0.31, 10, 24), rubberMaterial)
+  tire.rotation.y = Math.PI / 2
+  tire.position.set(x, radius, z)
+  const hub = mesh(new CylinderGeometry(radius * 0.22, radius * 0.22, radius * 0.42, 14), metalMaterial)
+  hub.rotation.z = Math.PI / 2
+  hub.position.copy(tire.position)
+  return [tire, hub]
+}
+
+function bogie(name: string, x: number, z: number, axleCount: number, topY: number, radius = 0.58) {
+  const assembly = new Group()
+  assembly.name = name
+  assembly.position.set(x, 0, z)
+  const axleSpacing = 1.45
+  const wheelTrack = 1.02
+  for (let axle = 0; axle < axleCount; axle += 1) {
+    const axleZ = (axle - (axleCount - 1) / 2) * axleSpacing
+    for (const side of [-1, 1]) assembly.add(...wheel(side * wheelTrack / 2, axleZ, radius))
+    const axleBeam = mesh(new CylinderGeometry(0.1, 0.1, wheelTrack + 0.42, 10), metalMaterial)
+    axleBeam.rotation.z = Math.PI / 2
+    axleBeam.position.set(0, radius, axleZ)
+    assembly.add(axleBeam)
+  }
+  const bogieBeam = mesh(new BoxGeometry(0.22, 0.2, Math.max(0.8, (axleCount - 1) * axleSpacing + 0.5)), metalMaterial)
+  bogieBeam.position.y = radius + 0.25
+  const strutLength = topY - radius - 0.2
+  const strut = mesh(new CylinderGeometry(0.14, 0.14, strutLength, 12), metalMaterial)
+  strut.position.y = radius + 0.3 + strutLength / 2
+  const braceLeft = mesh(new CylinderGeometry(0.07, 0.07, strutLength * 0.72, 10), metalMaterial)
+  braceLeft.position.set(-0.42, radius + strutLength * 0.55, 0)
+  braceLeft.rotation.z = -0.28
+  const braceRight = braceLeft.clone()
+  braceRight.position.x = 0.42
+  braceRight.rotation.z = 0.28
+  assembly.add(bogieBeam, strut, braceLeft, braceRight)
+  return assembly
+}
+
+function wing(side: -1 | 1, flaps: Group[]) {
+  const assembly = new Group()
+  assembly.name = side < 0 ? 'Left wing' : 'Right wing'
+  assembly.position.y = 6.7
+  const panel = mesh(slabGeometry([
+    [side * 2.75, -13.2],
+    [side * 39.9, 8.3],
+    [side * 39.45, 10.85],
+    [side * 6.2, 6.4],
+    [side * 2.8, 3.9],
+  ], 0.54), bodyMaterial)
+
+  const flapPivot = new Group()
+  flapPivot.name = 'Flap'
+  flapPivot.position.set(side * 19.2, -0.2, 4.9)
+  flapPivot.rotation.y = side * -0.48
+  const flapPanel = mesh(new BoxGeometry(22.5, 0.3, 2.15), bodyMaterial)
+  flapPanel.position.z = 0.7
+  flapPivot.add(flapPanel)
+  flaps.push(flapPivot)
+
+  const fence = mesh(new BoxGeometry(0.18, 1.45, 2.3), accentMaterial)
+  fence.position.set(side * 39.35, 0.76, 9.5)
+  fence.rotation.z = side * -0.12
+
+  const fairings = [7.5, 14.5, 21.5, 28.5].map((distance, index) => {
+    const fairing = mesh(new CylinderGeometry(0.16, 0.31, 2.9 - index * 0.2, 12), bodyMaterial)
+    fairing.rotation.x = Math.PI / 2
+    fairing.position.set(side * distance, -0.6, 6.15 + index * 0.48)
+    return fairing
   })
+  const navigationLight = new Mesh(
+    new SphereGeometry(0.24, 12, 8),
+    new MeshStandardMaterial({
+      color: side < 0 ? 0xd93630 : 0x32b66d,
+      emissive: side < 0 ? 0xd93630 : 0x32b66d,
+      emissiveIntensity: 2.4,
+    }),
+  )
+  navigationLight.position.set(side * 39.5, 0.25, 9.3)
+
+  assembly.add(panel, flapPivot, fence, navigationLight, ...fairings)
+  return assembly
+}
+
+function tailplane(side: -1 | 1) {
+  const assembly = new Group()
+  assembly.name = side < 0 ? 'Left tailplane' : 'Right tailplane'
+  assembly.position.set(0, 9.25, 28)
+  assembly.add(mesh(slabGeometry([
+    [side * 2.1, -2.2],
+    [side * 15.1, 3.7],
+    [side * 14.2, 6.7],
+    [side * 2.3, 3.4],
+  ], 0.38), bodyMaterial))
+  return assembly
+}
+
+function verticalTail() {
+  const assembly = new Group()
+  assembly.name = 'Fin'
+  assembly.position.set(0, 8.65, 24.4)
+  const fin = mesh(verticalSlabGeometry([
+    [0, 0],
+    [15.45, 4.1],
+    [15.05, 6.15],
+    [0.75, 11.5],
+  ], 0.5), bodyMaterial)
+  const accent = mesh(verticalSlabGeometry([
+    [2.7, 2.1],
+    [14.75, 4.95],
+    [14.15, 6.05],
+    [2.2, 10.35],
+  ], 0.53), liveryMaterial)
+  assembly.add(fin, accent)
+  return assembly
 }
 
 export function createAircraft(): AircraftRig {
   const aircraft = new Group()
   aircraft.name = 'N380FS'
-  aircraft.scale.setScalar(3.7)
-  const landingGearAssemblies = [
-    landingGear(-1.9, 1.35, 1, true),
-    landingGear(1.9, 1.35, 1, true),
-    landingGear(0, -6.55, 0.82, true),
-  ]
-
-  const fuselage = mesh(fuselageGeometry(), bodyMaterial)
-  fuselage.scale.set(0.68, 0.68, 1)
-  fuselage.position.y = 2.62
 
   const flaps: Group[] = []
-  const wingAssemblies = ([-1, 1] as const).map((side) => {
-    const assembly = new Group()
-    assembly.name = side < 0 ? 'Left wing' : 'Right wing'
-    assembly.position.y = 2.35
-    const panel = mesh(slabGeometry([
-      [side * 1.05, -1.75],
-      [side * 10.7, 1.15],
-      [side * 9.85, 2.65],
-      [side * 1.05, 0.65],
-    ], 0.2), bodyMaterial)
-    const stripe = mesh(new BoxGeometry(7.7, 0.045, 0.26), accentMaterial)
-    stripe.position.set(side * 5.75, 0.13, 0.55)
-    stripe.rotation.y = side * -0.19
-    const pivot = new Group()
-    pivot.name = 'Flap'
-    pivot.position.set(side * 4.9, -0.05, 1.25)
-    pivot.rotation.y = side * -0.16
-    const flapPanel = mesh(new BoxGeometry(5.9, 0.14, 0.72), bodyMaterial)
-    flapPanel.position.z = 0.36
-    pivot.add(flapPanel)
-    const winglet = mesh(new BoxGeometry(0.16, 0.92, 0.62), accentMaterial)
-    winglet.position.set(side * 10.05, 0.52, 1.82)
-    winglet.rotation.z = side * -0.18
-    flaps.push(pivot)
-    assembly.add(panel, stripe, pivot, winglet)
-    return assembly
-  })
-
-  const tailAssemblies = ([-1, 1] as const).map((side) => {
-    const assembly = new Group()
-    assembly.name = side < 0 ? 'Left tailplane' : 'Right tailplane'
-    assembly.position.y = 3
-    assembly.add(mesh(slabGeometry([
-      [side * 0.7, 6.1],
-      [side * 4.45, 7.45],
-      [side * 4.05, 8.25],
-      [side * 0.55, 7.45],
-    ], 0.16), bodyMaterial))
-    return assembly
-  })
-
-  const finAssembly = new Group()
-  finAssembly.name = 'Fin'
-  finAssembly.position.set(0, 3.85, 6.65)
-  const finPanel = mesh(slabGeometry([
-    [0, -0.9],
-    [0, 1.5],
-    [3.95, 1.05],
-    [3.15, -0.55],
-  ], 0.22), bodyMaterial)
-  finPanel.rotation.z = Math.PI / 2
-  const finAccent = mesh(new BoxGeometry(0.24, 1.25, 1.18), accentMaterial)
-  finAccent.position.set(0, 2.62, 0.55)
-  finAccent.rotation.x = -0.12
-  finAssembly.add(finPanel, finAccent)
-
-  const cabinWindows = passengerWindows()
-  const windshields = cockpitWindows()
-  const liveryLines = ([-1, 1] as const).map((side) => {
-    const line = new Mesh(new PlaneGeometry(10.8, 0.035), liveryMaterial)
-    line.position.set(side * 1.012, 2.58, -0.15)
-    line.rotation.y = side * Math.PI / 2
-    return line
-  })
+  const wingAssemblies = [wing(-1, flaps), wing(1, flaps)]
+  const tailAssemblies = [tailplane(-1), tailplane(1)]
+  const finAssembly = verticalTail()
   const engines = [
-    engine('left-outer-engine', -7.3, -0.05),
-    engine('left-inner-engine', -3.55, -1.05),
-    engine('right-inner-engine', 3.55, -1.05),
-    engine('right-outer-engine', 7.3, -0.05),
+    engine('left-outer-engine', -25.2, 3.75, 0.2),
+    engine('left-inner-engine', -11.7, 3.62, -5),
+    engine('right-inner-engine', 11.7, 3.62, -5),
+    engine('right-outer-engine', 25.2, 3.75, 0.2),
   ]
+  const landingGearAssemblies = [
+    bogie('Nose gear', 0, -25.4, 1, 5.1, 0.52),
+    bogie('Left wing gear', -10.2, 2.6, 2, 6.25),
+    bogie('Right wing gear', 10.2, 2.6, 2, 6.25),
+    bogie('Left body gear', -3.15, 7.1, 3, 5.7),
+    bogie('Right body gear', 3.15, 7.1, 3, 5.7),
+  ]
+  const wingBodyFairing = mesh(new SphereGeometry(1, 32, 18), bodyMaterial)
+  wingBodyFairing.name = 'Wing-body fairing'
+  wingBodyFairing.position.set(0, 4.55, 4.2)
+  wingBodyFairing.scale.set(4.05, 1.15, 13.4)
 
   aircraft.add(
-    fuselage,
+    mesh(fuselageGeometry(), bodyMaterial),
+    wingBodyFairing,
+    fuselageDetails(),
     ...wingAssemblies,
     ...tailAssemblies,
     finAssembly,
-    cabinWindows,
-    ...windshields,
-    ...liveryLines,
     ...engines,
     ...landingGearAssemblies,
   )
