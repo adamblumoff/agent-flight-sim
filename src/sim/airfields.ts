@@ -73,7 +73,7 @@ export const LAKESIDE_AIRPORT: Airport = Object.freeze({
   name: 'Lakeside Municipal',
   lat: lakesideThreshold.lat,
   lon: lakesideThreshold.lon,
-  elevationFt: 720,
+  elevationFt: KPWK_AIRPORT.elevationFt,
 })
 
 export const LAKESIDE_RUNWAY_22: MissionRunway = Object.freeze({

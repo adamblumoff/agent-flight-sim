@@ -510,9 +510,16 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
+.minimap-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.minimap-size-button,
 .minimap-drag-handle {
   display: grid;
-  width: 30px;
   height: 26px;
   flex: 0 0 auto;
   place-items: center;
@@ -520,10 +527,21 @@ summary:focus-visible {
   border-radius: 8px;
   background: transparent;
   color: rgb(244 239 222 / 42%);
+}
+
+.minimap-size-button {
+  width: 26px;
+  cursor: pointer;
+}
+
+.minimap-drag-handle {
+  width: 30px;
   cursor: grab;
   touch-action: none;
 }
 
+.minimap-size-button:hover,
+.minimap-size-button:focus-visible,
 .minimap-drag-handle:hover,
 .minimap-drag-handle:focus-visible {
   border-color: rgb(244 239 222 / 12%);
@@ -532,10 +550,16 @@ summary:focus-visible {
   outline: none;
 }
 
+.minimap-size-button:disabled {
+  color: rgb(244 239 222 / 16%);
+  cursor: default;
+}
+
 .minimap-drag-handle:active {
   cursor: grabbing;
 }
 
+.minimap-size-button svg,
 .minimap-drag-handle svg {
   width: 15px;
   height: 15px;

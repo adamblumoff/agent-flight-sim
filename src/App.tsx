@@ -84,7 +84,9 @@ function deriveObservations(state: FlightState): readonly CopilotObservation[] {
 }
 
 function deriveRecommendation(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return 'File the Lakeside Municipal runway 22 route before beginning the takeoff roll.'
+  if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned'
+    ? 'File the Lakeside Municipal runway 22 route before beginning the takeoff roll.'
+    : 'The Lakeside route is filed. Apply power when you are ready to begin the takeoff roll.'
   if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
   if (!state.procedure.compliant) return state.procedure.instruction
   if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
@@ -264,7 +266,7 @@ export default function App() {
     setShowTakeoffBrief(true)
   }, [])
 
-  const beginTakeoff = useCallback(() => {
+  const filePreflightRoute = useCallback(() => {
     flightSimulator.setRoute('continue_klak', 'Pilot filed the normal route to Lakeside Municipal runway 22 before departure.', 'human')
     setShowTakeoffBrief(false)
   }, [])
@@ -386,8 +388,8 @@ export default function App() {
               <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
-              <span>Filing the preflight route starts the takeoff roll.</span>
-              <Button autoFocus onClick={beginTakeoff}>File route &amp; take off</Button>
+              <span>Filing arms the departure. Apply power when you are ready to roll.</span>
+              <Button autoFocus onClick={filePreflightRoute}>File route</Button>
             </div>
           </div>
         </section>

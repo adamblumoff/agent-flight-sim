@@ -46,6 +46,10 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
     return action(flightSimulator.setRoute(input.plan as RoutePlan, input.reason.trim(), 'agent'))
   },
+  begin_takeoff: async (input) => {
+    if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
+    return action(flightSimulator.beginTakeoff('agent', input.reason.trim()))
+  },
   set_autopilot_targets: async (input) => action(flightSimulator.setAutopilotTargets(input, 'agent', reasonInput({ ...input }))),
   configure_aircraft: async (input) => action(flightSimulator.configureAircraft(input, 'agent')),
   request_human_approval: async (input) => {

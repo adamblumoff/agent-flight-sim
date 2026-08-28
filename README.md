@@ -36,6 +36,7 @@ get_mission_brief
 get_flight_state
 inspect_flight_evidence
 set_route
+begin_takeoff
 set_autopilot_targets
 configure_aircraft
 request_human_approval
@@ -46,15 +47,16 @@ transfer_control
 A normal agent flight is procedural and event-driven:
 
 1. Call `start_flight` with seed 17, 42, or 81.
-2. Before takeoff, call `set_route` with `continue_klak` and explain the preflight plan to Lakeside Municipal runway 22. Filing the route starts the takeoff roll.
-3. Respond to `configuration_required` and `checkpoint_reached` events while flying the normal route.
-4. Wait for `emergency_detected`; the scenario, evidence, and 45-second route-decision timer change only after that event.
-5. Inspect the new weather, cockpit, traffic, and passenger evidence, then replace the plan with `return_kpwk` and explain the choice.
-6. Follow each live checkpoint and configuration transition through base, final, and landing, then wait for touchdown and mission completion instead of polling.
+2. Before takeoff, call `set_route` with `continue_klak` and explain the preflight plan to Lakeside Municipal runway 22. Filing the route leaves the aircraft stopped.
+3. Call `begin_takeoff` when the route is filed and the aircraft is ready to roll.
+4. Respond to `configuration_required` and `checkpoint_reached` events while flying the normal route.
+5. Wait for `emergency_detected`; the scenario, evidence, and 45-second route-decision timer change only after that event.
+6. Inspect the new weather, cockpit, traffic, and passenger evidence, then replace the plan with `return_kpwk` and explain the choice.
+7. Follow each live checkpoint and configuration transition through base, final, and landing, then wait for touchdown and mission completion instead of polling.
 
 The intent-level tools make route and configuration decisions; the deterministic autopilot supplies the continuous control loop. The aircraft therefore keeps flying while a model is thinking or waiting for a human decision. Event waits return after at most 15 seconds and can be resumed from the returned monotonic revision.
 
-The minimap draws only the current aircraft-to-checkpoint leg and advances it when the aircraft enters that fix's capture radius. It can be dragged out of the way. The original destination is about 12.5 nautical miles away, so the emergency visibly replaces a real preflight route rather than revealing a route that was hidden from the start.
+The minimap draws only the current aircraft-to-checkpoint leg and advances it when the aircraft enters that fix's capture radius. It can be dragged, expanded, or reduced. The original destination is about 12.5 nautical miles away, so the emergency visibly replaces a real preflight route rather than revealing a route that was hidden from the start.
 
 The three seeds vary weather, engine health, traffic, and passenger urgency. Engine power and visibility affect the running simulation and world. Sustained G-load and abrupt changes accumulate passenger distress and deterministic injury risk, which are exposed in the live state and through `passenger_safety_update` events.
 

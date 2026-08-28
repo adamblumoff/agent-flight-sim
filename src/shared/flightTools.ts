@@ -19,6 +19,7 @@ export interface FlightToolArguments {
   get_flight_state: Record<string, never>
   inspect_flight_evidence: { readonly source?: EvidenceSource }
   set_route: { readonly plan: 'continue_klak' | 'return_kpwk'; readonly reason: string }
+  begin_takeoff: { readonly reason: string }
   set_autopilot_targets: AutopilotTargetsInput
   configure_aircraft: AircraftConfigurationInput
   request_human_approval: { readonly question: string; readonly requested_action: string; readonly reason: string }
@@ -32,6 +33,7 @@ export interface FlightToolResults {
   get_flight_state: FlightToolReceipt<{ readonly state: FlightState; readonly units: Readonly<Record<string, string>> }>
   inspect_flight_evidence: FlightToolReceipt<{ readonly evidence: FlightEvidence | readonly FlightEvidence[]; readonly inspectedSources: readonly EvidenceSource[] }>
   set_route: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
+  begin_takeoff: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
   set_autopilot_targets: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
   configure_aircraft: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
   request_human_approval: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
@@ -47,7 +49,7 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_flight', title: 'Start flight', readOnly: false,
-    description: 'Start a reproducible mission on North Field runway 18 and take copilot control. The aircraft remains stopped until set_route files the continue_klak preflight route.',
+    description: 'Start a reproducible mission on North Field runway 18 and take copilot control. The aircraft remains stopped while the copilot files the preflight route.',
     inputSchema: { type: 'object', properties: { seed: { type: 'number', enum: checkrideSeeds, default: 17 } }, additionalProperties: false },
   },
   {
@@ -65,8 +67,13 @@ export const flightToolDefinitions = [
   },
   {
     name: 'set_route', title: 'Choose route', readOnly: false,
-    description: 'Before takeoff, file continue_klak to Lakeside Municipal runway 22; this starts the takeoff roll. After emergency_detected, inspect at least two reports and replace it with return_kpwk. Each captured checkpoint emits checkpoint_reached.',
+    description: 'Before takeoff, file continue_klak to Lakeside Municipal runway 22. Filing a route does not move the aircraft; call begin_takeoff separately. After emergency_detected, inspect at least two reports and replace it with return_kpwk. Each captured checkpoint emits checkpoint_reached.',
     inputSchema: { type: 'object', properties: { plan: { type: 'string', enum: routePlans }, reason: { type: 'string', minLength: 1 } }, required: ['plan', 'reason'], additionalProperties: false },
+  },
+  {
+    name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
+    description: 'Begin the takeoff roll after the continue_klak preflight route has been filed. This explicitly authorizes the copilot to advance the throttle and rotate.',
+    inputSchema: { type: 'object', properties: { reason: { type: 'string', minLength: 1 } }, required: ['reason'], additionalProperties: false },
   },
   {
     name: 'set_autopilot_targets', title: 'Set autopilot targets', readOnly: false,

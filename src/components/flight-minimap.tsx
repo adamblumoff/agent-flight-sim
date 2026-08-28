@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { GripHorizontal } from 'lucide-react'
+import { GripHorizontal, Minus, Plus } from 'lucide-react'
 import { KPWK_RUNWAY_16, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
 import type { FlightState, MissionRunway } from '../sim/types'
 
 const WIDTH = 240
 const HEIGHT = 164
 const PADDING = 18
+const PANEL_WIDTHS = [238, 360, 520] as const
 
 interface MapPoint { readonly lat: number; readonly lon: number }
 interface PanelPosition { readonly x: number; readonly y: number }
@@ -34,6 +35,7 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
   const panelRef = useRef<HTMLElement>(null)
   const dragOriginRef = useRef<DragOrigin | null>(null)
   const [panelPosition, setPanelPosition] = useState<PanelPosition>(initialPanelPosition)
+  const [sizeIndex, setSizeIndex] = useState(0)
   const routePoints = state.route.waypoints
   const destinationRunway = state.route.destination === 'KLAK' ? LAKESIDE_RUNWAY_22 : KPWK_RUNWAY_16
   const visibleRunways = state.route.destination === 'KLAK'
@@ -85,6 +87,10 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
     }
   }, [])
 
+  useEffect(() => {
+    setPanelPosition((current) => clampPanelPosition(panelRef.current, current.x, current.y))
+  }, [sizeIndex])
+
   const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId)
     dragOriginRef.current = { pointerX: event.clientX, pointerY: event.clientY, panelX: panelPosition.x, panelY: panelPosition.y }
@@ -106,7 +112,7 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
     <aside
       ref={panelRef}
       className="flight-minimap"
-      style={{ left: panelPosition.x, top: panelPosition.y }}
+      style={{ left: panelPosition.x, top: panelPosition.y, width: Math.min(PANEL_WIDTHS[sizeIndex], window.innerWidth - 16) }}
       aria-label={`Movable route map. ${status}. ${routeProgress}.`}
     >
       <div className="minimap-heading">
@@ -114,18 +120,40 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
           <span>Navigation</span>
           <strong>{status}</strong>
         </div>
-        <button
-          type="button"
-          className="minimap-drag-handle"
-          aria-label="Move navigation map. Use arrow keys or drag."
-          title="Drag to move map"
-          onPointerDown={beginDrag}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          onKeyDown={moveWithKeyboard}
-        >
-          <GripHorizontal aria-hidden="true" />
-        </button>
+        <div className="minimap-actions">
+          <button
+            type="button"
+            className="minimap-size-button"
+            aria-label="Make navigation map smaller"
+            title="Make map smaller"
+            disabled={sizeIndex === 0}
+            onClick={() => setSizeIndex((current) => Math.max(0, current - 1))}
+          >
+            <Minus aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="minimap-size-button"
+            aria-label="Make navigation map larger"
+            title="Make map larger"
+            disabled={sizeIndex === PANEL_WIDTHS.length - 1}
+            onClick={() => setSizeIndex((current) => Math.min(PANEL_WIDTHS.length - 1, current + 1))}
+          >
+            <Plus aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="minimap-drag-handle"
+            aria-label="Move navigation map. Use arrow keys or drag."
+            title="Drag to move map"
+            onPointerDown={beginDrag}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            onKeyDown={moveWithKeyboard}
+          >
+            <GripHorizontal aria-hidden="true" />
+          </button>
+        </div>
       </div>
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={activeWaypoint ? `Aircraft tracking ${activeWaypoint.name}` : 'No active route'}>
         <defs>

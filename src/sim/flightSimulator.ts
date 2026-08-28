@@ -472,6 +472,7 @@ class FlightSimulator {
   }
 
   beginTakeoff = (actor: TraceActor = 'human', reason = 'Takeoff briefing acknowledged') => {
+    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
     if (this.state.mission.phase !== 'preflight') return this.receipt(false, 'Takeoff has already started.')
     if (this.state.route.plan !== 'continue_klak') return this.receipt(false, 'File the Lakeside Municipal runway 22 route before takeoff.')
     this.state = Object.freeze({
@@ -485,7 +486,11 @@ class FlightSimulator {
 
   setThrottle = (value: number, actor: TraceActor = 'human', reason = 'Set throttle') => {
     if (actor === 'human') this.takePilotControl(reason)
-    this.state = Object.freeze({ ...this.state, throttle: clamp(value, 0, 1) })
+    const throttle = clamp(value, 0, 1)
+    if (throttle > 0 && this.state.mission.phase === 'preflight' && this.state.route.plan === 'continue_klak') {
+      this.beginTakeoff(actor, 'Throttle applied after the preflight route was filed')
+    }
+    this.state = Object.freeze({ ...this.state, throttle })
     this.record(actor, 'throttle', reason, { value: this.state.throttle })
     this.publish(this.state)
   }
@@ -514,7 +519,6 @@ class FlightSimulator {
     this.addDebrief(actor, filingPreflight ? 'Filed Lakeside Municipal runway 22 route' : `Selected ${plan.replaceAll('_', ' ')}`)
     this.queueEvent('plan_updated', filingPreflight ? 'Preflight route to Lakeside Municipal runway 22 filed.' : `${plan.replaceAll('_', ' ')} route loaded.`)
     this.publish(this.state)
-    if (filingPreflight) this.beginTakeoff(actor, 'Preflight route filed; takeoff roll started')
     return this.receipt(true, `${route.destination ?? 'Holding'} route loaded.`)
   }
 
