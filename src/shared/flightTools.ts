@@ -59,7 +59,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'get_flight_state', title: 'Read flight state', readOnly: true,
-    description: 'Read live aircraft motion, fuel, control owner, current route, required phase-specific aircraft configuration, autopilot targets, approval, scenario conditions, and debrief.', inputSchema: emptySchema,
+    description: 'Read live airspeed, ground speed, track, wind components, angle of attack, stall state, fuel, control owner, route, configuration, autopilot targets, scenario conditions, and debrief.', inputSchema: emptySchema,
   },
   {
     name: 'inspect_flight_evidence', title: 'Inspect evidence', readOnly: true,

@@ -1,5 +1,18 @@
 import assert from 'node:assert/strict'
 import { flightSimulator } from '../src/sim/flightSimulator.ts'
+import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, windCorrectedHeadingDeg } from '../src/sim/aerodynamics.ts'
+
+const headwind = groundMotionFor(170, 180, { visibilityMiles: 10, ceilingFt: 6_500, windDirectionDeg: 180, windSpeedKt: 12, summary: 'Test wind' }, 0, 17)
+assert.ok(headwind.groundSpeedKt < 170)
+assert.ok(headwind.headwindKt > 10)
+const desiredTrackDeg = 159
+const correctionWeather = { visibilityMiles: 10, ceilingFt: 6_500, windDirectionDeg: 190, windSpeedKt: 18, summary: 'Crosswind test' }
+const correctedHeadingDeg = windCorrectedHeadingDeg(desiredTrackDeg, 140, correctionWeather, 12, 42)
+const correctedMotion = groundMotionFor(140, correctedHeadingDeg, correctionWeather, 12, 42)
+assert.ok(Math.abs(((correctedMotion.trackDeg - desiredTrackDeg + 540) % 360) - 180) < 0.01)
+assert.ok(airborneDragKtPerSecond(230, 30, true, 0) > airborneDragKtPerSecond(230, 0, false, 0))
+assert.ok(airborneDragKtPerSecond(230, 0, false, 0) > airborneDragKtPerSecond(140, 0, false, 0))
+assert.ok(stallResponseFor(100, 18, 0, 0, 0).severity > 0.5)
 
 flightSimulator.reset(17)
 flightSimulator.transferControl('agent', 'agent', 'Simulation smoke test')
@@ -149,6 +162,9 @@ assert.equal(completedMission.mission.outcome, 'landed')
 assert.equal(completedMission.debrief.landing?.safe, true)
 assert.ok(completedMission.route.completedWaypointIds.includes('KPWK_TOUCHDOWN'))
 assert.equal(completedMission.passengerSafety.status, 'comfortable')
+assert.ok(completedMission.elapsedSeconds > 300)
+assert.ok(completedMission.elapsedSeconds < completedMission.checkride.deadlineSeconds)
+assert.ok(completedMission.checkride.deadlineSeconds - completedMission.elapsedSeconds > 30)
 
 console.log(JSON.stringify({
   checkpoint: checkpoint.message,
@@ -156,5 +172,7 @@ console.log(JSON.stringify({
   timerExpiredScore: timerExpired.state.checkride.score.total,
   reroute: reroute.state.mission.nextFix,
   passengerSafety,
+  missionElapsedSeconds: completedMission.elapsedSeconds,
+  missionRemainingSeconds: completedMission.checkride.deadlineSeconds - completedMission.elapsedSeconds,
   landing: completedMission.debrief.landing,
 }, null, 2))

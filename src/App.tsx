@@ -59,7 +59,7 @@ function deriveObservations(state: FlightState): readonly CopilotObservation[] {
   return [
     {
       label: 'Weather',
-      value: `${weather.summary} · ${weather.visibilityMiles} mi, ${weather.ceilingFt.toLocaleString()} ft ceiling`,
+      value: `${weather.summary} · ${weather.visibilityMiles} mi, ${weather.ceilingFt.toLocaleString()} ft ceiling · wind ${weather.windDirectionDeg.toString().padStart(3, '0')}° at ${weather.windSpeedKt} kt`,
       tone: weatherTone,
     },
     {
@@ -371,7 +371,8 @@ export default function App() {
       : state.route.runway
         ? `Runway ${state.route.runway}`
         : routePlanLabels[state.route.plan]
-  const missionSecondsRemaining = Math.max(0, state.checkride.deadlineSeconds - state.elapsedSeconds)
+  const missionSecondsRemaining = state.checkride.deadlineSeconds - state.elapsedSeconds
+  const missionOvertime = missionSecondsRemaining < 0
   const lastDeduction = state.checkride.score.deductions.at(-1)
 
   return (
@@ -429,13 +430,13 @@ export default function App() {
       </header>
 
       <div className="flight-status-strip">
-        <div className="flight-clock" data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(state.elapsedSeconds)} elapsed, ${formatElapsed(missionSecondsRemaining)} remaining`}>
+        <div className="flight-clock" data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(state.elapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
           <Timer aria-hidden="true" />
           <span>Elapsed</span>
           <strong>{formatElapsed(state.elapsedSeconds)}</strong>
           <i aria-hidden="true" />
-          <span>Left</span>
-          <strong>{formatElapsed(missionSecondsRemaining)}</strong>
+          <span>{missionOvertime ? 'Overtime' : 'Remaining'}</span>
+          <strong>{formatElapsed(Math.abs(missionSecondsRemaining))}</strong>
         </div>
         <div className="score-meter" title={lastDeduction ? `Last deduction: −${lastDeduction.points} · ${lastDeduction.reason}` : 'No deductions'}>
           <Trophy aria-hidden="true" />

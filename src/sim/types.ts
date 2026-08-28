@@ -13,7 +13,17 @@ export type MissionOutcome = 'in_progress' | 'landed' | 'unsafe_touchdown' | 'fu
 export type AircraftPhase = 'takeoff_roll' | 'airborne' | 'landing_roll' | 'stopped' | 'crash_slide'
 
 export interface AutopilotState { readonly enabled: boolean; readonly headingDeg: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalMode: VerticalMode }
-export interface MotionState { readonly longitudinalAccelerationKtPerSecond: number; readonly verticalAccelerationFpmPerSecond: number; readonly turnRateDegPerSecond: number }
+export interface MotionState {
+  readonly longitudinalAccelerationKtPerSecond: number
+  readonly verticalAccelerationFpmPerSecond: number
+  readonly turnRateDegPerSecond: number
+  readonly groundSpeedKt: number
+  readonly trackDeg: number
+  readonly headwindKt: number
+  readonly crosswindKt: number
+  readonly angleOfAttackDeg: number
+  readonly stalled: boolean
+}
 export interface ImpactState { readonly revision: number; readonly severity: 'hard' | 'destructive'; readonly sinkRateFpm: number; readonly airspeedKt: number; readonly bankDeg: number; readonly pitchDeg: number; readonly onRunway: boolean; readonly rollDirection: -1 | 1 }
 export type ConfigurationStage = 'takeoff' | 'positive_rate' | 'climb_cleanup' | 'base' | 'final' | 'landing' | 'complete'
 export interface ConfigurationProcedure { readonly stage: ConfigurationStage; readonly gearDown: boolean; readonly flapsDeg: 0 | 10 | 20 | 30; readonly compliant: boolean; readonly instruction: string }
