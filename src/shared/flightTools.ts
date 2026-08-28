@@ -73,7 +73,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
-    description: 'Begin the takeoff roll after the continue_klak preflight route has been filed. Advance takeoff thrust and rotate near 170 kt.',
+    description: 'Begin the takeoff roll after the continue_klak preflight route has been filed. Advance takeoff thrust, rotate near 170 kt, and keep accelerating toward 210 kt after liftoff.',
     inputSchema: { type: 'object', properties: { reason: { type: 'string', minLength: 1 } }, required: ['reason'], additionalProperties: false },
   },
   {

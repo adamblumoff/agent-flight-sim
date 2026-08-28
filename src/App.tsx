@@ -1,7 +1,7 @@
 import '@fontsource-variable/sora'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import { Eye, Glasses, MapPin, Orbit, Plane, Timer } from 'lucide-react'
+import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy } from 'lucide-react'
 import {
   CopilotPanel,
   type CopilotDebrief,
@@ -198,6 +198,7 @@ function deriveDebrief(state: FlightState): CopilotDebrief | null {
     title: state.debrief.status === 'landed' ? 'Safely on the ground' : 'The flight did not finish safely',
     outcome: state.debrief.status === 'landed' ? 'Landed' : 'Failed',
     elapsed: formatElapsed(state.debrief.elapsedSeconds),
+    score: `${state.checkride.score.total}/100`,
     decision: routePlanLabels[state.debrief.decision],
     summary: landingSummary,
     events: state.debrief.events.slice(-4).map((event) => event.summary),
@@ -370,6 +371,8 @@ export default function App() {
       : state.route.runway
         ? `Runway ${state.route.runway}`
         : routePlanLabels[state.route.plan]
+  const missionSecondsRemaining = Math.max(0, state.checkride.deadlineSeconds - state.elapsedSeconds)
+  const lastDeduction = state.checkride.score.deductions.at(-1)
 
   return (
     <main className="app-shell">
@@ -394,7 +397,7 @@ export default function App() {
             </p>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
-              <li><kbd>W</kbd><span>Near {A380_ENVELOPE.rotateSpeedKt} knots, hold for a smooth rotation. Control inputs ramp in and ease out.</span></li>
+              <li><kbd>W</kbd><span>Near {A380_ENVELOPE.rotateSpeedKt} knots, rotate smoothly and keep takeoff power set while accelerating toward {A380_ENVELOPE.initialClimbSpeedKt} knots.</span></li>
               <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
@@ -425,13 +428,28 @@ export default function App() {
         <OwnershipControl mode={ownershipMode} onClick={toggleHandoff} />
       </header>
 
-      {state.checkride.decisionSecondsRemaining !== null ? (
-        <div className="emergency-timer" data-urgent={state.checkride.decisionSecondsRemaining <= 10} role="timer" aria-live="polite">
+      <div className="flight-status-strip">
+        <div className="flight-clock" data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(state.elapsedSeconds)} elapsed, ${formatElapsed(missionSecondsRemaining)} remaining`}>
           <Timer aria-hidden="true" />
-          <span>Emergency route decision</span>
-          <strong>0:{Math.ceil(state.checkride.decisionSecondsRemaining).toString().padStart(2, '0')}</strong>
+          <span>Elapsed</span>
+          <strong>{formatElapsed(state.elapsedSeconds)}</strong>
+          <i aria-hidden="true" />
+          <span>Left</span>
+          <strong>{formatElapsed(missionSecondsRemaining)}</strong>
         </div>
-      ) : null}
+        <div className="score-meter" title={lastDeduction ? `Last deduction: −${lastDeduction.points} · ${lastDeduction.reason}` : 'No deductions'}>
+          <Trophy aria-hidden="true" />
+          <span>Score</span>
+          <strong>{state.checkride.score.total}</strong>
+        </div>
+        {state.checkride.decisionSecondsRemaining !== null ? (
+          <div className="emergency-timer" data-urgent={state.checkride.decisionSecondsRemaining <= 30} role="timer" aria-live="polite">
+            <Timer aria-hidden="true" />
+            <span>Route decision</span>
+            <strong>0:{Math.ceil(state.checkride.decisionSecondsRemaining).toString().padStart(2, '0')}</strong>
+          </div>
+        ) : null}
+      </div>
 
       <FlightMinimap state={state} />
 

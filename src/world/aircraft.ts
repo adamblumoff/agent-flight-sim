@@ -344,10 +344,12 @@ function wing(side: -1 | 1, flaps: Group[]) {
 
   const flapPivot = new Group()
   flapPivot.name = 'Flap'
-  flapPivot.position.set(side * 19.2, -0.2, 4.9)
-  flapPivot.rotation.y = side * -0.48
-  const flapPanel = mesh(new BoxGeometry(22.5, 0.3, 2.15), bodyMaterial)
-  flapPanel.position.z = 0.7
+  // Follow the wing's actual trailing edge instead of canting the flap like a
+  // separate swept wing. The inboard/outboard edge rises about 4.5 m over 33 m.
+  flapPivot.position.set(side * 19.7, -0.08, 7.65)
+  flapPivot.rotation.y = side * -0.135
+  const flapPanel = mesh(new BoxGeometry(25.2, 0.28, 2.25), bodyMaterial)
+  flapPanel.position.z = 0.78
   flapPivot.add(flapPanel)
   flaps.push(flapPivot)
 

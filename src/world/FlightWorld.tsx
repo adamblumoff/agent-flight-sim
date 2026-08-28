@@ -53,6 +53,13 @@ const cockpitOffset = new Vector3(0, 10.5, -34)
 const cockpitLookAhead = new Vector3(0, 10, -240)
 const crashOrigin = new Vector3(0, 8, -34)
 
+const flapVisualDeflectionDeg = (detent: number) => {
+  if (detent >= 30) return 22
+  if (detent >= 20) return 14
+  if (detent >= 10) return 6
+  return 0
+}
+
 export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraModeRef = useRef(cameraMode)
@@ -91,7 +98,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
 
     const scene = new Scene()
     scene.background = new Color(0x849ba0)
-    const camera = new PerspectiveCamera(56, 1, 0.25, 8_000)
+    const camera = new PerspectiveCamera(56, 1, 0.25, 20_000)
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
@@ -209,7 +216,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
         gear.visible = state.gearDown
         gear.position.y = visualGearCompression
       }
-      visualFlapRadians = MathUtils.damp(visualFlapRadians, state.flapsDeg * DEG_TO_RAD, 4.5, deltaSeconds)
+      visualFlapRadians = MathUtils.damp(visualFlapRadians, flapVisualDeflectionDeg(state.flapsDeg) * DEG_TO_RAD, 4.5, deltaSeconds)
       for (const flap of flaps) flap.rotation.x = visualFlapRadians
 
       if (state.aircraftPhase !== 'airborne') {

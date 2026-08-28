@@ -664,30 +664,42 @@ summary:focus-visible {
   font-weight: 600;
 }
 
-.emergency-timer {
+.flight-status-strip {
   position: absolute;
   z-index: 10;
   top: 76px;
   left: 50%;
   display: flex;
   align-items: center;
+  gap: 7px;
+  transform: translateX(-50%);
+}
+
+.flight-clock,
+.score-meter,
+.emergency-timer {
+  display: flex;
+  align-items: center;
   gap: 8px;
   min-height: 32px;
   padding: 0 11px;
-  border: 1px solid rgb(226 183 111 / 35%);
+  border: 1px solid rgb(244 239 222 / 14%);
   border-radius: 999px;
-  background: rgb(31 27 19 / 88%);
+  background: rgb(18 22 19 / 88%);
   box-shadow: 0 12px 32px rgb(0 0 0 / 24%);
-  color: var(--amber);
-  transform: translateX(-50%);
+  color: var(--green);
   backdrop-filter: blur(14px);
 }
 
+.flight-clock svg,
+.score-meter svg,
 .emergency-timer svg {
   width: 14px;
   height: 14px;
 }
 
+.flight-clock span,
+.score-meter span,
 .emergency-timer span {
   color: rgb(244 239 222 / 68%);
   font-size: 8px;
@@ -696,6 +708,8 @@ summary:focus-visible {
   text-transform: uppercase;
 }
 
+.flight-clock strong,
+.score-meter strong,
 .emergency-timer strong {
   min-width: 31px;
   color: var(--cream);
@@ -703,6 +717,23 @@ summary:focus-visible {
   text-align: right;
 }
 
+.flight-clock i {
+  width: 1px;
+  height: 13px;
+  background: rgb(244 239 222 / 13%);
+}
+
+.score-meter {
+  border-color: rgb(154 209 168 / 28%);
+}
+
+.emergency-timer {
+  border-color: rgb(226 183 111 / 35%);
+  background: rgb(31 27 19 / 88%);
+  color: var(--amber);
+}
+
+.flight-clock[data-urgent="true"],
 .emergency-timer[data-urgent="true"] {
   border-color: rgb(231 128 104 / 50%);
   background: rgb(48 24 21 / 92%);
@@ -1128,7 +1159,7 @@ summary:focus-visible {
 
 .debrief-facts {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   margin: 21px 0 0;
   border-block: 1px solid rgb(244 239 222 / 10%);
 }
@@ -1356,6 +1387,15 @@ summary:focus-visible {
     left: auto;
     display: flex;
     transform: none;
+  }
+
+  .flight-status-strip {
+    top: 112px;
+    max-width: calc(100vw - 24px);
+  }
+
+  .flight-status-strip span {
+    display: none;
   }
 
   .flight-minimap {

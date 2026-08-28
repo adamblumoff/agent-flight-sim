@@ -108,6 +108,8 @@ const passengerSafety = flightSimulator.getState().passengerSafety
 assert.ok(passengerSafety.distress > 0)
 assert.ok(passengerSafety.loadFactorG > 1.5)
 assert.ok(passengerSafety.status === 'distressed' || passengerSafety.status === 'injured')
+assert.ok(flightSimulator.getState().checkride.score.total < 100)
+assert.ok(flightSimulator.getState().checkride.score.deductions.some((deduction) => deduction.reason.includes('G maneuver')))
 const passengerEvent = await flightSimulator.waitForFlightEvent({ afterRevision: 0, events: ['passenger_safety_update'], timeoutMs: 1_000 })
 assert.equal(passengerEvent.event, 'passenger_safety_update')
 

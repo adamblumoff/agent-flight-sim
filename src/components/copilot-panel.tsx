@@ -18,6 +18,7 @@ export interface CopilotDebrief {
   readonly title: string
   readonly outcome: string
   readonly elapsed: string
+  readonly score: string
   readonly decision: string
   readonly summary: string
   readonly events: readonly string[]
@@ -78,6 +79,10 @@ function MissionDebrief({
         <div>
           <dt>Decision</dt>
           <dd>{debrief.decision}</dd>
+        </div>
+        <div>
+          <dt>Score</dt>
+          <dd>{debrief.score}</dd>
         </div>
       </dl>
 

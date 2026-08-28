@@ -20,9 +20,10 @@ export function createCheckpointOrb() {
     color: 0xf2c75c,
     depthWrite: false,
     emissive: 0x5e4712,
-    emissiveIntensity: 0.35,
-    opacity: 0.11,
-    roughness: 0.72,
+    emissiveIntensity: 0.7,
+    fog: false,
+    opacity: 0.17,
+    roughness: 0.58,
     side: DoubleSide,
     transparent: true,
   }))
@@ -40,8 +41,8 @@ export function createCheckpointOrb() {
 
       waypointToWorldVector(waypoint, position)
       root.position.set(position.x, 0, position.z)
-      const radiusMeters = checkpointCaptureRadiusNm(waypoint, state.controlOwner) * NM_TO_METERS * 0.4
-      const pulse = 1 + Math.sin(elapsedSeconds * 1.5) * 0.015
+      const radiusMeters = checkpointCaptureRadiusNm(waypoint, state.controlOwner) * NM_TO_METERS * 0.65
+      const pulse = 1 + Math.sin(elapsedSeconds * 1.5) * 0.025
       root.scale.set(radiusMeters * pulse, 1, radiusMeters * pulse)
     },
   }

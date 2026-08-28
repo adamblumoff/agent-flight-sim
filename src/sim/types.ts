@@ -37,6 +37,18 @@ export interface PassengerSafetyState {
   readonly summary: string
 }
 
+export interface ScoreDeduction {
+  readonly id: string
+  readonly elapsedSeconds: number
+  readonly points: number
+  readonly reason: string
+}
+
+export interface ScoreState {
+  readonly total: number
+  readonly deductions: readonly ScoreDeduction[]
+}
+
 export type ApprovalStatus = 'none' | 'pending' | 'approved' | 'denied'
 export interface HumanApprovalState { readonly status: ApprovalStatus; readonly question: string | null; readonly requestedAction: string | null }
 export interface LandingResult { readonly runway: string; readonly sinkRateFpm: number; readonly airspeedKt: number; readonly centerlineErrorFt: number; readonly touchdownDistanceFt: number; readonly bounces: number; readonly onRunway: boolean; readonly safe: boolean }
@@ -58,7 +70,7 @@ export interface CheckrideState {
   readonly alert: string | null
   readonly humanApproval: 'not_required' | 'pending' | 'approved' | 'denied'
   readonly inspectedSources: readonly EvidenceSource[]
-  readonly score: { readonly total: number }
+  readonly score: ScoreState
   readonly decision: RoutePlan | null
 }
 
