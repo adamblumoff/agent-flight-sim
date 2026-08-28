@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   ACESFilmicToneMapping,
   Box3,
@@ -16,7 +16,7 @@ import {
   WebGLRenderer,
 } from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { flightSimulator } from '../sim/flightSimulator'
+import { flightSimulator, navigationBearingDeg } from '../sim/flightSimulator'
 import { createAircraft, createCrashEffects } from './aircraft'
 import { createAircraftBreakup } from './aircraftBreakup'
 import { createAirportWorld, disposeScene } from './airportScene'
@@ -33,6 +33,7 @@ export type FlightWorldStatus =
 
 export interface FlightWorldProps {
   readonly cameraMode?: FlightCameraMode
+  readonly compassRef?: RefObject<HTMLDivElement | null>
   readonly onStatusChange?: (status: FlightWorldStatus) => void
 }
 
@@ -52,6 +53,10 @@ const chaseLookAhead = new Vector3(0, -10, -120)
 const cockpitOffset = new Vector3(0, 10.5, -34)
 const cockpitLookAhead = new Vector3(0, 10, -240)
 const crashOrigin = new Vector3(0, 8, -34)
+const normalizeHeading = (degrees: number) => ((degrees % 360) + 360) % 360
+const relativeBearing = (bearing: number, heading: number) => ((bearing - heading + 540) % 360) - 180
+const interpolatedHeading = (previous: number, current: number, alpha: number) =>
+  normalizeHeading(previous + relativeBearing(current, previous) * alpha)
 
 const flapVisualDeflectionDeg = (detent: number) => {
   if (detent >= 30) return 22
@@ -60,7 +65,7 @@ const flapVisualDeflectionDeg = (detent: number) => {
   return 0
 }
 
-export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorldProps) {
+export function FlightWorld({ cameraMode = 'chase', compassRef, onStatusChange }: FlightWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraModeRef = useRef(cameraMode)
   const [status, setStatus] = useState<FlightWorldStatus>(loadingStatus)
@@ -76,6 +81,15 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+
+    const compass = compassRef?.current
+    const compassCard = compass?.querySelector<HTMLElement>('[data-compass-card]')
+    const courseNeedle = compass?.querySelector<HTMLElement>('[data-course-needle]')
+    const windNeedle = compass?.querySelector<HTMLElement>('[data-wind-needle]')
+    const headingValue = compass?.querySelector<HTMLElement>('[data-heading-value]')
+    const courseValue = compass?.querySelector<HTMLElement>('[data-course-value]')
+    const windValue = compass?.querySelector<HTMLElement>('[data-wind-value]')
+    let lastCompassText = ''
 
     let renderer: WebGLRenderer
     try {
@@ -180,6 +194,31 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       const state = flightSimulator.getState()
       const previousState = flightSimulator.getPreviousState()
       const interpolationAlpha = flightSimulator.getInterpolationAlpha(timestamp)
+      const headingDeg = interpolatedHeading(previousState.headingDeg, state.headingDeg, interpolationAlpha)
+      const activeWaypoint = state.mission.outcome === 'in_progress'
+        ? state.route.waypoints[state.route.activeWaypointIndex]
+        : undefined
+      const courseBearingDeg = activeWaypoint ? navigationBearingDeg(state, activeWaypoint) : null
+      const windFromDeg = state.scenario.weather.windDirectionDeg
+      if (compassCard) compassCard.style.transform = `rotate(${-headingDeg}deg)`
+      if (courseNeedle) {
+        courseNeedle.style.transform = `rotate(${courseBearingDeg === null ? 0 : relativeBearing(courseBearingDeg, headingDeg)}deg)`
+        courseNeedle.toggleAttribute('data-active', courseBearingDeg !== null)
+      }
+      if (windNeedle) windNeedle.style.transform = `rotate(${relativeBearing(windFromDeg, headingDeg)}deg)`
+      const headingText = `${Math.round(headingDeg).toString().padStart(3, '0')}°`
+      const courseText = activeWaypoint && courseBearingDeg !== null
+        ? `${activeWaypoint.name} · ${Math.round(courseBearingDeg).toString().padStart(3, '0')}° · ${(state.mission.distanceToNextFixNm ?? 0).toFixed(1)} NM`
+        : 'Route pending'
+      const windText = `${windFromDeg.toString().padStart(3, '0')}° · ${state.scenario.weather.windSpeedKt} kt`
+      const compassText = `${headingText}|${courseText}|${windText}`
+      if (compassText !== lastCompassText) {
+        if (headingValue) headingValue.textContent = headingText
+        if (courseValue) courseValue.textContent = courseText
+        if (windValue) windValue.textContent = windText
+        compass?.setAttribute('aria-label', `Heading ${headingText}. Next fix ${courseText}. Wind from ${windText}.`)
+        lastCompassText = compassText
+      }
       stateToWorldVector(previousState, previousAircraftPosition)
       stateToWorldVector(state, currentAircraftPosition)
       aircraftPosition.lerpVectors(previousAircraftPosition, currentAircraftPosition, interpolationAlpha)

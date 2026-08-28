@@ -1,6 +1,6 @@
 import '@fontsource-variable/sora'
 import '@fontsource-variable/kode-mono'
-import { lazy, Suspense, useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Wind } from 'lucide-react'
 import {
   CopilotPanel,
@@ -14,6 +14,7 @@ import {
 import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
+import { FlightCompass } from './components/flight-compass'
 import { A380_ENVELOPE } from './sim/a380Envelope'
 import { flightSimulator } from './sim/flightSimulator'
 import type { FlightState, RoutePlan } from './sim/types'
@@ -46,6 +47,17 @@ const formatElapsed = (seconds: number) => {
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = Math.floor(seconds % 60)
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+}
+
+const deductionLabel = (id: string) => {
+  if (id === 'mission-overtime') return 'overtime'
+  if (id === 'decision-timeout') return 'late decision'
+  if (id.startsWith('configuration-')) return 'configuration'
+  if (id.startsWith('high-g-')) return 'high G'
+  if (id.startsWith('jerk-')) return 'abrupt input'
+  if (id === 'hard-landing') return 'hard landing'
+  if (id === 'off-center-landing') return 'off center'
+  return id.replaceAll('-', ' ')
 }
 
 function deriveObservations(state: FlightState): readonly CopilotObservation[] {
@@ -235,6 +247,7 @@ function InstrumentStat({
 }
 
 export default function App() {
+  const compassRef = useRef<HTMLDivElement>(null)
   const state = useSyncExternalStore(
     flightSimulator.subscribe,
     flightSimulator.getSnapshot,
@@ -383,7 +396,7 @@ export default function App() {
   return (
     <main className="app-shell">
       <Suspense fallback={<div className="flight-world world-loading" />}>
-        <FlightWorld cameraMode={cameraMode} onStatusChange={setWorldStatus} />
+        <FlightWorld cameraMode={cameraMode} compassRef={compassRef} onStatusChange={setWorldStatus} />
       </Suspense>
       <div className="scene-shade" />
 
@@ -447,6 +460,7 @@ export default function App() {
           <Trophy aria-hidden="true" />
           <span>Score</span>
           <strong>{state.checkride.score.total}</strong>
+          {lastDeduction ? <small>−{lastDeduction.points} {deductionLabel(lastDeduction.id)}</small> : null}
         </div>
         <div className="wind-meter" title={windTitle} aria-label={windTitle} data-turbulence={state.motion.turbulenceLevel}>
           <Wind aria-hidden="true" />
@@ -464,6 +478,7 @@ export default function App() {
       </div>
 
       <FlightMinimap state={state} />
+      <FlightCompass ref={compassRef} />
 
       <nav className="camera-switcher" aria-label="Camera view">
         {cameraOptions.map(({ mode, label, icon: Icon }) => (

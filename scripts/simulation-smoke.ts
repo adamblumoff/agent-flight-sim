@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { flightSimulator, landingRollAccelerationKtPerSecond } from '../src/sim/flightSimulator.ts'
+import { flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg } from '../src/sim/flightSimulator.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from '../src/sim/aerodynamics.ts'
 
 const headwind = groundMotionFor(170, 180, { visibilityMiles: 10, ceilingFt: 6_500, windDirectionDeg: 180, windSpeedKt: 12, summary: 'Test wind' }, 0, 17)
@@ -18,6 +18,7 @@ assert.ok(turbulenceSamples.some((sample) => sample.level !== 'none'))
 assert.ok(turbulenceSamples.every((sample) => Math.abs(sample.verticalAccelerationFpmPerSecond) < 300))
 assert.ok(landingRollAccelerationKtPerSecond(1, 1) > 0)
 assert.ok(landingRollAccelerationKtPerSecond(0, 1) < 0)
+assert.ok(Math.abs(navigationBearingDeg({ lat: 42, lon: -88 }, { lat: 42, lon: -87.9 }) - 90) < 0.1)
 
 flightSimulator.reset(17)
 assert.equal(flightSimulator.getState().checkride.score.total, 100)
@@ -123,8 +124,11 @@ flightSimulator.beginTakeoff('agent', 'Begin passenger dynamics departure')
 flightSimulator.advanceForTesting(40)
 flightSimulator.transferControl('human', 'human', 'Test pilot began abrupt maneuvering')
 flightSimulator.setThrottle(1, 'human', 'Maintain maneuvering power')
+const bankBeforeHold = flightSimulator.getState().bankDeg
 flightSimulator.setPilotControls({ pitchAxis: 0, bankAxis: 1 }, 'human', 'Sustained maximum-bank input')
-flightSimulator.advanceForTesting(12)
+flightSimulator.advanceForTesting(1)
+assert.ok(Math.abs(flightSimulator.getState().bankDeg - bankBeforeHold) < 10)
+flightSimulator.advanceForTesting(17)
 flightSimulator.releasePilotControls()
 const passengerSafety = flightSimulator.getState().passengerSafety
 assert.ok(passengerSafety.distress > 0)

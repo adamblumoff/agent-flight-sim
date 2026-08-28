@@ -38,10 +38,10 @@ const TAKEOFF_POWER_ACCEL_KT_PER_SECOND = 5.8
 const TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND = 0.2
 const TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND = 0.65
 const MAX_GROUND_PITCH_DEG = 10
-const PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND = 9
-const PILOT_BANK_TRIM_RATE_DEG_PER_SECOND = 18
-const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 10
-const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 22
+const PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND = 5
+const PILOT_BANK_TRIM_RATE_DEG_PER_SECOND = 10
+const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 7
+const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 14
 const PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND = 420
 const EMERGENCY_TRIGGER_SECONDS = 45
 const EMERGENCY_DECISION_SECONDS = 45
@@ -258,7 +258,7 @@ const distanceNm = (a: { lat: number; lon: number }, b: { lat: number; lon: numb
   return EARTH_RADIUS_NM * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
 }
 
-const bearingDeg = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+export const navigationBearingDeg = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
   const lat1 = radians(a.lat)
   const lat2 = radians(b.lat)
   const dLon = radians(b.lon - a.lon)
@@ -304,7 +304,7 @@ const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDe
       2.4,
     )
     const diversionDistanceNm = distanceNm(origin, baseLeg)
-    const diversionBearingDeg = bearingDeg(origin, baseLeg)
+    const diversionBearingDeg = navigationBearingDeg(origin, baseLeg)
     const currentHeadingDeg = origin.headingDeg ?? diversionBearingDeg
     const intercepts: RouteWaypoint[] = []
     if (diversionDistanceNm > 1.6) {
@@ -576,7 +576,7 @@ class FlightSimulator {
     if (this.emergencyTriggered && actor === 'agent' && this.state.checkride.inspectedSources.length < 2) return this.receipt(false, 'Inspect at least two evidence sources before choosing the emergency route.')
     const route = Object.freeze({ ...routeFor(plan, this.state), reason })
     const target = route.waypoints[0]
-    const autopilot = target ? Object.freeze({ enabled: actor === 'agent', headingDeg: bearingDeg(this.state, target), altitudeFt: target.altitudeFt, airspeedKt: target.airspeedKt, verticalMode: target.altitudeFt < this.state.altitudeFt ? 'descend' as const : 'climb' as const }) : this.state.autopilot
+    const autopilot = target ? Object.freeze({ enabled: actor === 'agent', headingDeg: navigationBearingDeg(this.state, target), altitudeFt: target.altitudeFt, airspeedKt: target.airspeedKt, verticalMode: target.altitudeFt < this.state.altitudeFt ? 'descend' as const : 'climb' as const }) : this.state.autopilot
     this.state = Object.freeze({
       ...this.state, route, autopilot,
       agentMode: actor === 'agent' ? (filingPreflight ? 'thinking' : 'flying') : this.state.agentMode,
@@ -748,7 +748,7 @@ class FlightSimulator {
         const touchdownAim = touchdownRunway && touchdownFrame
           ? offsetPosition(touchdownRunway.threshold, touchdownRunway.heading, Math.max(0.14, touchdownFrame.alongNm + 0.6))
           : null
-        const guidanceTrackDeg = touchdownAim ? bearingDeg(this.state, touchdownAim) : target.headingDeg
+        const guidanceTrackDeg = touchdownAim ? navigationBearingDeg(this.state, touchdownAim) : target.headingDeg
         const guidanceHeadingDeg = windCorrectedHeadingDeg(
           guidanceTrackDeg,
           Math.max(airspeed, 90),
@@ -1163,7 +1163,7 @@ class FlightSimulator {
       const baseWaypoint = waypoints[baseIndex]
       const completedWaypoints = waypoints.slice(0, route.activeWaypointIndex + 1)
       const approachWaypoints = waypoints.slice(baseIndex)
-      const courseErrorDeg = headingError(bearingDeg(position, baseWaypoint), headingDeg)
+      const courseErrorDeg = headingError(navigationBearingDeg(position, baseWaypoint), headingDeg)
       const completedTurnFixes = completedWaypointIds.filter((id) => id.startsWith('KPWK_TURN_')).length
       if (Math.abs(courseErrorDeg) > 12 && completedTurnFixes < MAX_EMERGENCY_TURN_FIXES) {
         const turnStepDeg = clamp(courseErrorDeg, -45, 45)
@@ -1195,7 +1195,7 @@ class FlightSimulator {
       ? runway.elevation + Math.tan(radians(3)) * distanceNm(position, next) * FEET_PER_NM
       : next.altitudeFt
     const autopilot = this.state.controlOwner === 'agent'
-      ? Object.freeze({ enabled: true, headingDeg: bearingDeg(position, next), altitudeFt: targetAltitude, airspeedKt: next.airspeedKt, verticalMode: final ? 'approach' as const : targetAltitude < altitudeFt ? 'descend' as const : 'level' as const })
+      ? Object.freeze({ enabled: true, headingDeg: navigationBearingDeg(position, next), altitudeFt: targetAltitude, airspeedKt: next.airspeedKt, verticalMode: final ? 'approach' as const : targetAltitude < altitudeFt ? 'descend' as const : 'level' as const })
       : this.state.autopilot
     const updatedRoute = reached
       ? Object.freeze({ ...route, waypoints, activeWaypointIndex: index, completedWaypointIds })
