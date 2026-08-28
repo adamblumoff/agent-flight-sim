@@ -1,10 +1,12 @@
 import {
   AdditiveBlending,
   BoxGeometry,
+  BufferGeometry,
   CapsuleGeometry,
   CircleGeometry,
-  ConeGeometry,
   CylinderGeometry,
+  DoubleSide,
+  Float32BufferAttribute,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -17,7 +19,8 @@ import {
 } from 'three'
 
 export interface AircraftBreakawayPart {
-  readonly name: 'left-wing' | 'right-wing' | 'left-tail' | 'right-tail' | 'fin' | 'propeller'
+  readonly name: 'left-wing' | 'right-wing' | 'left-tail' | 'right-tail' | 'fin'
+    | 'left-outer-engine' | 'left-inner-engine' | 'right-inner-engine' | 'right-outer-engine'
   readonly root: Group
 }
 
@@ -34,6 +37,7 @@ const bodyMaterial = new MeshPhysicalMaterial({
   roughness: 0.42,
   clearcoat: 0.55,
   clearcoatRoughness: 0.3,
+  side: DoubleSide,
 })
 const accentMaterial = new MeshStandardMaterial({ color: 0x13354b, metalness: 0.12, roughness: 0.38 })
 const glassMaterial = new MeshPhysicalMaterial({
@@ -52,54 +56,101 @@ function mesh(geometry: ConstructorParameters<typeof Mesh>[0], material: Constru
   return result
 }
 
-function curvedWindow(length: number, z: number, thetaStart: number, thetaLength: number) {
-  const window = mesh(new CylinderGeometry(0.675, 0.675, length, 18, 1, true, thetaStart, thetaLength), glassMaterial)
+function curvedWindow(radius: number, length: number, y: number, z: number, thetaStart: number, thetaLength: number) {
+  const window = mesh(new CylinderGeometry(radius, radius, length, 24, 1, true, thetaStart, thetaLength), glassMaterial)
   window.rotation.x = Math.PI / 2
-  window.position.set(0, 1.4, z)
+  window.position.set(0, y, z)
   return window
 }
 
-function wheel(x: number, z: number, scale = 1) {
+function landingGear(x: number, z: number, scale = 1, twin = false) {
   const assembly = new Group()
   assembly.name = 'Landing gear'
-  const tireCenterY = 0.37 * scale
-  const strutLength = 0.95 * scale
-  const tire = mesh(new TorusGeometry(0.28 * scale, 0.09 * scale, 8, 18), rubberMaterial)
-  tire.rotation.y = Math.PI / 2
-  tire.position.set(x, tireCenterY, z)
-  const strut = mesh(new CylinderGeometry(0.035, 0.035, strutLength, 8), metalMaterial)
+  const tireCenterY = 0.54 * scale
+  const strutLength = 1.35 * scale
+  const wheelOffsets = twin ? [-0.32, 0.32] : [0]
+  for (const wheelOffset of wheelOffsets) {
+    const tire = mesh(new TorusGeometry(0.41 * scale, 0.13 * scale, 8, 20), rubberMaterial)
+    tire.rotation.y = Math.PI / 2
+    tire.position.set(x + wheelOffset * scale, tireCenterY, z)
+    assembly.add(tire)
+  }
+  const strut = mesh(new CylinderGeometry(0.06, 0.06, strutLength, 10), metalMaterial)
   strut.position.set(x, tireCenterY + strutLength / 2, z)
-  assembly.add(tire, strut)
+  assembly.add(strut)
+  return assembly
+}
+
+function slabGeometry(points: readonly (readonly [number, number])[], thickness: number) {
+  const half = thickness / 2
+  const positions = points.flatMap(([x, z]) => [x, half, z, x, -half, z])
+  const indices: number[] = []
+  for (let index = 1; index < points.length - 1; index += 1) {
+    indices.push(0, index * 2, (index + 1) * 2)
+    indices.push(1, (index + 1) * 2 + 1, index * 2 + 1)
+  }
+  for (let index = 0; index < points.length; index += 1) {
+    const next = (index + 1) % points.length
+    indices.push(index * 2, index * 2 + 1, next * 2)
+    indices.push(next * 2, index * 2 + 1, next * 2 + 1)
+  }
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+function engine(name: AircraftBreakawayPart['name'], x: number, z: number) {
+  const assembly = new Group()
+  assembly.name = name
+  assembly.position.set(x, 1.35, z)
+  const nacelle = mesh(new CylinderGeometry(0.62, 0.78, 2.15, 20, 1, false), bodyMaterial)
+  nacelle.rotation.x = Math.PI / 2
+  const intake = mesh(new TorusGeometry(0.66, 0.1, 8, 24), metalMaterial)
+  intake.position.z = -1.08
+  const fan = new Mesh(new CircleGeometry(0.55, 24), new MeshStandardMaterial({ color: 0x182126, metalness: 0.6, roughness: 0.35 }))
+  fan.position.z = -1.09
+  assembly.add(nacelle, intake, fan)
   return assembly
 }
 
 export function createAircraft(): AircraftRig {
   const aircraft = new Group()
-  aircraft.name = 'N417FS'
-  const landingGear = [wheel(-1.45, 0.35), wheel(1.45, 0.35), wheel(0, -2.8, 0.78)]
+  aircraft.name = 'N380FS'
+  const landingGearAssemblies = [
+    landingGear(-3.15, 1.35, 1, true),
+    landingGear(3.15, 1.35, 1, true),
+    landingGear(0, -6.55, 0.82, true),
+  ]
 
-  const fuselage = mesh(new CapsuleGeometry(0.66, 4.7, 6, 14), bodyMaterial)
+  const fuselage = mesh(new CapsuleGeometry(1.35, 14.8, 8, 24), bodyMaterial)
   fuselage.rotation.x = Math.PI / 2
-  fuselage.position.y = 1.4
-
-  const nose = mesh(new ConeGeometry(0.62, 1.65, 18), bodyMaterial)
-  nose.rotation.x = -Math.PI / 2
-  nose.position.set(0, 1.4, -3.9)
+  fuselage.position.y = 2.62
+  const upperDeck = mesh(new CapsuleGeometry(0.72, 6.6, 6, 20), bodyMaterial)
+  upperDeck.rotation.x = Math.PI / 2
+  upperDeck.position.set(0, 3.48, -1.75)
 
   const flaps: Group[] = []
   const wingAssemblies = ([-1, 1] as const).map((side) => {
     const assembly = new Group()
     assembly.name = side < 0 ? 'Left wing' : 'Right wing'
-    assembly.position.set(side * 2.7, 1.32, -0.75)
-    assembly.rotation.x = -0.035
-    const panel = mesh(new BoxGeometry(5.4, 0.14, 1), bodyMaterial)
-    const stripe = mesh(new BoxGeometry(5.15, 0.04, 0.28), accentMaterial)
-    stripe.position.set(0, 0.08, -0.05)
+    assembly.position.y = 2.35
+    const panel = mesh(slabGeometry([
+      [side * 1.05, -1.75],
+      [side * 10.7, 1.15],
+      [side * 9.85, 2.65],
+      [side * 1.05, 0.65],
+    ], 0.2), bodyMaterial)
+    const stripe = mesh(new BoxGeometry(7.7, 0.045, 0.26), accentMaterial)
+    stripe.position.set(side * 5.75, 0.13, 0.55)
+    stripe.rotation.y = side * -0.19
     const pivot = new Group()
     pivot.name = 'Flap'
-    pivot.position.set(-side * 0.55, -0.01, 0.5)
-    const flapPanel = mesh(new BoxGeometry(2.2, 0.11, 0.56), bodyMaterial)
-    flapPanel.position.z = 0.28
+    pivot.position.set(side * 4.9, -0.05, 1.25)
+    pivot.rotation.y = side * -0.16
+    const flapPanel = mesh(new BoxGeometry(5.9, 0.14, 0.72), bodyMaterial)
+    flapPanel.position.z = 0.36
     pivot.add(flapPanel)
     flaps.push(pivot)
     assembly.add(panel, stripe, pivot)
@@ -109,49 +160,56 @@ export function createAircraft(): AircraftRig {
   const tailAssemblies = ([-1, 1] as const).map((side) => {
     const assembly = new Group()
     assembly.name = side < 0 ? 'Left tailplane' : 'Right tailplane'
-    assembly.position.set(side * 1.025, 1.58, 2.8)
-    assembly.add(mesh(new BoxGeometry(2.05, 0.11, 0.78), bodyMaterial))
+    assembly.position.y = 3
+    assembly.add(mesh(slabGeometry([
+      [side * 0.7, 6.1],
+      [side * 4.45, 7.45],
+      [side * 4.05, 8.25],
+      [side * 0.55, 7.45],
+    ], 0.16), bodyMaterial))
     return assembly
   })
 
   const finAssembly = new Group()
   finAssembly.name = 'Fin'
-  finAssembly.position.set(0, 2.2, 2.7)
-  finAssembly.rotation.x = -0.28
-  finAssembly.add(mesh(new BoxGeometry(0.14, 1.75, 1.45), accentMaterial))
+  finAssembly.position.set(0, 3.85, 6.65)
+  const finPanel = mesh(slabGeometry([
+    [0, -0.9],
+    [0, 1.5],
+    [3.95, 1.05],
+    [3.15, -0.55],
+  ], 0.22), accentMaterial)
+  finPanel.rotation.z = Math.PI / 2
+  finAssembly.add(finPanel)
 
-  const windshield = curvedWindow(0.72, -1.9, 2.28, 1.72)
-  const sideWindowLeft = curvedWindow(1.08, -1.03, 4, 0.55)
-  const sideWindowRight = curvedWindow(1.08, -1.03, 1.73, 0.55)
-
-  const propellerAssembly = new Group()
-  propellerAssembly.name = 'Propeller'
-  propellerAssembly.position.set(0, 1.4, -4.76)
-  const spinner = mesh(new SphereGeometry(0.22, 12, 8), accentMaterial)
-  spinner.scale.z = 1.3
-  const propellerDisc = new Mesh(
-    new CircleGeometry(1.08, 32),
-    new MeshBasicMaterial({ color: 0xaeb8ba, transparent: true, opacity: 0.16, depthWrite: false }),
-  )
-  propellerDisc.position.z = -0.06
-  propellerAssembly.add(spinner, propellerDisc)
+  const windows = [
+    curvedWindow(1.365, 8.9, 2.82, -0.15, 3.9, 0.24),
+    curvedWindow(1.365, 8.9, 2.82, -0.15, 2.14, 0.24),
+    curvedWindow(1.365, 7.4, 3.2, -0.55, 3.93, 0.2),
+    curvedWindow(1.365, 7.4, 3.2, -0.55, 2.15, 0.2),
+    curvedWindow(1.37, 1.25, 2.95, -7.2, 2.45, 1.4),
+  ]
+  const engines = [
+    engine('left-outer-engine', -7.3, -0.05),
+    engine('left-inner-engine', -3.55, -1.05),
+    engine('right-inner-engine', 3.55, -1.05),
+    engine('right-outer-engine', 7.3, -0.05),
+  ]
 
   aircraft.add(
     fuselage,
-    nose,
+    upperDeck,
     ...wingAssemblies,
     ...tailAssemblies,
     finAssembly,
-    windshield,
-    sideWindowLeft,
-    sideWindowRight,
-    propellerAssembly,
-    ...landingGear,
+    ...windows,
+    ...engines,
+    ...landingGearAssemblies,
   )
 
   return {
     root: aircraft,
-    landingGear,
+    landingGear: landingGearAssemblies,
     flaps,
     breakawayParts: [
       { name: 'left-wing', root: wingAssemblies[0] },
@@ -159,7 +217,10 @@ export function createAircraft(): AircraftRig {
       { name: 'left-tail', root: tailAssemblies[0] },
       { name: 'right-tail', root: tailAssemblies[1] },
       { name: 'fin', root: finAssembly },
-      { name: 'propeller', root: propellerAssembly },
+      { name: 'left-outer-engine', root: engines[0] },
+      { name: 'left-inner-engine', root: engines[1] },
+      { name: 'right-inner-engine', root: engines[2] },
+      { name: 'right-outer-engine', root: engines[3] },
     ],
   }
 }

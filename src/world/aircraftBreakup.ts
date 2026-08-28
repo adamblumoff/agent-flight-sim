@@ -66,7 +66,21 @@ export function createAircraftBreakup(aircraft: Group, parts: readonly AircraftB
     )
     const impactWing = impact.rollDirection < 0 ? 'left-wing' : 'right-wing'
     const oppositeWing = impact.rollDirection < 0 ? 'right-wing' : 'left-wing'
-    const order = [impactWing, 'propeller', 'fin', oppositeWing, 'left-tail', 'right-tail']
+    const impactEngines = impact.rollDirection < 0
+      ? ['left-outer-engine', 'left-inner-engine'] as const
+      : ['right-outer-engine', 'right-inner-engine'] as const
+    const oppositeEngines = impact.rollDirection < 0
+      ? ['right-outer-engine', 'right-inner-engine'] as const
+      : ['left-outer-engine', 'left-inner-engine'] as const
+    const order: readonly AircraftBreakawayPart['name'][] = [
+      impactWing,
+      ...impactEngines,
+      'fin',
+      oppositeWing,
+      ...oppositeEngines,
+      'left-tail',
+      'right-tail',
+    ]
     const partCount = Math.min(order.length, Math.max(3, Math.ceil(intensity * order.length)))
     const forwardSpeedMetersPerSecond = impact.airspeedKt * 0.514_444
 

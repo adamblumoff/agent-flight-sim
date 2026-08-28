@@ -73,6 +73,27 @@ assert.equal(timerExpired.event, 'decision_timer_expired')
 assert.equal(timerExpired.state.checkride.decisionSecondsRemaining, 0)
 assert.equal(timerExpired.state.checkride.score.total, 85)
 
+flightSimulator.reset(17)
+flightSimulator.transferControl('agent', 'agent', 'Passenger comfort smoke test')
+flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
+flightSimulator.beginTakeoff('agent', 'Begin passenger comfort departure')
+flightSimulator.advanceForTesting(25)
+flightSimulator.transferControl('human', 'human', 'Test pilot began smooth maneuvering')
+const pitchBeforeTap = flightSimulator.getState().pitchDeg
+for (let index = 0; index < 12; index += 1) {
+  flightSimulator.setPilotControls({
+    pitchAxis: index % 2 === 0 ? 1 : -1,
+    bankAxis: index % 4 < 2 ? 1 : -1,
+  }, 'human', 'Brief keyboard input')
+  flightSimulator.advanceForTesting(0.1)
+  flightSimulator.releasePilotControls()
+  flightSimulator.advanceForTesting(0.45)
+}
+const comfortablePassengers = flightSimulator.getState().passengerSafety
+assert.ok(Math.abs(flightSimulator.getState().pitchDeg - pitchBeforeTap) < 2)
+assert.equal(comfortablePassengers.status, 'comfortable')
+assert.ok(comfortablePassengers.distress < 10)
+
 flightSimulator.reset(42)
 flightSimulator.transferControl('agent', 'agent', 'Passenger dynamics smoke test')
 flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
@@ -80,17 +101,13 @@ flightSimulator.beginTakeoff('agent', 'Begin passenger dynamics departure')
 flightSimulator.advanceForTesting(25)
 flightSimulator.transferControl('human', 'human', 'Test pilot began abrupt maneuvering')
 flightSimulator.setThrottle(1, 'human', 'Maintain maneuvering power')
-for (let index = 0; index < 56; index += 1) {
-  flightSimulator.setPilotControls({
-    pitchAxis: index % 2 === 0 ? 1 : -1,
-    bankAxis: index % 4 < 2 ? 1 : -1,
-  }, 'human', 'Abrupt alternating control input')
-  flightSimulator.advanceForTesting(0.35)
-}
+flightSimulator.setPilotControls({ pitchAxis: 0, bankAxis: 1 }, 'human', 'Sustained maximum-bank input')
+flightSimulator.advanceForTesting(12)
 flightSimulator.releasePilotControls()
 const passengerSafety = flightSimulator.getState().passengerSafety
 assert.ok(passengerSafety.distress > 0)
-assert.ok(passengerSafety.jerkGPerSecond > 0 || passengerSafety.injuryProbability > 0)
+assert.ok(passengerSafety.loadFactorG > 1.5)
+assert.ok(passengerSafety.status === 'distressed' || passengerSafety.status === 'injured')
 const passengerEvent = await flightSimulator.waitForFlightEvent({ afterRevision: 0, events: ['passenger_safety_update'], timeoutMs: 1_000 })
 assert.equal(passengerEvent.event, 'passenger_safety_update')
 

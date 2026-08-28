@@ -393,7 +393,7 @@ export default function App() {
             </p>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
-              <li><kbd>W</kbd><span>At 55 knots, raise the nose. Release the key when the pitch looks right.</span></li>
+              <li><kbd>W</kbd><span>At 55 knots, hold for a smooth rotation. Control inputs ramp in and ease out.</span></li>
               <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
@@ -409,7 +409,7 @@ export default function App() {
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
             <strong>Flightdeck</strong>
-            <span>N417FS · North Field departure</span>
+            <span>N380FS · Wide-body departure</span>
           </div>
         </div>
 

@@ -35,6 +35,11 @@ const TAKEOFF_POWER_ACCEL_KT_PER_SECOND = 5.8
 const TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND = 0.2
 const TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND = 0.65
 const MAX_GROUND_PITCH_DEG = 10
+const PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND = 9
+const PILOT_BANK_TRIM_RATE_DEG_PER_SECOND = 18
+const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 10
+const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 22
+const PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND = 420
 const EMERGENCY_TRIGGER_SECONDS = 45
 const EMERGENCY_DECISION_SECONDS = 45
 const PASSENGER_INJURY_DRAW: Readonly<Record<CheckrideSeed, number>> = Object.freeze({ 17: 0.72, 42: 0.56, 81: 0.42 })
@@ -62,6 +67,7 @@ const isDestructiveImpact = ({
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 const approach = (value: number, target: number, change: number) => value < target ? Math.min(value + change, target) : Math.max(value - change, target)
+const damp = (value: number, target: number, lambda: number, dt: number) => target + (value - target) * Math.exp(-lambda * dt)
 const radians = (degrees: number) => degrees * Math.PI / 180
 const normalizeHeading = (degrees: number) => ((degrees % 360) + 360) % 360
 const headingError = (target: number, current: number) => ((target - current + 540) % 360) - 180
@@ -104,18 +110,18 @@ const passengerSafetyFor = (
   return Object.freeze({ loadFactorG, jerkGPerSecond, distress, injuryProbability, status, summary })
 }
 
-// A compact airframe envelope keeps Three mesh details out of the fixed-step simulator.
+// A compact wide-body envelope keeps Three mesh details out of the fixed-step simulator.
 const collisionHull = Object.freeze([
-  Object.freeze({ x: 0, y: 0.8, z: -4.8 }),
-  Object.freeze({ x: 0, y: 1.1, z: 3.5 }),
-  Object.freeze({ x: -5.4, y: 1.25, z: -0.55 }),
-  Object.freeze({ x: 5.4, y: 1.25, z: -0.55 }),
-  Object.freeze({ x: 0, y: 0.7, z: 0 }),
+  Object.freeze({ x: 0, y: 1.25, z: -8.75 }),
+  Object.freeze({ x: 0, y: 1.35, z: 8.75 }),
+  Object.freeze({ x: -10.7, y: 2.15, z: 1.6 }),
+  Object.freeze({ x: 10.7, y: 2.15, z: 1.6 }),
+  Object.freeze({ x: 0, y: 1.2, z: 0 }),
 ])
 const extendedGearContactPoints = Object.freeze([
-  Object.freeze({ x: -1.45, y: 0, z: 0.35 }),
-  Object.freeze({ x: 1.45, y: 0, z: 0.35 }),
-  Object.freeze({ x: 0, y: 0, z: -2.8 }),
+  Object.freeze({ x: -3.15, y: 0, z: 1.35 }),
+  Object.freeze({ x: 3.15, y: 0, z: 1.35 }),
+  Object.freeze({ x: 0, y: 0, z: -6.55 }),
 ])
 const collisionPoints = Object.freeze([...collisionHull, ...extendedGearContactPoints])
 
@@ -360,6 +366,7 @@ class FlightSimulator {
   private fuelExhausted = false
   private passengerInjuryDraw = PASSENGER_INJURY_DRAW[17]
   private pilotControls: PilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+  private smoothedPilotControls = { pitchAxis: 0, bankAxis: 0 }
   private manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
   private readonly listeners = new Set<FlightStateListener>()
   private readonly waiters = new Set<EventWaiter>()
@@ -409,6 +416,7 @@ class FlightSimulator {
     this.fuelExhausted = false
     this.passengerInjuryDraw = PASSENGER_INJURY_DRAW[seed]
     this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+    this.smoothedPilotControls = { pitchAxis: 0, bankAxis: 0 }
     this.manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
     this.record('system', 'mission_started', `Normal departure seed ${seed} started`, {})
     this.previousState = this.state
@@ -444,6 +452,7 @@ class FlightSimulator {
 
   transferControl = (owner: ControlOwner, actor: TraceActor = owner, reason = `${owner} took control`) => {
     this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+    this.smoothedPilotControls = { pitchAxis: 0, bankAxis: 0 }
     this.manualAttitudeTarget = owner === 'human'
       ? { pitchDeg: this.state.pitchDeg, bankDeg: this.state.bankDeg }
       : { pitchDeg: 0, bankDeg: 0 }
@@ -672,19 +681,21 @@ class FlightSimulator {
       }
     } else {
       const onTakeoffRoll = this.state.aircraftPhase === 'takeoff_roll'
+      this.smoothedPilotControls.pitchAxis = damp(this.smoothedPilotControls.pitchAxis, this.pilotControls.pitchAxis, 5.5, dt)
+      this.smoothedPilotControls.bankAxis = damp(this.smoothedPilotControls.bankAxis, this.pilotControls.bankAxis, 4.5, dt)
       this.manualAttitudeTarget.pitchDeg = clamp(
-        this.manualAttitudeTarget.pitchDeg + this.pilotControls.pitchAxis * 32 * dt,
+        this.manualAttitudeTarget.pitchDeg + this.smoothedPilotControls.pitchAxis * PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND * dt,
         onTakeoffRoll ? 0 : -55,
         onTakeoffRoll ? MAX_GROUND_PITCH_DEG : 55,
       )
       this.manualAttitudeTarget.bankDeg = onTakeoffRoll
         ? 0
-        : clamp(this.manualAttitudeTarget.bankDeg + this.pilotControls.bankAxis * 70 * dt, -60, 60)
+        : clamp(this.manualAttitudeTarget.bankDeg + this.smoothedPilotControls.bankAxis * PILOT_BANK_TRIM_RATE_DEG_PER_SECOND * dt, -60, 60)
       const targetPitch = onTakeoffRoll && airspeed < ROTATE_SPEED_KT ? 0 : this.manualAttitudeTarget.pitchDeg
-      pitch = approach(pitch, targetPitch, 32 * dt)
-      bank = approach(bank, this.manualAttitudeTarget.bankDeg, 70 * dt)
+      pitch = approach(pitch, targetPitch, PILOT_PITCH_RESPONSE_DEG_PER_SECOND * dt)
+      bank = approach(bank, this.manualAttitudeTarget.bankDeg, PILOT_BANK_RESPONSE_DEG_PER_SECOND * dt)
       const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch)), -4_500, 4_500)
-      verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, 1_200 * dt)
+      verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND * dt)
     }
 
     const drag = 0.36 + this.state.flapsDeg * 0.008 + (this.state.gearDown ? 0.12 : 0)
