@@ -90,6 +90,9 @@ function deriveRecommendation(state: FlightState): string {
   if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
   if (!state.procedure.compliant) return state.procedure.instruction
   if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
+  if (state.controlOwner === 'human' && state.route.plan === 'return_kpwk') {
+    return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KPWK runway 16.'
+  }
   if (state.approval.status === 'pending') {
     return state.approval.requestedAction ?? 'Hold the current flight path until you decide.'
   }
@@ -149,6 +152,12 @@ function deriveAction(state: FlightState): string {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
   if (state.checkride.status === 'armed') return 'Normal departure. Monitoring the aircraft and surrounding conditions.'
+  if (state.controlOwner === 'human' && state.route.plan === 'return_kpwk') {
+    const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
+    return waypoint
+      ? `You are flying. Follow the active route to ${waypoint.name}.`
+      : 'You are flying the emergency return to KPWK runway 16.'
+  }
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
     return 'Reviewing the available evidence and route options.'
   }

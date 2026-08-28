@@ -838,6 +838,7 @@ class FlightSimulator {
     })
     if (!this.emergencyTriggered && aircraftPhase === 'airborne' && elapsedSeconds >= EMERGENCY_TRIGGER_SECONDS) {
       this.emergencyTriggered = true
+      const humanControlled = this.state.controlOwner === 'human'
       this.state = Object.freeze({
         ...this.state,
         scenario: this.selectedScenario,
@@ -854,6 +855,13 @@ class FlightSimulator {
       this.record('system', 'scenario_triggered', EMERGENCY_ALERT, { seed: this.state.checkride.seed })
       this.addDebrief('system', 'Unexpected emergency scenario received')
       this.queueEvent('emergency_detected', EMERGENCY_ALERT)
+      if (humanControlled) {
+        this.setRoute(
+          'return_kpwk',
+          'The safest emergency route was loaded automatically for the human pilot: return to KPWK runway 16.',
+          'system',
+        )
+      }
     }
     if (decisionTimerJustExpired) {
       this.decisionTimerExpired = true
