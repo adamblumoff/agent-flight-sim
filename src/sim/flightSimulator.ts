@@ -6,6 +6,7 @@ import type {
   PilotControls, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
   TraceEvent,
 } from './types'
+import { checkpointCaptureRadiusNm } from './checkpoints.ts'
 import {
   KPWK_AIRPORT,
   KPWK_RUNWAY_16,
@@ -110,18 +111,18 @@ const passengerSafetyFor = (
   return Object.freeze({ loadFactorG, jerkGPerSecond, distress, injuryProbability, status, summary })
 }
 
-// A compact wide-body envelope keeps Three mesh details out of the fixed-step simulator.
+// A380-class envelope: 72.7 m long, 79.8 m span, with simplified contact points.
 const collisionHull = Object.freeze([
-  Object.freeze({ x: 0, y: 1.25, z: -8.75 }),
-  Object.freeze({ x: 0, y: 1.35, z: 8.75 }),
-  Object.freeze({ x: -10.7, y: 2.15, z: 1.6 }),
-  Object.freeze({ x: 10.7, y: 2.15, z: 1.6 }),
-  Object.freeze({ x: 0, y: 1.2, z: 0 }),
+  Object.freeze({ x: 0, y: 4.6, z: -36.4 }),
+  Object.freeze({ x: 0, y: 5, z: 36.2 }),
+  Object.freeze({ x: -39.6, y: 8, z: 5.9 }),
+  Object.freeze({ x: 39.6, y: 8, z: 5.9 }),
+  Object.freeze({ x: 0, y: 4.4, z: 0 }),
 ])
 const extendedGearContactPoints = Object.freeze([
-  Object.freeze({ x: -3.15, y: 0, z: 1.35 }),
-  Object.freeze({ x: 3.15, y: 0, z: 1.35 }),
-  Object.freeze({ x: 0, y: 0, z: -6.55 }),
+  Object.freeze({ x: -7.1, y: 0, z: 5 }),
+  Object.freeze({ x: 7.1, y: 0, z: 5 }),
+  Object.freeze({ x: 0, y: 0, z: -24.2 }),
 ])
 const collisionPoints = Object.freeze([...collisionHull, ...extendedGearContactPoints])
 
@@ -957,7 +958,11 @@ class FlightSimulator {
     const route = this.state.route
     const active = route.waypoints[route.activeWaypointIndex]
     if (!active) return { route, autopilot: this.state.autopilot, phase: this.state.mission.phase, reached: null, next: null }
-    const reached = !route.completedWaypointIds.includes(active.id) && distanceNm(position, active) < active.captureRadiusNm
+    const horizontalDistanceNm = distanceNm(position, active)
+    const verticalDistanceNm = Math.abs(altitudeFt - active.altitudeFt) / FEET_PER_NM
+    const captureRadiusNm = checkpointCaptureRadiusNm(active, this.state.controlOwner)
+    const reached = !route.completedWaypointIds.includes(active.id)
+      && Math.hypot(horizontalDistanceNm, verticalDistanceNm) < captureRadiusNm
     const index = reached ? Math.min(route.activeWaypointIndex + 1, route.waypoints.length - 1) : route.activeWaypointIndex
     const next = route.waypoints[index]
     const final = next.kind === 'final' || next.kind === 'touchdown'

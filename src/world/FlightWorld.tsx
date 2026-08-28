@@ -20,6 +20,7 @@ import { flightSimulator } from '../sim/flightSimulator'
 import { createAircraft, createCrashEffects } from './aircraft'
 import { createAircraftBreakup } from './aircraftBreakup'
 import { createAirportWorld, disposeScene } from './airportScene'
+import { createCheckpointOrb } from './checkpointOrb'
 import { stateToWorldVector, WORLD_RUNWAY } from './coordinates'
 
 export type FlightCameraMode = 'chase' | 'cockpit' | 'free'
@@ -46,11 +47,11 @@ const readyStatus: FlightWorldStatus = {
 
 const DEG_TO_RAD = Math.PI / 180
 const RUNWAY_HEADING_DEG = 159
-const chaseOffset = new Vector3(0, 11.5, 33)
-const chaseLookAhead = new Vector3(0, -7, -48)
-const cockpitOffset = new Vector3(0, 3.35, -7.1)
-const cockpitLookAhead = new Vector3(0, 3.1, -120)
-const crashOrigin = new Vector3(0, 2.6, -7.7)
+const chaseOffset = new Vector3(0, 28, 105)
+const chaseLookAhead = new Vector3(0, -10, -120)
+const cockpitOffset = new Vector3(0, 10.5, -34)
+const cockpitLookAhead = new Vector3(0, 10, -240)
+const crashOrigin = new Vector3(0, 8, -34)
 
 export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -94,8 +95,8 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
-    controls.maxDistance = 850
-    controls.minDistance = 5
+    controls.maxDistance = 1_500
+    controls.minDistance = 15
     controls.maxPolarAngle = Math.PI * 0.485
     controls.enabled = false
 
@@ -106,7 +107,8 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
     const flaps = aircraftRig.flaps
     const breakup = createAircraftBreakup(aircraft, aircraftRig.breakawayParts)
     const crashEffects = createCrashEffects()
-    scene.add(aircraft, breakup.root, crashEffects.root)
+    const checkpointOrb = createCheckpointOrb()
+    scene.add(aircraft, breakup.root, crashEffects.root, checkpointOrb.root)
 
     const timer = new Timer()
     timer.connect(document)
@@ -241,6 +243,7 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       crashEffects.update(deltaSeconds, groundY)
       crashWasActive = crashActive
       world.update(state, aircraftPosition, deltaSeconds)
+      checkpointOrb.update(state, state.elapsedSeconds + interpolationAlpha / 60)
 
       const mode = cameraModeRef.current
       aircraft.visible = mode !== 'cockpit'
@@ -252,8 +255,8 @@ export function FlightWorld({ cameraMode = 'chase', onStatusChange }: FlightWorl
       )
       smoothedAcceleration = MathUtils.damp(smoothedAcceleration, MathUtils.clamp(renderedAcceleration, -8, 8), 3.5, deltaSeconds)
       const accelerationCue = MathUtils.clamp(smoothedAcceleration / 5, -1, 1)
-      dynamicChaseOffset.set(0, 11.5, 33 + (accelerationCue >= 0 ? accelerationCue * 7 : accelerationCue * 4))
-      dynamicChaseLookAhead.set(0, -7, -48 - accelerationCue * 6)
+      dynamicChaseOffset.set(0, 28, 105 + (accelerationCue >= 0 ? accelerationCue * 14 : accelerationCue * 8))
+      dynamicChaseLookAhead.set(0, -10, -120 - accelerationCue * 10)
       const targetFov = mode === 'cockpit' ? 70 : mode === 'chase' ? 56 + accelerationCue * 4 : 56
       const previousFov = camera.fov
       camera.fov = previousMode !== mode ? targetFov : MathUtils.damp(camera.fov, targetFov, 4, deltaSeconds)

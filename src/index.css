@@ -467,10 +467,10 @@ summary:focus-visible {
   z-index: 8;
   top: 76px;
   left: 20px;
-  width: 238px;
-  padding: 11px;
-  border: 1px solid rgb(244 239 222 / 16%);
-  border-radius: 16px;
+  width: min(520px, calc(100vw - 16px));
+  padding: 6px;
+  border: 1px solid rgb(244 239 222 / 18%);
+  border-radius: 13px;
   background: linear-gradient(145deg, rgb(28 31 26 / 88%), rgb(15 18 15 / 82%));
   box-shadow: 0 16px 44px rgb(0 0 0 / 28%), inset 0 1px rgb(255 255 255 / 3%);
   color: var(--cream);
@@ -478,70 +478,24 @@ summary:focus-visible {
   backdrop-filter: blur(16px) saturate(110%);
 }
 
-.minimap-heading {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 1px 2px 8px;
-}
-
-.minimap-heading > div {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-
-.minimap-heading span {
-  color: rgb(244 239 222 / 43%);
-  font-size: 7px;
-  font-weight: 680;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-}
-
-.minimap-heading strong {
-  overflow: hidden;
-  color: rgb(244 239 222 / 76%);
-  font: 500 8px/1.2 "Kode Mono Variable", monospace;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.minimap-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 2px;
-}
-
-.minimap-size-button,
 .minimap-drag-handle {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 12px;
   display: grid;
-  height: 26px;
-  flex: 0 0 auto;
+  width: 32px;
+  height: 25px;
   place-items: center;
-  border: 1px solid transparent;
+  border: 1px solid rgb(244 239 222 / 12%);
   border-radius: 8px;
-  background: transparent;
-  color: rgb(244 239 222 / 42%);
-}
-
-.minimap-size-button {
-  width: 26px;
-  cursor: pointer;
-}
-
-.minimap-drag-handle {
-  width: 30px;
+  background: rgb(9 13 10 / 72%);
+  color: rgb(244 239 222 / 54%);
   cursor: grab;
   touch-action: none;
+  backdrop-filter: blur(8px);
 }
 
-.minimap-size-button:hover,
-.minimap-size-button:focus-visible,
 .minimap-drag-handle:hover,
 .minimap-drag-handle:focus-visible {
   border-color: rgb(244 239 222 / 12%);
@@ -550,16 +504,10 @@ summary:focus-visible {
   outline: none;
 }
 
-.minimap-size-button:disabled {
-  color: rgb(244 239 222 / 16%);
-  cursor: default;
-}
-
 .minimap-drag-handle:active {
   cursor: grabbing;
 }
 
-.minimap-size-button svg,
 .minimap-drag-handle svg {
   width: 15px;
   height: 15px;
@@ -570,8 +518,8 @@ summary:focus-visible {
   width: 100%;
   height: auto;
   overflow: hidden;
-  border: 1px solid rgb(244 239 222 / 7%);
-  border-radius: 11px;
+  border: 0;
+  border-radius: 9px;
   background: #0b100c;
   pointer-events: none;
 }
@@ -614,6 +562,13 @@ summary:focus-visible {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.minimap-capture-ring {
+  fill: rgb(242 199 92 / 9%);
+  stroke: rgb(255 220 122 / 82%);
+  stroke-dasharray: 2.5 2.5;
+  stroke-width: 1;
 }
 
 .minimap-route-active {
@@ -675,11 +630,33 @@ summary:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 2px 0;
+  gap: 12px;
+  padding: 8px 5px 3px;
   color: rgb(244 239 222 / 43%);
   font: 560 7px/1 "Kode Mono Variable", monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.minimap-footer > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.minimap-footer > div > strong {
+  overflow: hidden;
+  color: rgb(244 239 222 / 82%);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.minimap-footer > div > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .minimap-footer strong {
@@ -1384,7 +1361,7 @@ summary:focus-visible {
   .flight-minimap {
     top: 158px;
     left: 12px;
-    width: 184px;
+    width: min(520px, calc(100vw - 24px));
   }
 
   .copilot-panel {
@@ -1457,12 +1434,7 @@ summary:focus-visible {
 
   .flight-minimap {
     top: 154px;
-    width: 158px;
-    padding: 7px;
-  }
-
-  .minimap-heading strong {
-    max-width: 104px;
+    width: calc(100vw - 24px);
   }
 
   .manual-controls {
