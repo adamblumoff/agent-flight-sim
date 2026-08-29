@@ -91,7 +91,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'rebuild_active_leg', title: 'Rebuild active leg', readOnly: false,
-    description: 'Recover from a non-converging checkpoint. Use direct_intercept for a shorter rejoin, wider_pattern for more maneuvering room, or skip_noncritical only for a departure or enroute checkpoint. Base, final, and touchdown cannot be skipped.',
+    description: 'After route_progress_stalled, recover the airborne active leg. Use direct_intercept for a shorter rejoin, wider_pattern for more maneuvering room, or skip_noncritical only for an enroute checkpoint. Departure, base, final, and touchdown cannot be skipped.',
     inputSchema: { type: 'object', properties: { strategy: { type: 'string', enum: ['direct_intercept', 'wider_pattern', 'skip_noncritical'] }, reason: { type: 'string', minLength: 1 } }, required: ['strategy', 'reason'], additionalProperties: false },
   },
   {
