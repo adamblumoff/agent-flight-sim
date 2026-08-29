@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { GripHorizontal } from 'lucide-react'
-import { KPWK_RUNWAY_16, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
+import { KPWK_RUNWAY_16, LAKESIDE_RUNWAY_04, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
 import { checkpointCaptureRadiusNm } from '../sim/checkpoints'
 import type { FlightState, MissionRunway } from '../sim/types'
 
@@ -37,7 +37,9 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
   const dragOriginRef = useRef<DragOrigin | null>(null)
   const [panelPosition, setPanelPosition] = useState<PanelPosition>(initialPanelPosition)
   const routePoints = state.route.waypoints
-  const destinationRunway = state.route.destination === 'KLAK' ? LAKESIDE_RUNWAY_22 : KPWK_RUNWAY_16
+  const destinationRunway = state.route.destination === 'KLAK'
+    ? state.route.runway === '04' ? LAKESIDE_RUNWAY_04 : LAKESIDE_RUNWAY_22
+    : state.route.destination === 'KPWK' ? KPWK_RUNWAY_16 : NORTH_FIELD_RUNWAY_18
   const visibleRunways = state.route.destination === 'KLAK'
     ? [NORTH_FIELD_RUNWAY_18, LAKESIDE_RUNWAY_22]
     : [NORTH_FIELD_RUNWAY_18, KPWK_RUNWAY_16]

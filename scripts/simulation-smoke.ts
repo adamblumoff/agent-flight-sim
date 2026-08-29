@@ -59,7 +59,10 @@ assert.equal(decisionContext.evidence.length, 4)
 assert.equal(decisionContext.routeOptions.length, 2)
 assert.equal(decisionContext.routeOptions.find((option) => option.recommended)?.plan, 'return_kpwk')
 assert.ok((decisionContext.routeOptions.find((option) => option.plan === 'return_kpwk')?.estimatedMinutes ?? 0) > 4)
-assert.ok((decisionContext.routeOptions.find((option) => option.plan === 'continue_klak')?.estimatedMinutes ?? 0) > 3)
+const lakesideOption = decisionContext.routeOptions.find((option) => option.plan === 'continue_klak')
+assert.equal(lakesideOption?.runway, '04')
+assert.ok((lakesideOption?.estimatedMinutes ?? 0) > 3)
+assert.ok((lakesideOption?.estimatedMinutes ?? Number.POSITIVE_INFINITY) * 60 + flightSimulator.getState().elapsedSeconds < flightSimulator.getState().checkride.deadlineSeconds)
 assert.equal(flightSimulator.getState().checkride.inspectedSources.length, 4)
 assert.equal(flightSimulator.rebuildActiveLeg('direct_intercept', 'Do not rewrite a healthy route.', 'agent').accepted, false)
 const reroute = flightSimulator.setRoute('return_kpwk', 'Weather remains usable, but engine indications require the nearby priority runway.', 'agent')
@@ -102,6 +105,20 @@ assert.equal(humanRoute.checkride.decisionSecondsRemaining, null)
 assert.equal(humanRoute.autopilot.enabled, false)
 const humanPlanUpdate = await flightSimulator.waitForFlightEvent({ afterRevision: humanEmergency.revision, events: ['plan_updated'], timeoutMs: 1_000 })
 assert.equal(humanPlanUpdate.event, 'plan_updated')
+
+flightSimulator.reset(42)
+flightSimulator.transferControl('agent', 'agent', 'Pilot override regression')
+flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
+flightSimulator.beginTakeoff('agent', 'Begin pilot override regression')
+flightSimulator.advanceForTesting(46)
+assert.equal(flightSimulator.getState().checkride.status, 'decision_required')
+flightSimulator.transferControl('human', 'human', 'Pilot took control before the emergency event was consumed')
+const overrideRoute = flightSimulator.getState()
+assert.equal(overrideRoute.controlOwner, 'human')
+assert.equal(overrideRoute.route.plan, 'return_kpwk')
+assert.equal(overrideRoute.checkride.status, 'resolved')
+assert.equal(overrideRoute.checkride.decisionSecondsRemaining, null)
+assert.equal(overrideRoute.autopilot.enabled, false)
 
 flightSimulator.reset(81)
 flightSimulator.transferControl('agent', 'agent', 'Decision timer smoke test')
@@ -226,7 +243,7 @@ for (const seed of [17, 42, 81] as const) {
   flightSimulator.transferControl('agent', 'agent', `Seed ${seed} Lakeside continuation regression`)
   flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
   flightSimulator.beginTakeoff('agent', 'Begin Lakeside continuation')
-  for (let elapsed = 0; elapsed < 900 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+  for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
     const state = flightSimulator.getState()
     if (state.checkride.status === 'decision_required') {
       flightSimulator.getDecisionContext()
@@ -238,9 +255,10 @@ for (const seed of [17, 42, 81] as const) {
   }
   const lakesideMission = flightSimulator.getState()
   assert.equal(lakesideMission.mission.outcome, 'landed', `Seed ${seed} should complete the Lakeside continuation: ${JSON.stringify({ landing: lakesideMission.debrief.landing, impact: lakesideMission.impact, fuel: lakesideMission.fuelMinutesRemaining })}`)
-  assert.equal(lakesideMission.debrief.landing?.runway, 'KLAK 22')
+  assert.equal(lakesideMission.debrief.landing?.runway, 'KLAK 04')
   assert.equal(lakesideMission.debrief.landing?.safe, true)
   assert.ok(lakesideMission.fuelMinutesRemaining > 0)
+  assert.ok(lakesideMission.elapsedSeconds < lakesideMission.checkride.deadlineSeconds, `Seed ${seed} should complete the Lakeside continuation inside nine minutes`)
 }
 
 console.log(JSON.stringify({
