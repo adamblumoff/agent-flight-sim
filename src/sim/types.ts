@@ -8,11 +8,12 @@ export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
 export interface FlightEvidence { readonly source: EvidenceSource; readonly headline: string; readonly detail: string; readonly reliability: EvidenceReliability }
 export type RoutePlan = 'unassigned' | 'continue_klak' | 'return_kpwk'
 export type VerticalMode = 'climb' | 'level' | 'descend' | 'approach'
+export type LateralMode = 'route' | 'heading'
 export type MissionPhase = 'preflight' | 'takeoff' | 'planning' | 'enroute' | 'approach' | 'flare' | 'rollout' | 'complete' | 'failed'
 export type MissionOutcome = 'in_progress' | 'landed' | 'unsafe_touchdown' | 'fuel_exhausted' | 'crashed'
 export type AircraftPhase = 'takeoff_roll' | 'airborne' | 'landing_roll' | 'stopped' | 'crash_slide'
 
-export interface AutopilotState { readonly enabled: boolean; readonly headingDeg: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalMode: VerticalMode }
+export interface AutopilotState { readonly enabled: boolean; readonly headingDeg: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalMode: VerticalMode; readonly lateralMode: LateralMode }
 export interface MotionState {
   readonly longitudinalAccelerationKtPerSecond: number
   readonly verticalAccelerationFpmPerSecond: number
@@ -30,7 +31,7 @@ export type ConfigurationStage = 'takeoff' | 'positive_rate' | 'climb_cleanup' |
 export interface ConfigurationProcedure { readonly stage: ConfigurationStage; readonly gearDown: boolean; readonly flapsDeg: 0 | 10 | 20 | 30; readonly compliant: boolean; readonly instruction: string }
 export type RouteWaypointKind = 'departure' | 'enroute' | 'base' | 'final' | 'touchdown'
 export interface RouteWaypoint { readonly id: string; readonly name: string; readonly kind: RouteWaypointKind; readonly lat: number; readonly lon: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly captureRadiusNm: number }
-export interface RouteState { readonly plan: RoutePlan; readonly destination: 'KLAK' | 'KPWK' | null; readonly runway: '22' | '16' | null; readonly waypoints: readonly RouteWaypoint[]; readonly activeWaypointIndex: number; readonly completedWaypointIds: readonly string[]; readonly reason: string | null }
+export interface RouteState { readonly plan: RoutePlan; readonly destination: 'KLAK' | 'KPWK' | null; readonly runway: '22' | '16' | null; readonly waypoints: readonly RouteWaypoint[]; readonly activeWaypointIndex: number; readonly completedWaypointIds: readonly string[]; readonly activeLegOrigin: { readonly lat: number; readonly lon: number }; readonly reason: string | null }
 
 export interface ScenarioConditions {
   readonly weather: { readonly visibilityMiles: number; readonly ceilingFt: number; readonly windDirectionDeg: number; readonly windSpeedKt: number; readonly summary: string }
@@ -66,9 +67,9 @@ export interface LandingResult { readonly runway: string; readonly sinkRateFpm: 
 export interface DebriefEvent { readonly elapsedSeconds: number; readonly actor: TraceActor; readonly summary: string }
 export interface DebriefState { readonly status: 'in_progress' | 'landed' | 'failed'; readonly elapsedSeconds: number; readonly decision: RoutePlan; readonly decisionReason: string | null; readonly events: readonly DebriefEvent[]; readonly landing: LandingResult | null }
 
-export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'decision_timer_expired' | 'plan_updated' | 'checkpoint_reached' | 'passenger_safety_update' | 'configuration_required' | 'configuration_confirmed' | 'approval_required' | 'approval_resolved' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
+export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'decision_timer_expired' | 'plan_updated' | 'route_progress_stalled' | 'checkpoint_reached' | 'comfort_limit_approaching' | 'passenger_safety_update' | 'configuration_required' | 'configuration_confirmed' | 'approval_required' | 'approval_resolved' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
 export interface FlightEvent { readonly revision: number; readonly type: FlightEventType; readonly elapsedSeconds: number; readonly message: string; readonly phase: MissionPhase; readonly routePlan: RoutePlan }
-export interface MissionNavigationState { readonly phase: MissionPhase; readonly outcome: MissionOutcome; readonly nextFix: string | null; readonly distanceToNextFixNm: number | null; readonly distanceToThresholdNm: number; readonly centerlineErrorNm: number; readonly glidepathErrorFt: number; readonly stableApproach: boolean; readonly eventRevision: number }
+export interface MissionNavigationState { readonly phase: MissionPhase; readonly outcome: MissionOutcome; readonly nextFix: string | null; readonly distanceToNextFixNm: number | null; readonly bearingToNextFixDeg: number | null; readonly closingRateKt: number | null; readonly captureRadiusNm: number | null; readonly minimumTurnRadiusNm: number; readonly routeStatus: 'idle' | 'tracking' | 'stalled'; readonly distanceToThresholdNm: number; readonly centerlineErrorNm: number; readonly glidepathErrorFt: number; readonly stableApproach: boolean; readonly eventRevision: number }
 
 /** Temporary compact view for the old panel while it is replaced in parallel. */
 export interface CheckrideState {
@@ -104,7 +105,11 @@ export interface Airport { readonly code: 'KPWK' | 'KNFD' | 'KLAK'; readonly nam
 export interface MissionRunway { readonly id: string; readonly airport: Airport['code']; readonly thresholdLat: number; readonly thresholdLon: number; readonly farEndLat: number; readonly farEndLon: number; readonly headingDeg: number; readonly lengthFt: number; readonly widthFt: number; readonly elevationFt: number }
 export interface MissionBrief { readonly id: string; readonly name: string; readonly objective: string; readonly start: string; readonly deadlineSeconds: number; readonly airports: readonly Airport[]; readonly runways: readonly MissionRunway[]; readonly availablePlans: readonly RoutePlan[]; readonly evidenceSources: readonly EvidenceSource[]; readonly successConditions: readonly string[] }
 
-export interface AutopilotTargetsInput { readonly headingDeg?: number; readonly altitudeFt?: number; readonly airspeedKt?: number; readonly verticalMode?: VerticalMode; readonly reason?: string }
+export interface DecisionRouteOption { readonly plan: Exclude<RoutePlan, 'unassigned'>; readonly destination: 'KLAK' | 'KPWK'; readonly runway: '22' | '16'; readonly distanceNm: number; readonly estimatedMinutes: number; readonly risk: 'low' | 'moderate' | 'high'; readonly summary: string; readonly recommended: boolean }
+export interface EmergencyDecisionContext { readonly evidence: readonly FlightEvidence[]; readonly decisionSecondsRemaining: number | null; readonly fuelMinutesRemaining: number; readonly comfortLimits: { readonly maximumBankDeg: number; readonly warningLoadFactorG: number; readonly warningJerkGPerSecond: number }; readonly routeOptions: readonly DecisionRouteOption[] }
+export type ActiveLegRebuildStrategy = 'direct_intercept' | 'wider_pattern' | 'skip_noncritical'
+
+export interface AutopilotTargetsInput { readonly headingDeg?: number; readonly altitudeFt?: number; readonly airspeedKt?: number; readonly verticalMode?: VerticalMode; readonly lateralMode?: LateralMode; readonly reason?: string }
 export interface AircraftConfigurationInput { readonly gearDown?: boolean; readonly flapsDeg?: 0 | 10 | 20 | 30; readonly reason?: string }
 export interface FlightEventWaitInput { readonly afterRevision: number; readonly events: readonly FlightEventType[]; readonly timeoutMs: number }
 export interface FlightEventWaitResult { readonly revision: number; readonly event: FlightEventType | 'timeout'; readonly message: string; readonly state: FlightState }

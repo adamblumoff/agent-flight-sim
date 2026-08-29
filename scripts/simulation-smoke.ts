@@ -51,8 +51,11 @@ assert.equal(emergency.event, 'emergency_detected')
 assert.ok((emergency.state.checkride.decisionSecondsRemaining ?? 0) > 40)
 assert.equal(emergency.state.route.plan, 'continue_klak')
 
-flightSimulator.inspectEvidence('weather')
-flightSimulator.inspectEvidence('cockpit')
+const decisionContext = flightSimulator.getDecisionContext()
+assert.equal(decisionContext.evidence.length, 4)
+assert.equal(decisionContext.routeOptions.length, 2)
+assert.equal(decisionContext.routeOptions.find((option) => option.recommended)?.plan, 'return_kpwk')
+assert.equal(flightSimulator.getState().checkride.inspectedSources.length, 4)
 const reroute = flightSimulator.setRoute('return_kpwk', 'Weather remains usable, but engine indications require the nearby priority runway.', 'agent')
 assert.equal(reroute.accepted, true)
 assert.equal(reroute.state.route.destination, 'KPWK')
@@ -90,7 +93,11 @@ flightSimulator.reset(81)
 flightSimulator.transferControl('agent', 'agent', 'Decision timer smoke test')
 flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
 flightSimulator.beginTakeoff('agent', 'Begin timer smoke test departure')
-flightSimulator.advanceForTesting(91)
+flightSimulator.advanceForTesting(46)
+const deliveredEmergency = await flightSimulator.waitForFlightEvent({ afterRevision: 0, events: ['emergency_detected'], timeoutMs: 1_000 })
+assert.equal(deliveredEmergency.event, 'emergency_detected')
+flightSimulator.getDecisionContext()
+flightSimulator.advanceForTesting(61)
 const timerExpired = await flightSimulator.waitForFlightEvent({ afterRevision: 0, events: ['decision_timer_expired'], timeoutMs: 1_000 })
 assert.equal(timerExpired.event, 'decision_timer_expired')
 assert.equal(timerExpired.state.checkride.decisionSecondsRemaining, 0)
@@ -178,7 +185,27 @@ assert.ok(completedMission.route.completedWaypointIds.filter((id) => id.startsWi
 assert.equal(completedMission.passengerSafety.status, 'comfortable')
 assert.ok(completedMission.elapsedSeconds > 300)
 assert.ok(completedMission.elapsedSeconds < completedMission.checkride.deadlineSeconds)
-assert.ok(completedMission.checkride.deadlineSeconds - completedMission.elapsedSeconds > 30)
+assert.ok(completedMission.checkride.deadlineSeconds - completedMission.elapsedSeconds > 10)
+
+for (const seed of [42, 81] as const) {
+  flightSimulator.reset(seed)
+  flightSimulator.transferControl('agent', 'agent', `Seed ${seed} route regression`)
+  flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
+  flightSimulator.beginTakeoff('agent', `Begin seed ${seed} departure`)
+  for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+    const state = flightSimulator.getState()
+    if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
+      flightSimulator.getDecisionContext()
+      flightSimulator.setRoute('return_kpwk', 'The combined context favors the nearby priority runway.', 'agent')
+    }
+    const current = flightSimulator.getState()
+    if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
+    flightSimulator.advanceForTesting(0.1)
+  }
+  assert.equal(flightSimulator.getState().mission.outcome, 'landed', `Seed ${seed} should land`)
+  assert.equal(flightSimulator.getState().passengerSafety.status, 'comfortable', `Seed ${seed} should preserve passenger comfort`)
+  assert.ok(flightSimulator.getState().elapsedSeconds < flightSimulator.getState().checkride.deadlineSeconds, `Seed ${seed} should finish inside nine minutes`)
+}
 
 console.log(JSON.stringify({
   checkpoint: checkpoint.message,

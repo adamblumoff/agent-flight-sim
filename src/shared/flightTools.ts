@@ -1,7 +1,7 @@
 import type {
-  ActionReceipt, AircraftConfigurationInput, AutopilotTargetsInput, CheckrideSeed,
+  ActionReceipt, ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotTargetsInput, CheckrideSeed,
   ControlOwner, EvidenceSource, FlightEventType, FlightEventWaitResult, FlightEvidence,
-  FlightState, MissionBrief, RoutePlan,
+  FlightState, EmergencyDecisionContext, MissionBrief, RoutePlan,
 } from '../sim/types'
 import { A380_ENVELOPE } from '../sim/a380Envelope'
 
@@ -12,16 +12,18 @@ export interface FlightToolReceipt<T> { readonly ok: true; readonly summary: str
 export const checkrideSeeds = [17, 42, 81] as const satisfies readonly CheckrideSeed[]
 export const evidenceSources = ['weather', 'cockpit', 'traffic', 'passenger'] as const satisfies readonly EvidenceSource[]
 export const routePlans = ['continue_klak', 'return_kpwk'] as const satisfies readonly RoutePlan[]
-export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'plan_updated', 'checkpoint_reached', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
+export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'plan_updated', 'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
 export interface FlightToolArguments {
   start_flight: { readonly seed?: CheckrideSeed }
   get_mission_brief: Record<string, never>
   get_flight_state: Record<string, never>
+  get_decision_context: Record<string, never>
   inspect_flight_evidence: { readonly source?: EvidenceSource }
   set_route: { readonly plan: 'continue_klak' | 'return_kpwk'; readonly reason: string }
   begin_takeoff: { readonly reason: string }
   set_autopilot_targets: AutopilotTargetsInput
+  rebuild_active_leg: { readonly strategy: ActiveLegRebuildStrategy; readonly reason: string }
   configure_aircraft: AircraftConfigurationInput
   request_human_approval: { readonly question: string; readonly requested_action: string; readonly reason: string }
   wait_for_flight_event: { readonly after_revision?: number; readonly events?: readonly FlightEventType[]; readonly timeout_ms?: number }
@@ -32,10 +34,12 @@ export interface FlightToolResults {
   start_flight: FlightToolReceipt<{ readonly seed: CheckrideSeed; readonly brief: MissionBrief; readonly state: FlightState }>
   get_mission_brief: FlightToolReceipt<{ readonly brief: MissionBrief }>
   get_flight_state: FlightToolReceipt<{ readonly state: FlightState; readonly units: Readonly<Record<string, string>> }>
+  get_decision_context: FlightToolReceipt<{ readonly context: EmergencyDecisionContext }>
   inspect_flight_evidence: FlightToolReceipt<{ readonly evidence: FlightEvidence | readonly FlightEvidence[]; readonly inspectedSources: readonly EvidenceSource[] }>
   set_route: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
   begin_takeoff: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
   set_autopilot_targets: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
+  rebuild_active_leg: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
   configure_aircraft: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
   request_human_approval: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
   wait_for_flight_event: FlightEventWaitResult & { readonly ok: true; readonly summary: string; readonly tone: ToolReceiptTone }
@@ -59,7 +63,11 @@ export const flightToolDefinitions = [
   },
   {
     name: 'get_flight_state', title: 'Read flight state', readOnly: true,
-    description: 'Read live airspeed, ground speed, track, wind components, turbulence, angle of attack, stall state, fuel, control owner, route, configuration, autopilot targets, scenario conditions, and debrief.', inputSchema: emptySchema,
+    description: 'Read live flight data. Navigation includes bearing, closing rate, checkpoint width, achievable turn radius, and whether progress has stalled. Passenger safety includes current G-load and jerk.', inputSchema: emptySchema,
+  },
+  {
+    name: 'get_decision_context', title: 'Read emergency options', readOnly: true,
+    description: 'After emergency_detected, read all evidence, the comfort envelope, fuel, decision time, and ranked KPWK/KLAK route options in one call. This starts the agent decision clock if it has not started.', inputSchema: emptySchema,
   },
   {
     name: 'inspect_flight_evidence', title: 'Inspect evidence', readOnly: true,
@@ -68,18 +76,23 @@ export const flightToolDefinitions = [
   },
   {
     name: 'set_route', title: 'Choose route', readOnly: false,
-    description: 'Before takeoff, file continue_klak to Lakeside Municipal runway 22. Filing a route does not move the aircraft; call begin_takeoff separately. After emergency_detected, inspect at least two reports and replace it with return_kpwk. Each captured checkpoint emits checkpoint_reached.',
+    description: 'Before takeoff, file continue_klak to Lakeside Municipal runway 22. Filing does not move the aircraft. After emergency_detected, read get_decision_context and choose return_kpwk or continue_klak. The flight director follows a physically achievable route and emits checkpoint_reached at each fly-through gate.',
     inputSchema: { type: 'object', properties: { plan: { type: 'string', enum: routePlans }, reason: { type: 'string', minLength: 1 } }, required: ['plan', 'reason'], additionalProperties: false },
   },
   {
     name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
-    description: 'Begin the takeoff roll after the continue_klak preflight route has been filed. Advance takeoff thrust, rotate near 170 kt, and keep accelerating toward 210 kt after liftoff.',
+    description: 'Begin the takeoff roll after filing continue_klak. The flight director holds runway heading through 400 ft AGL. A runway excursion or surface strike causes a crash.',
     inputSchema: { type: 'object', properties: { reason: { type: 'string', minLength: 1 } }, required: ['reason'], additionalProperties: false },
   },
   {
     name: 'set_autopilot_targets', title: 'Set autopilot targets', readOnly: false,
-    description: 'Adjust intent-level heading, altitude, speed, or vertical mode. Use this for a deliberate correction, not continuous stick inputs.',
-    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: 645, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: A380_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
+    description: 'Set persistent intent-level heading, altitude, speed, or vertical mode. Supplying heading selects heading hold. Set lateralMode to route to resume route guidance. Commands remain active until changed.',
+    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: 645, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: A380_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, lateralMode: { type: 'string', enum: ['route', 'heading'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
+  },
+  {
+    name: 'rebuild_active_leg', title: 'Rebuild active leg', readOnly: false,
+    description: 'Recover from a non-converging checkpoint. Use direct_intercept for a shorter rejoin, wider_pattern for more maneuvering room, or skip_noncritical only for a departure or enroute checkpoint. Base, final, and touchdown cannot be skipped.',
+    inputSchema: { type: 'object', properties: { strategy: { type: 'string', enum: ['direct_intercept', 'wider_pattern', 'skip_noncritical'] }, reason: { type: 'string', minLength: 1 } }, required: ['strategy', 'reason'], additionalProperties: false },
   },
   {
     name: 'configure_aircraft', title: 'Configure aircraft', readOnly: false,
@@ -93,7 +106,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'wait_for_flight_event', title: 'Wait for flight event', readOnly: true,
-    description: 'Wait without polling for a configuration change, handoff, approval, touchdown, mission completion, or failure. Call again after a timeout.',
+    description: 'Wait without polling for route, comfort, configuration, handoff, touchdown, completion, or failure events. route_progress_stalled means the current leg should be rebuilt instead of orbited.',
     inputSchema: { type: 'object', properties: { after_revision: { type: 'number', minimum: 0 }, events: { type: 'array', items: { type: 'string', enum: flightEventValues }, minItems: 1 }, timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 15000 } }, additionalProperties: false },
   },
   {

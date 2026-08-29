@@ -102,6 +102,7 @@ function deriveRecommendation(state: FlightState): string {
     : 'The Lakeside route is filed. Apply power when you are ready to begin the takeoff roll.'
   if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
   if (!state.procedure.compliant) return state.procedure.instruction
+  if (state.mission.routeStatus === 'stalled') return 'The active leg is no longer converging. Rebuild it from the current position instead of continuing the orbit.'
   if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
   if (state.controlOwner === 'human' && state.route.plan === 'return_kpwk') {
     return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KPWK runway 16.'
@@ -134,8 +135,15 @@ function derivePlan(state: FlightState): readonly string[] {
       ]
     }
     return [
-      'Confirm weather, engine, passenger, and traffic conditions.',
-      'Commit to the KPWK return, then configure the aircraft for runway 16.',
+      'Read the combined emergency context and compare the two usable routes.',
+      'Commit to one route, then configure the aircraft for the selected runway.',
+    ]
+  }
+
+  if (state.mission.routeStatus === 'stalled') {
+    return [
+      'Rebuild the active leg with a direct intercept or wider pattern.',
+      'Resume route guidance after the new checkpoint is loaded.',
     ]
   }
 
@@ -165,6 +173,7 @@ function deriveAction(state: FlightState): string {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
   if (state.checkride.status === 'armed') return 'Normal departure. Monitoring the aircraft and surrounding conditions.'
+  if (state.mission.routeStatus === 'stalled') return 'Route progress stalled. Waiting for a leg rebuild.'
   if (state.controlOwner === 'human' && state.route.plan === 'return_kpwk') {
     const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
     return waypoint
@@ -172,7 +181,7 @@ function deriveAction(state: FlightState): string {
       : 'You are flying the emergency return to KPWK runway 16.'
   }
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
-    return 'Reviewing the available evidence and route options.'
+    return 'Reading the emergency context and comparing the available routes.'
   }
   if (!state.procedure.compliant) return state.procedure.instruction
   if (state.controlOwner === 'agent' && state.autopilot.enabled) {
@@ -472,7 +481,7 @@ export default function App() {
           <div className="emergency-timer" data-urgent={state.checkride.decisionSecondsRemaining <= 30} role="timer" aria-live="polite">
             <Timer aria-hidden="true" />
             <span>Route decision</span>
-            <strong>0:{Math.ceil(state.checkride.decisionSecondsRemaining).toString().padStart(2, '0')}</strong>
+            <strong>{formatElapsed(Math.ceil(state.checkride.decisionSecondsRemaining))}</strong>
           </div>
         ) : null}
       </div>

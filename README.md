@@ -34,10 +34,12 @@ The page registers these tools:
 start_flight
 get_mission_brief
 get_flight_state
+get_decision_context
 inspect_flight_evidence
 set_route
 begin_takeoff
 set_autopilot_targets
+rebuild_active_leg
 configure_aircraft
 request_human_approval
 wait_for_flight_event
@@ -50,13 +52,13 @@ A normal agent flight is procedural and event-driven:
 2. Before takeoff, call `set_route` with `continue_klak` and explain the preflight plan to Lakeside Municipal runway 22. Filing the route leaves the aircraft stopped.
 3. Call `begin_takeoff` when the route is filed and the aircraft is ready to roll.
 4. Respond to `configuration_required` and `checkpoint_reached` events while flying the normal route.
-5. Wait for `emergency_detected`; the scenario, evidence, and 45-second route-decision timer change only after that event.
-6. Inspect the new weather, cockpit, traffic, and passenger evidence, then replace the plan with `return_kpwk` and explain the choice.
-7. Follow each live checkpoint and configuration transition through base, final, and landing, then wait for touchdown and mission completion instead of polling.
+5. Wait for `emergency_detected`, then call `get_decision_context` once. It returns all evidence, fuel, passenger limits, and ranked KPWK/KLAK options. The 60-second agent decision clock starts when the event or context is delivered.
+6. Choose `return_kpwk` or `continue_klak` and explain the tradeoff. The flight director holds a safe heading and altitude while the agent decides.
+7. Follow each live checkpoint and configuration transition through base, final, and landing. If `route_progress_stalled` arrives, call `rebuild_active_leg` instead of allowing another orbit.
 
-The intent-level tools make route and configuration decisions; the deterministic autopilot supplies the continuous control loop. The aircraft therefore keeps flying while a model is thinking or waiting for a human decision. Event waits return after at most 15 seconds and can be resumed from the returned monotonic revision.
+The intent-level tools make route and configuration decisions; the deterministic flight director supplies the continuous control loop. It holds runway heading through 400 feet AGL, limits commanded bank and roll rate, tracks fly-through gates, and uses an outbound intercept when the airplane reaches final pointed the wrong way. Explicit heading commands remain active until the agent resumes route mode. Event waits return after at most 15 seconds and can be resumed from the returned monotonic revision.
 
-The minimap draws only the current aircraft-to-checkpoint leg and advances it when the aircraft enters that fix's capture radius. It can be dragged, expanded, or reduced. The original destination is about 12.5 nautical miles away, so the emergency visibly replaces a real preflight route rather than revealing a route that was hidden from the start.
+The minimap draws only the current aircraft-to-checkpoint leg and advances it when the aircraft crosses that fix's fly-through gate. The original destination is about 12.5 nautical miles away, so the emergency replaces a real preflight route rather than revealing a route that was hidden from the start.
 
 The three seeds vary weather, engine health, traffic, and passenger urgency. Engine power and visibility affect the running simulation and world. Sustained G-load and abrupt changes accumulate passenger distress and deterministic injury risk, which are exposed in the live state and through `passenger_safety_update` events.
 
