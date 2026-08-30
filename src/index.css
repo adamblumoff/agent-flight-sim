@@ -1568,6 +1568,37 @@ summary:focus-visible {
   content: "";
 }
 
+.debrief-export {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgb(244 239 222 / 10%);
+}
+
+.debrief-export h3,
+.debrief-export p {
+  margin: 0;
+}
+
+.debrief-export h3 {
+  color: var(--cream);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.debrief-export p {
+  margin-top: 4px;
+  color: rgb(244 239 222 / 48%);
+  font: 520 8px/1.35 "Kode Mono Variable", monospace;
+}
+
+.debrief-export button {
+  flex: 0 0 auto;
+}
+
 .debrief-reset {
   width: 100%;
   height: 34px;

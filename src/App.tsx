@@ -274,7 +274,7 @@ export default function App() {
     flightSimulator.getSnapshot,
     flightSimulator.getSnapshot,
   )
-  const { status: webMcpStatus, activities } = useWebMcp()
+  const { status: webMcpStatus, activities, clearActivities: clearWebMcpActivities } = useWebMcp()
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
   const [audioVolume, setAudioVolume] = useState(50)
   const lastAudibleVolumeRef = useRef(50)
@@ -314,8 +314,9 @@ export default function App() {
 
   const resetScenario = useCallback(() => {
     flightSimulator.reset()
+    clearWebMcpActivities()
     setShowTakeoffBrief(true)
-  }, [])
+  }, [clearWebMcpActivities])
 
   const changeAudioVolume = useCallback((volume: number) => {
     const nextVolume = Math.max(0, Math.min(100, Math.round(volume)))
@@ -624,6 +625,10 @@ export default function App() {
         approvalPending={state.approval.status === 'pending'}
         approvalPrompt={state.approval.question ?? 'Approve the copilot’s requested action?'}
         debrief={deriveDebrief(state)}
+        webMcpCalls={activities.map((activity) => ({
+          tool: activity.tool,
+          arguments: activity.arguments,
+        }))}
         diagnostics={{
           world: worldStatus.message,
           webMcp: webMcpLabels[webMcpStatus],

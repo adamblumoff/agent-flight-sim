@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { executeFlightToolFromUnknown } from '../shared/executeFlightTool'
 import {
   flightToolDefinitions,
@@ -14,6 +14,7 @@ export interface WebMcpActivity {
   readonly status: 'completed' | 'failed'
   readonly summary: string
   readonly timestamp: number
+  readonly arguments: Readonly<Record<string, unknown>>
 }
 
 type RecordActivity = (activity: Omit<WebMcpActivity, 'id' | 'timestamp'>) => void
@@ -33,6 +34,7 @@ function createFlightTools(recordActivity: RecordActivity): WebMCP.ModelContextT
           title: definition.title,
           status: result.ok ? 'completed' : 'failed',
           summary: result.summary,
+          arguments: input,
         })
         return result
       } catch (error) {
@@ -41,6 +43,7 @@ function createFlightTools(recordActivity: RecordActivity): WebMCP.ModelContextT
           title: definition.title,
           status: 'failed',
           summary: error instanceof Error ? error.message : 'Tool call failed',
+          arguments: input,
         })
         throw error
       }
@@ -52,6 +55,7 @@ export function useWebMcp() {
   const [status, setStatus] = useState<WebMcpStatus>('registering')
   const [activities, setActivities] = useState<readonly WebMcpActivity[]>([])
   const nextActivityId = useRef(1)
+  const clearActivities = useCallback(() => setActivities([]), [])
 
   useEffect(() => {
     if (!document.modelContext) {
@@ -66,7 +70,7 @@ export function useWebMcp() {
         id: nextActivityId.current++,
         timestamp: Date.now(),
       }
-      setActivities((current) => [...current.slice(-7), event])
+      setActivities((current) => activity.tool === 'start_flight' ? [event] : [...current, event])
     }
 
     async function registerTools() {
@@ -90,5 +94,5 @@ export function useWebMcp() {
     return () => controller.abort()
   }, [])
 
-  return { status, activities }
+  return { status, activities, clearActivities }
 }

@@ -23,7 +23,7 @@ assert.ok(Math.abs(navigationBearingDeg({ lat: 42, lon: -88 }, { lat: 42, lon: -
 flightSimulator.reset(17)
 assert.equal(flightSimulator.getState().checkride.score.total, 100)
 assert.deepEqual(flightSimulator.getState().checkride.score.deductions, [])
-assert.equal(flightSimulator.getState().checkride.deadlineSeconds, 540)
+assert.equal(flightSimulator.getState().checkride.deadlineSeconds, 600)
 flightSimulator.transferControl('agent', 'agent', 'Simulation smoke test')
 assert.equal(flightSimulator.getState().mission.phase, 'preflight')
 assert.equal(flightSimulator.getState().route.plan, 'unassigned')
@@ -192,7 +192,7 @@ flightSimulator.reset(17)
 flightSimulator.transferControl('agent', 'agent', 'Full mission smoke test')
 flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
 flightSimulator.beginTakeoff('agent', 'Begin full mission departure')
-for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
   const state = flightSimulator.getState()
   if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
     flightSimulator.getDecisionContext()
@@ -234,7 +234,7 @@ for (const seed of [42, 81] as const) {
   flightSimulator.transferControl('agent', 'agent', `Seed ${seed} route regression`)
   flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
   flightSimulator.beginTakeoff('agent', `Begin seed ${seed} departure`)
-  for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+  for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
     const state = flightSimulator.getState()
     if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
       flightSimulator.getDecisionContext()
@@ -246,7 +246,7 @@ for (const seed of [42, 81] as const) {
   }
   assert.equal(flightSimulator.getState().mission.outcome, 'landed', `Seed ${seed} should land: ${JSON.stringify({ landing: flightSimulator.getState().debrief.landing, impact: flightSimulator.getState().impact, route: flightSimulator.getState().route, mission: flightSimulator.getState().mission })}`)
   assert.equal(flightSimulator.getState().passengerSafety.status, 'comfortable', `Seed ${seed} should preserve passenger comfort`)
-  assert.ok(flightSimulator.getState().elapsedSeconds < flightSimulator.getState().checkride.deadlineSeconds, `Seed ${seed} should finish inside nine minutes`)
+  assert.ok(flightSimulator.getState().elapsedSeconds < flightSimulator.getState().checkride.deadlineSeconds, `Seed ${seed} should finish inside ten minutes`)
 }
 
 for (const seed of [17, 42, 81] as const) {
@@ -254,7 +254,7 @@ for (const seed of [17, 42, 81] as const) {
   flightSimulator.transferControl('agent', 'agent', `Seed ${seed} Lakeside continuation regression`)
   flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
   flightSimulator.beginTakeoff('agent', 'Begin Lakeside continuation')
-  for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+  for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
     const state = flightSimulator.getState()
     if (state.checkride.status === 'decision_required') {
       flightSimulator.getDecisionContext()
@@ -269,7 +269,7 @@ for (const seed of [17, 42, 81] as const) {
   assert.equal(lakesideMission.debrief.landing?.runway, 'KLAK 04')
   assert.equal(lakesideMission.debrief.landing?.safe, true)
   assert.ok(lakesideMission.fuelMinutesRemaining > 0)
-  assert.ok(lakesideMission.elapsedSeconds < lakesideMission.checkride.deadlineSeconds, `Seed ${seed} should complete the Lakeside continuation inside nine minutes`)
+  assert.ok(lakesideMission.elapsedSeconds < lakesideMission.checkride.deadlineSeconds, `Seed ${seed} should complete the Lakeside continuation inside ten minutes`)
 }
 
 console.log(JSON.stringify({

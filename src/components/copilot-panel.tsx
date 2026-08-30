@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  Download,
   RotateCcw,
   ShieldCheck,
 } from 'lucide-react'
@@ -49,6 +50,10 @@ export interface CopilotPanelProps {
   readonly approvalPrompt: string
   readonly debrief: CopilotDebrief | null
   readonly diagnostics: CopilotDiagnostics
+  readonly webMcpCalls: readonly {
+    readonly tool: string
+    readonly arguments: Readonly<Record<string, unknown>>
+  }[]
   readonly onApprove: () => void
   readonly onDeny: () => void
   readonly onReset: () => void
@@ -56,13 +61,16 @@ export interface CopilotPanelProps {
 
 function MissionDebrief({
   debrief,
+  webMcpCalls,
   onReset,
 }: {
   readonly debrief: CopilotDebrief
+  readonly webMcpCalls: CopilotPanelProps['webMcpCalls']
   readonly onReset: () => void
 }) {
   const landed = debrief.outcome === 'Landed'
   const DebriefIcon = landed ? Check : CircleAlert
+  const webMcpExportHref = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(webMcpCalls, null, 2))}`
 
   return (
     <div className="mission-debrief">
@@ -121,6 +129,21 @@ function MissionDebrief({
         </ol>
       ) : null}
 
+      {webMcpCalls.length > 0 ? (
+        <section className="debrief-export" aria-labelledby="webmcp-export-title">
+          <div>
+            <h3 id="webmcp-export-title">WebMCP call log</h3>
+            <p>{webMcpCalls.length} calls from this run · JSON only</p>
+          </div>
+          <Button
+            variant="outline"
+            render={<a href={webMcpExportHref} download="flightdeck-webmcp-calls.json" />}
+          >
+            <Download data-icon="inline-start" /> Export JSON
+          </Button>
+        </section>
+      ) : null}
+
       <Button variant="outline" className="debrief-reset" onClick={onReset}>
         <RotateCcw data-icon="inline-start" /> Fly again
       </Button>
@@ -139,6 +162,7 @@ export function CopilotPanel({
   approvalPrompt,
   debrief,
   diagnostics,
+  webMcpCalls,
   onApprove,
   onDeny,
   onReset,
@@ -155,7 +179,7 @@ export function CopilotPanel({
       </header>
 
       {debrief ? (
-        <MissionDebrief debrief={debrief} onReset={onReset} />
+        <MissionDebrief debrief={debrief} webMcpCalls={webMcpCalls} onReset={onReset} />
       ) : (
         <div className="copilot-body">
           <section className="panel-section observation-section" aria-labelledby="observations-title">

@@ -46,7 +46,7 @@ const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 14
 const PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND = 420
 const EMERGENCY_TRIGGER_SECONDS = 45
 const EMERGENCY_DECISION_SECONDS = 60
-const MISSION_DEADLINE_SECONDS = 9 * 60
+const MISSION_DEADLINE_SECONDS = 10 * 60
 const ROUTE_BANK_DEG = 25
 const MAX_EMERGENCY_TURN_FIXES = 3
 const DEPARTURE_GUIDANCE_RELEASE_AGL_FT = A380_ENVELOPE.departureHeadingReleaseAglFt
@@ -252,7 +252,7 @@ const routeEstimatedMinutes = (
 export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   id: 'SHARED-AUTONOMY-EMERGENCY-01',
   name: 'Rough running over Wheeling',
-  objective: 'Depart North Field, assess the emergency, and land at Chicago Executive within nine minutes.',
+  objective: 'Depart North Field, assess the emergency, and land at Chicago Executive within ten minutes.',
   start: 'Lined up on North Field runway 18 with the aircraft configured for takeoff.',
   deadlineSeconds: MISSION_DEADLINE_SECONDS,
   airports: Object.freeze([NORTH_FIELD_AIRPORT, LAKESIDE_AIRPORT, KPWK_AIRPORT]),
@@ -1232,7 +1232,7 @@ class FlightSimulator {
       score = withScoreDeduction(score, 'decision-timeout', elapsedSeconds, 15, 'Emergency route decision exceeded 60 seconds')
     }
     if (elapsedSeconds >= this.state.checkride.deadlineSeconds && outcome === 'in_progress') {
-      score = withScoreDeduction(score, 'mission-overtime', elapsedSeconds, 12, 'Mission exceeded the nine-minute operating window')
+      score = withScoreDeduction(score, 'mission-overtime', elapsedSeconds, 12, 'Mission exceeded the ten-minute operating window')
     }
     // Ignore the brief acceleration transient at rotation; handling penalties
     // start once the wide-body is established above the departure surface.
