@@ -40,14 +40,25 @@ assert.equal(flightSimulator.getState().throttle, 0)
 assert.equal(flightSimulator.beginTakeoff('agent', 'Route filed and departure clearance received.').accepted, true)
 assert.equal(flightSimulator.getState().mission.phase, 'takeoff')
 
-flightSimulator.advanceForTesting(35)
+let peakTakeoffPitchDeg = 0
+let peakTakeoffRotationRateDegPerSecond = 0
+let previousTakeoffPitchDeg = flightSimulator.getState().pitchDeg
+for (let elapsed = 0; elapsed < 40; elapsed += 0.1) {
+  flightSimulator.advanceForTesting(0.1)
+  const state = flightSimulator.getState()
+  peakTakeoffPitchDeg = Math.max(peakTakeoffPitchDeg, state.pitchDeg)
+  peakTakeoffRotationRateDegPerSecond = Math.max(peakTakeoffRotationRateDegPerSecond, (state.pitchDeg - previousTakeoffPitchDeg) / 0.1)
+  previousTakeoffPitchDeg = state.pitchDeg
+}
+assert.ok(peakTakeoffPitchDeg >= 12.4, `Expected 12.5° initial pitch, reached ${peakTakeoffPitchDeg.toFixed(1)}°`)
+assert.ok(peakTakeoffRotationRateDegPerSecond <= 3.05, `Rotation exceeded 3°/s: ${peakTakeoffRotationRateDegPerSecond.toFixed(2)}°/s`)
 const checkpoint = await flightSimulator.waitForFlightEvent({ afterRevision: 0, events: ['checkpoint_reached'], timeoutMs: 1_000 })
 assert.equal(checkpoint.event, 'checkpoint_reached')
 assert.equal(checkpoint.state.route.completedWaypointIds[0], 'NORTH_FIELD_CLIMB')
 assert.equal(checkpoint.state.mission.nextFix, 'LAKESIDE_ENROUTE')
 assert.equal(checkpoint.state.mission.captureRadiusNm, 0.8)
 
-flightSimulator.advanceForTesting(12)
+flightSimulator.advanceForTesting(7)
 const emergency = await flightSimulator.waitForFlightEvent({ afterRevision: checkpoint.revision, events: ['emergency_detected'], timeoutMs: 1_000 })
 assert.equal(emergency.event, 'emergency_detected')
 assert.ok((emergency.state.checkride.decisionSecondsRemaining ?? 0) > 40)

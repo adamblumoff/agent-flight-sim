@@ -81,7 +81,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
-    description: 'Begin the takeoff roll after filing continue_klak. The flight director holds runway heading through 400 ft AGL. A runway excursion or surface strike causes a crash.',
+    description: `Begin the takeoff roll after filing continue_klak. At ${A380_ENVELOPE.rotateSpeedKt} knots the flight director rotates at about ${A380_ENVELOPE.rotationRateDegPerSecond} degrees per second, lifts off near ${A380_ENVELOPE.liftoffPitchDeg} degrees, and targets ${A380_ENVELOPE.initialClimbPitchDeg} degrees before following climb guidance. It holds runway heading through ${A380_ENVELOPE.departureHeadingReleaseAglFt} ft AGL. A runway excursion or surface strike causes a crash.`,
     inputSchema: { type: 'object', properties: { reason: { type: 'string', minLength: 1 } }, required: ['reason'], additionalProperties: false },
   },
   {

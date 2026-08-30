@@ -174,7 +174,7 @@ function derivePlan(state: FlightState): readonly string[] {
 
 function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
-  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return `Accelerating on runway 18. Rotate near ${A380_ENVELOPE.rotateSpeedKt} knots.`
+  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return `Accelerating on runway 18. At ${A380_ENVELOPE.rotateSpeedKt} knots, rotate toward ${A380_ENVELOPE.initialClimbPitchDeg}°.`
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
@@ -454,7 +454,7 @@ export default function App() {
             </p>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
-              <li><kbd>W</kbd><span>Near {A380_ENVELOPE.rotateSpeedKt} knots, rotate smoothly and keep takeoff power set while accelerating toward {A380_ENVELOPE.initialClimbSpeedKt} knots.</span></li>
+              <li><kbd>W</kbd><span>At {A380_ENVELOPE.rotateSpeedKt} knots, rotate at about {A380_ENVELOPE.rotationRateDegPerSecond}°/s through liftoff near {A380_ENVELOPE.liftoffPitchDeg}°, then target {A380_ENVELOPE.initialClimbPitchDeg}° while accelerating toward {A380_ENVELOPE.initialClimbSpeedKt} knots.</span></li>
               <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">

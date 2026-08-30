@@ -1082,6 +1082,7 @@ summary:focus-visible {
 }
 
 .instrument-value strong {
+  flex-shrink: 0;
   overflow: hidden;
   color: var(--cream);
   font: 520 clamp(18px, 1.8vw, 24px)/1 "Kode Mono Variable", monospace;
@@ -1090,6 +1091,7 @@ summary:focus-visible {
 }
 
 .instrument-value small {
+  flex-shrink: 0;
   color: rgb(244 239 222 / 43%);
   font: 500 8px/1 "Kode Mono Variable", monospace;
 }

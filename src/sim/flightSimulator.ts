@@ -38,7 +38,7 @@ const ROTATE_SPEED_KT = A380_ENVELOPE.rotateSpeedKt
 const TAKEOFF_POWER_ACCEL_KT_PER_SECOND = 5.8
 const TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND = 0.2
 const TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND = 0.65
-const MAX_GROUND_PITCH_DEG = 10
+const MAX_GROUND_PITCH_DEG = A380_ENVELOPE.liftoffPitchDeg
 const PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND = 5
 const PILOT_BANK_TRIM_RATE_DEG_PER_SECOND = 10
 const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 7
@@ -49,7 +49,7 @@ const EMERGENCY_DECISION_SECONDS = 60
 const MISSION_DEADLINE_SECONDS = 9 * 60
 const ROUTE_BANK_DEG = 25
 const MAX_EMERGENCY_TURN_FIXES = 3
-const DEPARTURE_GUIDANCE_RELEASE_AGL_FT = 400
+const DEPARTURE_GUIDANCE_RELEASE_AGL_FT = A380_ENVELOPE.departureHeadingReleaseAglFt
 const LIFTOFF_CONFIRM_AGL_FT = 35
 const ROUTE_STALL_SECONDS = 20
 const ROUTE_PROGRESS_EPSILON_NM = 0.015
@@ -261,6 +261,7 @@ export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   evidenceSources: Object.freeze(['weather', 'cockpit', 'traffic', 'passenger'] as const),
   successConditions: Object.freeze([
     'Take off from North Field runway 18.',
+    'At 170 knots, rotate at approximately 3 degrees per second toward 12.5 degrees initial pitch while holding runway heading.',
     'Retract gear after a positive climb rate, then retract takeoff flaps in the climb.',
     'Read the combined emergency decision context before selecting a route.',
     'Use flaps 10 near 185 knots on base, then gear down and flaps 20 by 155 knots on final.',
@@ -276,7 +277,7 @@ const NORMAL_DEPARTURE_MISSION: MissionBrief = Object.freeze({
   availablePlans: Object.freeze(['continue_klak'] as const),
   successConditions: Object.freeze([
     'File the Lakeside Municipal runway 22 route before takeoff.',
-    'Take off from North Field runway 18.',
+    'At 170 knots, rotate at approximately 3 degrees per second toward 12.5 degrees initial pitch on North Field runway 18.',
     'Retract gear after a positive climb rate.',
     'Retract takeoff flaps after the climb is established.',
     'Monitor for an enroute update before changing the route.',
@@ -430,7 +431,7 @@ const configurationProcedureFor = (state: Pick<FlightState, 'aircraftPhase' | 'a
   let stage: ConfigurationProcedure['stage'] = 'takeoff'
   let gearDown = true
   let flapsDeg: ConfigurationProcedure['flapsDeg'] = A380_ENVELOPE.takeoffFlapsDeg
-  let instruction = 'Takeoff: gear down, flaps 10° (CONF 1+F), rotate near 170 kt and continue accelerating.'
+  let instruction = 'Takeoff: gear down, flaps 10° (CONF 1+F); at 170 kt rotate at 3°/s toward 12.5° initial pitch.'
   if (state.aircraftPhase === 'airborne') {
     const aglFt = state.altitudeFt - NORTH_FIELD_RUNWAY_18.elevationFt
     const activeKind = state.route.waypoints[state.route.activeWaypointIndex]?.kind
@@ -940,8 +941,12 @@ class FlightSimulator {
         bank = approach(bank, clamp(headingError(NORTH_FIELD_RUNWAY_18.headingDeg, heading) * 0.65, -12, 12), 24 * dt)
         throttle = approach(throttle, 1, 0.55 * dt)
         const rotating = airspeed >= ROTATE_SPEED_KT
-        verticalSpeed = approach(verticalSpeed, rotating ? 1_200 : 0, 700 * dt)
-        pitch = approach(pitch, rotating ? 8 : 0, 7 * dt)
+        verticalSpeed = approach(verticalSpeed, rotating ? A380_ENVELOPE.initialClimbVerticalSpeedFpm : 0, 700 * dt)
+        pitch = approach(
+          pitch,
+          rotating ? A380_ENVELOPE.initialClimbPitchDeg : 0,
+          A380_ENVELOPE.rotationRateDegPerSecond * dt,
+        )
       } else {
         const target = this.state.autopilot
         const activeWaypoint = this.state.route.waypoints[this.state.route.activeWaypointIndex]
@@ -1022,7 +1027,11 @@ class FlightSimulator {
         ? 0
         : clamp(this.manualAttitudeTarget.bankDeg + this.smoothedPilotControls.bankAxis * PILOT_BANK_TRIM_RATE_DEG_PER_SECOND * dt, -60, 60)
       const targetPitch = onTakeoffRoll && airspeed < ROTATE_SPEED_KT ? 0 : this.manualAttitudeTarget.pitchDeg
-      pitch = approach(pitch, targetPitch, PILOT_PITCH_RESPONSE_DEG_PER_SECOND * dt)
+      pitch = approach(
+        pitch,
+        targetPitch,
+        (onTakeoffRoll ? A380_ENVELOPE.rotationRateDegPerSecond : PILOT_PITCH_RESPONSE_DEG_PER_SECOND) * dt,
+      )
       bank = approach(bank, this.manualAttitudeTarget.bankDeg, PILOT_BANK_RESPONSE_DEG_PER_SECOND * dt)
       const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch)), -4_500, 4_500)
       verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND * dt)
@@ -1085,7 +1094,7 @@ class FlightSimulator {
         aircraftPhase = 'airborne'
         altitude = takeoffContactAltitude
         verticalSpeed = -1
-      } else if (airspeed < ROTATE_SPEED_KT || pitch <= 1) {
+      } else if (airspeed < ROTATE_SPEED_KT || pitch < A380_ENVELOPE.liftoffPitchDeg) {
         altitude = takeoffContactAltitude
         verticalSpeed = 0
       } else if (altitude > NORTH_FIELD_RUNWAY_18.elevationFt + LIFTOFF_CONFIRM_AGL_FT && verticalSpeed > 0) {
