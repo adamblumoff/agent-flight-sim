@@ -1832,6 +1832,20 @@ summary:focus-visible {
   }
 }
 
+@media (min-width: 761px) and (max-width: 860px) {
+  .instrument-readings {
+    grid-template-columns: repeat(2, minmax(72px, 1fr));
+  }
+
+  .instrument-stat:nth-child(3) {
+    border-right: 1px solid rgb(244 239 222 / 12%);
+  }
+
+  .instrument-stat:nth-child(even) {
+    border-right: 0;
+  }
+}
+
 @media (max-width: 760px) {
   .flight-header {
     top: 12px;
