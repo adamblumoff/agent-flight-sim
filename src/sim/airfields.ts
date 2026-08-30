@@ -95,3 +95,16 @@ export const LAKESIDE_RUNWAY_22: MissionRunway = Object.freeze({
   widthFt: A380_ENVELOPE.standardRunwayWidthFt,
   elevationFt: LAKESIDE_AIRPORT.elevationFt,
 })
+
+export const LAKESIDE_RUNWAY_04: MissionRunway = Object.freeze({
+  id: 'KLAK-04',
+  airport: 'KLAK',
+  thresholdLat: lakesideFarEnd.lat,
+  thresholdLon: lakesideFarEnd.lon,
+  farEndLat: lakesideThreshold.lat,
+  farEndLon: lakesideThreshold.lon,
+  headingDeg: 40,
+  lengthFt: LAKESIDE_RUNWAY_LENGTH_FT,
+  widthFt: A380_ENVELOPE.standardRunwayWidthFt,
+  elevationFt: LAKESIDE_AIRPORT.elevationFt,
+})

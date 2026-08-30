@@ -1,5 +1,5 @@
 import { flightSimulator } from '../sim/flightSimulator'
-import type { CheckrideSeed, EvidenceSource, RoutePlan } from '../sim/types'
+import type { ActiveLegRebuildStrategy, CheckrideSeed, EvidenceSource, RoutePlan } from '../sim/types'
 import {
   checkrideSeeds, evidenceSources, flightEventValues, routePlans,
   type FlightToolArguments, type FlightToolName, type FlightToolResults,
@@ -11,6 +11,7 @@ const seedSet = new Set<number>(checkrideSeeds)
 const evidenceSet = new Set<string>(evidenceSources)
 const routeSet = new Set<string>(routePlans)
 const eventSet = new Set<string>(flightEventValues)
+const rebuildStrategySet = new Set<string>(['direct_intercept', 'wider_pattern', 'skip_noncritical'])
 
 const reasonInput = (input: UnknownInput, fallback = 'Requested by the copilot') => typeof input.reason === 'string' && input.reason.trim() ? input.reason.trim() : fallback
 const receipt = <T>(summary: string, tone: ToolReceiptTone, details: T) => ({ ok: true as const, summary, tone, details })
@@ -24,16 +25,19 @@ const boundedTimeout = (value: unknown) => {
 const executors: { readonly [Name in FlightToolName]: (input: FlightToolArguments[Name]) => Promise<FlightToolResults[Name]> } = {
   start_flight: async (input) => {
     const seed = input.seed ?? 17
+    const mode = input.mode ?? 'full'
     if (!seedSet.has(seed)) throw new TypeError('seed must be 17, 42, or 81')
-    flightSimulator.reset(seed as CheckrideSeed)
+    if (mode !== 'full' && mode !== 'judge') throw new TypeError('mode must be full or judge')
+    flightSimulator.reset(seed as CheckrideSeed, mode)
     flightSimulator.transferControl('agent', 'agent', 'Copilot started the emergency mission')
-    return receipt(`Mission seed ${seed} is ready for a preflight route on North Field runway 18`, 'automation', { seed: seed as CheckrideSeed, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
+    return receipt(`${mode === 'judge' ? 'Judge' : 'Full'} mission seed ${seed} is ready for a preflight route on North Field runway 18`, 'automation', { seed: seed as CheckrideSeed, mode, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
   },
   get_mission_brief: async () => receipt('Mission brief read', 'neutral', { brief: flightSimulator.getMissionBrief() }),
   get_flight_state: async () => receipt('Live flight state read', 'neutral', {
     state: flightSimulator.getState(),
     units: { altitude: 'feet MSL', airspeed: 'knots', verticalSpeed: 'feet per minute', angles: 'degrees', distance: 'nautical miles', fuelEndurance: 'minutes' },
   }),
+  get_decision_context: async () => receipt('Emergency decision context read', 'neutral', { context: flightSimulator.getDecisionContext() }),
   inspect_flight_evidence: async (input) => {
     if (input.source !== undefined && !evidenceSet.has(input.source)) throw new TypeError('source must be weather, cockpit, traffic, or passenger')
     const evidence = input.source === undefined
@@ -51,6 +55,11 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     return action(flightSimulator.beginTakeoff('agent', input.reason.trim()))
   },
   set_autopilot_targets: async (input) => action(flightSimulator.setAutopilotTargets(input, 'agent', reasonInput({ ...input }))),
+  rebuild_active_leg: async (input) => {
+    if (!rebuildStrategySet.has(input.strategy)) throw new TypeError('strategy must be direct_intercept, wider_pattern, or skip_noncritical')
+    if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
+    return action(flightSimulator.rebuildActiveLeg(input.strategy as ActiveLegRebuildStrategy, input.reason.trim(), 'agent'))
+  },
   configure_aircraft: async (input) => action(flightSimulator.configureAircraft(input, 'agent')),
   request_human_approval: async (input) => {
     if (![input.question, input.requested_action, input.reason].every((value) => typeof value === 'string' && value.trim())) throw new TypeError('question, requested_action, and reason are required')

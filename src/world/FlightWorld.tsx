@@ -17,6 +17,7 @@ import {
 } from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { flightSimulator, navigationBearingDeg } from '../sim/flightSimulator'
+import type { FlightMode } from '../sim/types'
 import { createAircraft, createCrashEffects } from './aircraft'
 import { createAircraftBreakup } from './aircraftBreakup'
 import { createAirportWorld, disposeScene } from './airportScene'
@@ -32,6 +33,7 @@ export type FlightWorldStatus =
   | { readonly kind: 'error'; readonly message: string }
 
 export interface FlightWorldProps {
+  readonly mode: FlightMode
   readonly cameraMode?: FlightCameraMode
   readonly compassRef?: RefObject<HTMLDivElement | null>
   readonly onStatusChange?: (status: FlightWorldStatus) => void
@@ -65,7 +67,7 @@ const flapVisualDeflectionDeg = (detent: number) => {
   return 0
 }
 
-export function FlightWorld({ cameraMode = 'chase', compassRef, onStatusChange }: FlightWorldProps) {
+export function FlightWorld({ mode: flightMode, cameraMode = 'chase', compassRef, onStatusChange }: FlightWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraModeRef = useRef(cameraMode)
   const [status, setStatus] = useState<FlightWorldStatus>(loadingStatus)
@@ -122,7 +124,7 @@ export function FlightWorld({ cameraMode = 'chase', compassRef, onStatusChange }
     controls.enabled = false
 
     const world = createAirportWorld(scene, Math.min(8, renderer.capabilities.getMaxAnisotropy()))
-    const aircraftRig = createAircraft()
+    const aircraftRig = createAircraft(flightMode)
     const aircraft = aircraftRig.root
     const landingGear = aircraftRig.landingGear
     const flaps = aircraftRig.flaps
@@ -143,6 +145,9 @@ export function FlightWorld({ cameraMode = 'chase', compassRef, onStatusChange }
     const smoothedTarget = new Vector3()
     const freeLookDirection = new Vector3()
     const explosionPosition = new Vector3()
+    const activeCockpitOffset = flightMode === 'judge' ? new Vector3(0, 5.6, -30) : cockpitOffset
+    const activeCockpitLookAhead = flightMode === 'judge' ? new Vector3(0, 5, -240) : cockpitLookAhead
+    const activeCrashOrigin = flightMode === 'judge' ? new Vector3(0, 4.2, -29) : crashOrigin
     const aircraftBounds = new Box3()
     const visiblePartBounds = new Box3()
     const attitude = new Euler(0, 0, 0, 'YXZ')
@@ -283,7 +288,7 @@ export function FlightWorld({ cameraMode = 'chase', compassRef, onStatusChange }
       breakup.update(deltaSeconds, groundY)
       const crashActive = Boolean(destructiveImpact)
       if (crashActive && !crashWasActive) {
-        explosionPosition.copy(crashOrigin).applyQuaternion(attitudeQuaternion).add(aircraft.position)
+        explosionPosition.copy(activeCrashOrigin).applyQuaternion(attitudeQuaternion).add(aircraft.position)
         crashEffects.start(explosionPosition)
       } else if (!crashActive && crashWasActive) crashEffects.reset()
       crashEffects.update(deltaSeconds, groundY)
@@ -323,8 +328,8 @@ export function FlightWorld({ cameraMode = 'chase', compassRef, onStatusChange }
         controls.update()
       } else {
         controls.enabled = false
-        const cameraOffset = mode === 'cockpit' ? cockpitOffset : dynamicChaseOffset
-        const cameraLookAhead = mode === 'cockpit' ? cockpitLookAhead : dynamicChaseLookAhead
+        const cameraOffset = mode === 'cockpit' ? activeCockpitOffset : dynamicChaseOffset
+        const cameraLookAhead = mode === 'cockpit' ? activeCockpitLookAhead : dynamicChaseLookAhead
         desiredCameraPosition.copy(cameraOffset).applyQuaternion(attitudeQuaternion).add(aircraft.position)
         desiredCameraTarget.copy(cameraLookAhead).applyQuaternion(attitudeQuaternion).add(aircraft.position)
 

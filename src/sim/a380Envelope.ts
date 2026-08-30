@@ -1,6 +1,11 @@
 export const A380_ENVELOPE = Object.freeze({
-  standardRunwayWidthFt: 200,
+  standardRunwayWidthFt: 260,
   rotateSpeedKt: 170,
+  rotationRateDegPerSecond: 3,
+  liftoffPitchDeg: 10,
+  initialClimbPitchDeg: 12.5,
+  initialClimbVerticalSpeedFpm: 1_200,
+  departureHeadingReleaseAglFt: 400,
   initialClimbSpeedKt: 210,
   flapRetractionSpeedKt: 210,
   enrouteSpeedKt: 230,
