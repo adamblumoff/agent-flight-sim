@@ -19,6 +19,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three'
+import type { FlightMode } from '../sim/types'
 
 export interface AircraftBreakawayPart {
   readonly name: 'left-wing' | 'right-wing' | 'left-tail' | 'right-tail' | 'fin'
@@ -410,7 +411,7 @@ function verticalTail() {
   return assembly
 }
 
-export function createAircraft(): AircraftRig {
+function createWidebodyAircraft(): AircraftRig {
   const aircraft = new Group()
   aircraft.name = 'N380FS'
 
@@ -463,6 +464,174 @@ export function createAircraft(): AircraftRig {
       { name: 'right-outer-engine', root: engines[3] },
     ],
   }
+}
+
+function concordeWindows() {
+  const zPositions = Array.from({ length: 38 }, (_, index) => -21 + index * 1.08)
+  const windows = new InstancedMesh(new PlaneGeometry(0.28, 0.19), windowMaterial, zPositions.length * 2)
+  const transform = new Object3D()
+  let index = 0
+  for (const side of [-1, 1]) {
+    for (const z of zPositions) {
+      transform.position.set(side * 1.66, 4.72, z)
+      transform.rotation.set(0, side * Math.PI / 2, 0)
+      transform.updateMatrix()
+      windows.setMatrixAt(index, transform.matrix)
+      index += 1
+    }
+  }
+  windows.instanceMatrix.needsUpdate = true
+  return windows
+}
+
+function concordeWing(side: -1 | 1, flaps: Group[]) {
+  const assembly = new Group()
+  assembly.name = side < 0 ? 'Left delta wing' : 'Right delta wing'
+  assembly.position.y = 4.05
+  assembly.add(mesh(slabGeometry([
+    [side * 0.8, -16],
+    [side * 13.7, 10.5],
+    [side * 12.6, 15.7],
+    [side * 1.1, 18.2],
+  ], 0.34), bodyMaterial))
+
+  const elevon = new Group()
+  elevon.name = side < 0 ? 'Left elevon' : 'Right elevon'
+  elevon.position.set(side * 6.8, -0.06, 15.4)
+  elevon.rotation.y = side * -0.12
+  elevon.add(mesh(new BoxGeometry(9.8, 0.2, 1.65), bodyMaterial))
+  flaps.push(elevon)
+
+  const navigationLight = new Mesh(
+    new SphereGeometry(0.18, 10, 7),
+    new MeshStandardMaterial({
+      color: side < 0 ? 0xd93630 : 0x32b66d,
+      emissive: side < 0 ? 0xd93630 : 0x32b66d,
+      emissiveIntensity: 2.4,
+    }),
+  )
+  navigationLight.position.set(side * 13.25, 0.18, 11.3)
+  assembly.add(elevon, navigationLight)
+  return { assembly, elevon }
+}
+
+function concordeFin() {
+  const assembly = new Group()
+  assembly.name = 'Concorde fin'
+  assembly.position.set(0, 4.5, 21)
+  assembly.add(
+    mesh(verticalSlabGeometry([
+      [0, -2],
+      [7.1, 2.1],
+      [7.25, 4.1],
+      [0.65, 10.4],
+    ], 0.38), bodyMaterial),
+    mesh(verticalSlabGeometry([
+      [3.2, 1.4],
+      [6.75, 3.3],
+      [6.7, 4.15],
+      [2.8, 7.6],
+    ], 0.41), liveryMaterial),
+  )
+  return assembly
+}
+
+function concordeEngine(name: AircraftBreakawayPart['name'], x: number, z: number) {
+  const assembly = new Group()
+  assembly.name = name
+  assembly.position.set(x, 2.72, z)
+
+  const nacelle = mesh(new BoxGeometry(1.72, 1.12, 7.3), accentMaterial)
+  const intake = new Mesh(new PlaneGeometry(1.42, 0.82), windowMaterial)
+  intake.position.z = -3.66
+  const exhaust = new Mesh(new PlaneGeometry(1.25, 0.72), fanMaterial)
+  exhaust.position.z = 3.66
+  exhaust.rotation.y = Math.PI
+  const pylon = mesh(new BoxGeometry(1.05, 1.25, 4.8), bodyMaterial)
+  pylon.position.y = 0.82
+  assembly.add(nacelle, intake, exhaust, pylon)
+  return assembly
+}
+
+function createConcordeAircraft(): AircraftRig {
+  const aircraft = new Group()
+  aircraft.name = 'G-BOAC'
+  const flaps: Group[] = []
+  const leftWing = concordeWing(-1, flaps)
+  const rightWing = concordeWing(1, flaps)
+  const finAssembly = concordeFin()
+  const engines = [
+    concordeEngine('left-outer-engine', -7.25, 5.5),
+    concordeEngine('left-inner-engine', -4.95, 4.25),
+    concordeEngine('right-inner-engine', 4.95, 4.25),
+    concordeEngine('right-outer-engine', 7.25, 5.5),
+  ]
+  const landingGearAssemblies = [
+    bogie('Nose gear', 0, -23.5, 1, 3.45, 0.43),
+    bogie('Left main gear', -4.6, 7.2, 2, 3.9, 0.5),
+    bogie('Right main gear', 4.6, 7.2, 2, 3.9, 0.5),
+  ]
+
+  const fuselage = mesh(taperedTubeGeometry([
+    [-35, 0.06],
+    [-33.8, 0.5],
+    [-31.3, 1.18],
+    [-27.5, 1.62],
+    [18.5, 1.7],
+    [25.5, 1.42],
+    [31.5, 0.62],
+    [34.2, 0.06],
+  ], 48), bodyMaterial)
+  fuselage.position.y = 4.15
+
+  const details = new Group()
+  details.name = 'Concorde fuselage details'
+  details.add(concordeWindows())
+  for (const side of [-1, 1] as const) {
+    details.add(sidePanel(50, 0.12, 1.68, 4.05, -1.2, side, liveryMaterial))
+    const cockpitWindow = sidePanel(2.5, 0.65, 1.18, 4.78, -29.6, side, windowMaterial)
+    cockpitWindow.rotation.z = side * -0.08
+    details.add(cockpitWindow)
+  }
+  const visor = mesh(slabGeometry([
+    [-0.95, -31.5],
+    [0.95, -31.5],
+    [0.62, -29.1],
+    [-0.62, -29.1],
+  ], 0.05), windowMaterial)
+  visor.position.y = 5.3
+  details.add(visor)
+
+  aircraft.add(
+    fuselage,
+    details,
+    leftWing.assembly,
+    rightWing.assembly,
+    finAssembly,
+    ...engines,
+    ...landingGearAssemblies,
+  )
+
+  return {
+    root: aircraft,
+    landingGear: landingGearAssemblies,
+    flaps,
+    breakawayParts: [
+      { name: 'left-wing', root: leftWing.assembly },
+      { name: 'right-wing', root: rightWing.assembly },
+      { name: 'left-tail', root: leftWing.elevon },
+      { name: 'right-tail', root: rightWing.elevon },
+      { name: 'fin', root: finAssembly },
+      { name: 'left-outer-engine', root: engines[0] },
+      { name: 'left-inner-engine', root: engines[1] },
+      { name: 'right-inner-engine', root: engines[2] },
+      { name: 'right-outer-engine', root: engines[3] },
+    ],
+  }
+}
+
+export function createAircraft(mode: FlightMode = 'full'): AircraftRig {
+  return mode === 'judge' ? createConcordeAircraft() : createWidebodyAircraft()
 }
 
 function seededRandom(seed: number) {

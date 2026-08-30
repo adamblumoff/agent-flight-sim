@@ -369,7 +369,7 @@ export default function App() {
     function handleKeyDown(event: KeyboardEvent) {
       if (showTakeoffBrief) return
       const target = event.target
-      if (target instanceof HTMLElement && target.matches('input, textarea, select, [contenteditable="true"]')) return
+      if (target instanceof HTMLElement && target.matches('textarea, select, [contenteditable="true"], input:not([type="range"]):not([type="button"]):not([type="submit"])')) return
 
       const current = flightSimulator.getState()
       const key = event.key.toLowerCase()
@@ -448,7 +448,7 @@ export default function App() {
   return (
     <main className="app-shell">
       <Suspense fallback={<div className="flight-world world-loading" />}>
-        <FlightWorld cameraMode={cameraMode} compassRef={compassRef} onStatusChange={setWorldStatus} />
+        <FlightWorld key={state.mode} mode={state.mode} cameraMode={cameraMode} compassRef={compassRef} onStatusChange={setWorldStatus} />
       </Suspense>
       <div className="scene-shade" />
 
@@ -492,7 +492,7 @@ export default function App() {
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
             <strong>Flightdeck</strong>
-            <span>N380FS · Wide-body departure</span>
+            <span>{state.mode === 'judge' ? 'G-BOAC · Concorde evaluation' : 'N380FS · Wide-body departure'}</span>
           </div>
         </div>
 

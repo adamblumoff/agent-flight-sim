@@ -47,7 +47,7 @@ const PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND = 420
 const EMERGENCY_DECISION_SECONDS = 60
 const MISSION_CONFIG = Object.freeze({
   full: Object.freeze({ deadlineSeconds: 10 * 60, wallClockDeadlineSeconds: 10 * 60, simulationRate: 1, emergencyTriggerSeconds: 45, takeoffAccelerationKtPerSecond: TAKEOFF_POWER_ACCEL_KT_PER_SECOND }),
-  judge: Object.freeze({ deadlineSeconds: 9 * 60, wallClockDeadlineSeconds: 3 * 60, simulationRate: 3, emergencyTriggerSeconds: 50, takeoffAccelerationKtPerSecond: 7.8 }),
+  judge: Object.freeze({ deadlineSeconds: 9 * 60, wallClockDeadlineSeconds: 3 * 60, simulationRate: 3, emergencyTriggerSeconds: 50, takeoffAccelerationKtPerSecond: TAKEOFF_POWER_ACCEL_KT_PER_SECOND }),
 } satisfies Record<FlightMode, { readonly deadlineSeconds: number; readonly wallClockDeadlineSeconds: number; readonly simulationRate: number; readonly emergencyTriggerSeconds: number; readonly takeoffAccelerationKtPerSecond: number }>)
 const ROUTE_BANK_DEG = 25
 const MAX_EMERGENCY_TURN_FIXES = 3
@@ -1272,7 +1272,7 @@ class FlightSimulator {
       score = withScoreDeduction(score, 'off-center-landing', elapsedSeconds, 4, 'Touchdown away from runway centerline')
     }
     if (crashJustOccurred) {
-      score = withScoreDeduction(score, 'crash', elapsedSeconds, 40, impact?.severity === 'destructive' ? 'Destructive impact' : 'Unsafe touchdown')
+      score = withScoreDeduction(score, 'crash', elapsedSeconds, score.total, impact?.severity === 'destructive' ? 'Destructive impact' : 'Unsafe touchdown')
     }
     const previousDeductionIds = new Set(this.state.checkride.score.deductions.map((deduction) => deduction.id))
     const newDeductions = score.deductions.filter((deduction) => !previousDeductionIds.has(deduction.id))
