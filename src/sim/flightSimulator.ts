@@ -158,7 +158,7 @@ const withScoreDeduction = (
   const deduction = Object.freeze({ id, elapsedSeconds, points, reason })
   return Object.freeze({
     total: Math.max(0, score.total - points),
-    deductions: Object.freeze([...score.deductions.slice(-11), deduction]),
+    deductions: Object.freeze([...score.deductions, deduction]),
   })
 }
 

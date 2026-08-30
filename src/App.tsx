@@ -1,7 +1,7 @@
 import '@fontsource-variable/sora'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Wind } from 'lucide-react'
+import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Volume2, VolumeX, Wind } from 'lucide-react'
 import {
   CopilotPanel,
   type CopilotDebrief,
@@ -16,6 +16,7 @@ import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
 import { A380_ENVELOPE } from './sim/a380Envelope'
+import { flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
 import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
@@ -223,6 +224,12 @@ function deriveDebrief(state: FlightState): CopilotDebrief | null {
     decision: routePlanLabels[state.debrief.decision],
     summary: landingSummary,
     events: state.debrief.events.slice(-4).map((event) => event.summary),
+    deductions: state.checkride.score.deductions.map((deduction) => ({
+      elapsed: formatElapsed(deduction.elapsedSeconds),
+      label: deductionLabel(deduction.id),
+      points: deduction.points,
+      reason: deduction.reason,
+    })),
   }
 }
 
@@ -264,6 +271,7 @@ export default function App() {
   )
   const { status: webMcpStatus, activities } = useWebMcp()
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
+  const [audioMuted, setAudioMuted] = useState(false)
   const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
@@ -272,7 +280,11 @@ export default function App() {
 
   useEffect(() => {
     flightSimulator.start()
-    return () => flightSimulator.stop()
+    flightAudio.start()
+    return () => {
+      flightAudio.stop()
+      flightSimulator.stop()
+    }
   }, [])
 
   const toggleHandoff = useCallback(() => {
@@ -503,6 +515,20 @@ export default function App() {
             <Icon aria-hidden="true" />
           </button>
         ))}
+        <span className="camera-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className="camera-button"
+          aria-label={audioMuted ? 'Turn flight audio on' : 'Mute flight audio'}
+          aria-pressed={audioMuted}
+          title={audioMuted ? 'Flight audio off' : 'Flight audio on'}
+          onClick={() => setAudioMuted((muted) => {
+            flightAudio.setMuted(!muted)
+            return !muted
+          })}
+        >
+          {audioMuted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+        </button>
       </nav>
 
       <section className="instrument-console" aria-label="Flight instruments and controls">

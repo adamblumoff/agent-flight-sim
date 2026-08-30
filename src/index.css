@@ -462,6 +462,13 @@ summary:focus-visible {
   height: 15px;
 }
 
+.camera-divider {
+  width: 22px;
+  height: 1px;
+  margin: 2px auto;
+  background: rgb(244 239 222 / 14%);
+}
+
 .flight-minimap {
   position: absolute;
   z-index: 8;
@@ -1245,6 +1252,78 @@ summary:focus-visible {
   list-style: none;
 }
 
+.debrief-score {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid rgb(244 239 222 / 11%);
+  border-radius: 10px;
+  background: rgb(244 239 222 / 3%);
+}
+
+.debrief-score-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.debrief-score h3 {
+  margin: 0;
+  color: var(--cream);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.debrief-score-heading span,
+.debrief-score > p {
+  margin: 0;
+  color: rgb(244 239 222 / 48%);
+  font-size: 8px;
+}
+
+.debrief-score ol {
+  display: grid;
+  gap: 9px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.debrief-score li {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.debrief-score time,
+.debrief-score li span {
+  color: rgb(244 239 222 / 45%);
+  font: 520 8px/1.35 "Kode Mono Variable", monospace;
+}
+
+.debrief-score li div {
+  display: grid;
+  gap: 2px;
+}
+
+.debrief-score li strong {
+  color: rgb(244 239 222 / 82%);
+  font-size: 9px;
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.debrief-score li b {
+  color: var(--red);
+  font: 650 10px/1 "Kode Mono Variable", monospace;
+}
+
+.debrief-score > p {
+  margin-top: 12px;
+  color: var(--green);
+}
+
 .plan-section li {
   display: grid;
   grid-template-columns: 20px 1fr;
@@ -1607,6 +1686,12 @@ summary:focus-visible {
     left: auto;
     display: flex;
     transform: none;
+  }
+
+  .camera-divider {
+    width: 1px;
+    height: 22px;
+    margin: auto 2px;
   }
 
   .flight-status-strip {

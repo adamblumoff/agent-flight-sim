@@ -22,6 +22,12 @@ export interface CopilotDebrief {
   readonly decision: string
   readonly summary: string
   readonly events: readonly string[]
+  readonly deductions: readonly {
+    readonly elapsed: string
+    readonly label: string
+    readonly points: number
+    readonly reason: string
+  }[]
 }
 
 export interface CopilotDiagnostics {
@@ -85,6 +91,29 @@ function MissionDebrief({
           <dd>{debrief.score}</dd>
         </div>
       </dl>
+
+      <section className="debrief-score" aria-labelledby="score-breakdown-title">
+        <div className="debrief-score-heading">
+          <h3 id="score-breakdown-title">Score breakdown</h3>
+          <span>Started at 100</span>
+        </div>
+        {debrief.deductions.length > 0 ? (
+          <ol>
+            {debrief.deductions.map((deduction, index) => (
+              <li key={`${index}-${deduction.elapsed}-${deduction.label}`}>
+                <time>{deduction.elapsed}</time>
+                <div>
+                  <strong>{deduction.reason}</strong>
+                  <span>{deduction.label}</span>
+                </div>
+                <b>−{deduction.points}</b>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p>No points deducted on this run.</p>
+        )}
+      </section>
 
       {debrief.events.length > 0 ? (
         <ol className="debrief-events" aria-label="Key flight events">
