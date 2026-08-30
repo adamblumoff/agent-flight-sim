@@ -325,6 +325,15 @@ const delayedJudgeState = flightSimulator.getState()
 assert.equal(delayedJudgeState.mission.outcome, 'landed', `Delayed Judge flight should land: ${JSON.stringify({ elapsedSeconds: delayedJudgeState.elapsedSeconds, route: delayedJudgeState.route.completedWaypointIds, mission: delayedJudgeState.mission })}`)
 assert.ok(delayedJudgeState.elapsedSeconds / delayedJudgeState.checkride.simulationRate < 240, `Delayed Judge flight should finish inside four minutes: ${delayedJudgeState.elapsedSeconds / delayedJudgeState.checkride.simulationRate}`)
 
+flightSimulator.reset(17)
+for (let attempt = 0; attempt < 30; attempt += 1) {
+  flightSimulator.configureAircraft({ gearDown: false, reason: `Deliberate procedure violation ${attempt + 1}` }, 'human')
+}
+const saturatedScore = flightSimulator.getState().checkride.score
+const displayedDeductions = saturatedScore.deductions.reduce((total, deduction) => total + deduction.points, 0)
+assert.equal(saturatedScore.total, 0)
+assert.equal(displayedDeductions, 100, 'Displayed deductions should reconcile exactly with the final score')
+
 console.log(JSON.stringify({
   checkpoint: checkpoint.message,
   emergencyTimerSeconds: emergency.state.checkride.decisionSecondsRemaining,

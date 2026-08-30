@@ -167,9 +167,11 @@ const withScoreDeduction = (
   reason: string,
 ): FlightState['checkride']['score'] => {
   if (score.deductions.some((deduction) => deduction.id === id)) return score
-  const deduction = Object.freeze({ id, elapsedSeconds, points, reason })
+  const appliedPoints = Math.min(score.total, Math.max(0, points))
+  if (appliedPoints === 0) return score
+  const deduction = Object.freeze({ id, elapsedSeconds, points: appliedPoints, reason })
   return Object.freeze({
-    total: Math.max(0, score.total - points),
+    total: score.total - appliedPoints,
     deductions: Object.freeze([...score.deductions, deduction]),
   })
 }
