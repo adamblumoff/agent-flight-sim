@@ -481,7 +481,7 @@ export default function App() {
             </ol>
             <div className="takeoff-briefing-actions">
               <span>Filing arms the departure. Apply power when you are ready to roll.</span>
-              <Button autoFocus onClick={filePreflightRoute}>File route</Button>
+              <Button autoFocus onClick={filePreflightRoute}>Fly route</Button>
             </div>
           </div>
         </section>
