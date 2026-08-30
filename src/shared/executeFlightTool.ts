@@ -25,10 +25,12 @@ const boundedTimeout = (value: unknown) => {
 const executors: { readonly [Name in FlightToolName]: (input: FlightToolArguments[Name]) => Promise<FlightToolResults[Name]> } = {
   start_flight: async (input) => {
     const seed = input.seed ?? 17
+    const mode = input.mode ?? 'full'
     if (!seedSet.has(seed)) throw new TypeError('seed must be 17, 42, or 81')
-    flightSimulator.reset(seed as CheckrideSeed)
+    if (mode !== 'full' && mode !== 'judge') throw new TypeError('mode must be full or judge')
+    flightSimulator.reset(seed as CheckrideSeed, mode)
     flightSimulator.transferControl('agent', 'agent', 'Copilot started the emergency mission')
-    return receipt(`Mission seed ${seed} is ready for a preflight route on North Field runway 18`, 'automation', { seed: seed as CheckrideSeed, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
+    return receipt(`${mode === 'judge' ? 'Judge' : 'Full'} mission seed ${seed} is ready for a preflight route on North Field runway 18`, 'automation', { seed: seed as CheckrideSeed, mode, brief: flightSimulator.getMissionBrief(), state: flightSimulator.getState() })
   },
   get_mission_brief: async () => receipt('Mission brief read', 'neutral', { brief: flightSimulator.getMissionBrief() }),
   get_flight_state: async () => receipt('Live flight state read', 'neutral', {

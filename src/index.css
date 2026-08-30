@@ -173,6 +173,40 @@ summary:focus-visible {
   line-height: 1.65;
 }
 
+.mission-mode-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.mission-mode-picker button {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid rgb(244 239 222 / 12%);
+  border-radius: 9px;
+  background: rgb(244 239 222 / 3%);
+  color: var(--cream);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mission-mode-picker button[aria-pressed="true"] {
+  border-color: rgb(139 196 155 / 48%);
+  background: rgb(139 196 155 / 10%);
+}
+
+.mission-mode-picker strong {
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.mission-mode-picker span {
+  color: rgb(244 239 222 / 50%);
+  font: 500 8px/1.35 "Kode Mono Variable", monospace;
+}
+
 .takeoff-briefing ol {
   display: grid;
   gap: 9px;
@@ -1423,6 +1457,74 @@ summary:focus-visible {
   font-size: 11px;
   font-weight: 570;
   line-height: 1.45;
+}
+
+.agent-trace {
+  margin: 0 16px 16px;
+  padding-top: 13px;
+  border-top: 1px solid rgb(244 239 222 / 10%);
+}
+
+.agent-trace-heading,
+.agent-trace li > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-trace h2,
+.agent-trace-heading span {
+  margin: 0;
+  color: rgb(244 239 222 / 50%);
+  font-size: 8px;
+  font-weight: 680;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.agent-trace ol {
+  display: grid;
+  gap: 9px;
+  margin: 11px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-trace li {
+  padding-left: 9px;
+  border-left: 2px solid rgb(139 196 155 / 45%);
+}
+
+.agent-trace li[data-status="running"] {
+  border-left-color: var(--amber);
+}
+
+.agent-trace li[data-status="failed"] {
+  border-left-color: var(--red);
+}
+
+.agent-trace strong {
+  color: var(--cream);
+  font: 600 9px/1.2 "Kode Mono Variable", monospace;
+}
+
+.agent-trace li > div span,
+.agent-trace small {
+  color: rgb(244 239 222 / 44%);
+  font: 500 7px/1.35 "Kode Mono Variable", monospace;
+}
+
+.agent-trace p,
+.agent-trace small {
+  display: block;
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
+.agent-trace p {
+  color: rgb(244 239 222 / 72%);
+  font-size: 9px;
 }
 
 .approval-request {

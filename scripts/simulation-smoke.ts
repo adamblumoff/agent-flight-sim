@@ -234,7 +234,7 @@ for (const seed of [42, 81] as const) {
   flightSimulator.transferControl('agent', 'agent', `Seed ${seed} route regression`)
   flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
   flightSimulator.beginTakeoff('agent', `Begin seed ${seed} departure`)
-  for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+  for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
     const state = flightSimulator.getState()
     if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
       flightSimulator.getDecisionContext()
@@ -272,6 +272,31 @@ for (const seed of [17, 42, 81] as const) {
   assert.ok(lakesideMission.elapsedSeconds < lakesideMission.checkride.deadlineSeconds, `Seed ${seed} should complete the Lakeside continuation inside ten minutes`)
 }
 
+const judgeResults = []
+for (const seed of [17, 42, 81] as const) {
+  flightSimulator.reset(seed, 'judge')
+  flightSimulator.transferControl('agent', 'agent', `Judge seed ${seed} regression`)
+  flightSimulator.setRoute('continue_klak', 'Normal route filed for the judge episode.', 'agent')
+  flightSimulator.beginTakeoff('agent', 'Begin compressed judge episode')
+  for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+    const state = flightSimulator.getState()
+    if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
+      flightSimulator.getDecisionContext()
+      flightSimulator.setRoute('return_kpwk', 'Use the nearby priority runway in judge mode.', 'agent')
+    }
+    const current = flightSimulator.getState()
+    if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
+    flightSimulator.advanceForTesting(0.1)
+  }
+  const judgeState = flightSimulator.getState()
+  judgeResults.push({ seed, outcome: judgeState.mission.outcome, elapsedSeconds: judgeState.elapsedSeconds, score: judgeState.checkride.score.total, nextFix: judgeState.mission.nextFix, distanceToNextFixNm: judgeState.mission.distanceToNextFixNm, route: judgeState.route.completedWaypointIds, position: { lat: judgeState.lat, lon: judgeState.lon, altitudeFt: judgeState.altitudeFt, headingDeg: judgeState.headingDeg, airspeedKt: judgeState.airspeedKt } })
+  assert.equal(judgeState.checkride.deadlineSeconds, 540)
+  assert.equal(judgeState.checkride.wallClockDeadlineSeconds, 180)
+  assert.equal(judgeState.checkride.simulationRate, 3)
+  assert.equal(judgeState.mission.outcome, 'landed', `Judge seed ${seed} should land: ${JSON.stringify(judgeResults.at(-1))}`)
+  assert.ok(judgeState.elapsedSeconds / judgeState.checkride.simulationRate < 180, `Judge seed ${seed} should finish inside three minutes: ${JSON.stringify(judgeResults.at(-1))}`)
+}
+
 console.log(JSON.stringify({
   checkpoint: checkpoint.message,
   emergencyTimerSeconds: emergency.state.checkride.decisionSecondsRemaining,
@@ -282,4 +307,5 @@ console.log(JSON.stringify({
   missionElapsedSeconds: completedMission.elapsedSeconds,
   missionRemainingSeconds: completedMission.checkride.deadlineSeconds - completedMission.elapsedSeconds,
   landing: completedMission.debrief.landing,
+  judgeResults,
 }, null, 2))

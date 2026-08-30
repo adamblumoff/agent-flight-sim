@@ -1,7 +1,7 @@
 import type {
   ActionReceipt, ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotTargetsInput, CheckrideSeed,
   ControlOwner, EvidenceSource, FlightEventType, FlightEventWaitResult, FlightEvidence,
-  FlightState, EmergencyDecisionContext, MissionBrief, RoutePlan,
+  FlightMode, FlightState, EmergencyDecisionContext, MissionBrief, RoutePlan,
 } from '../sim/types'
 import { A380_ENVELOPE } from '../sim/a380Envelope'
 
@@ -15,7 +15,7 @@ export const routePlans = ['continue_klak', 'return_kpwk'] as const satisfies re
 export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'plan_updated', 'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
 export interface FlightToolArguments {
-  start_flight: { readonly seed?: CheckrideSeed }
+  start_flight: { readonly seed?: CheckrideSeed; readonly mode?: FlightMode }
   get_mission_brief: Record<string, never>
   get_flight_state: Record<string, never>
   get_decision_context: Record<string, never>
@@ -31,7 +31,7 @@ export interface FlightToolArguments {
 }
 
 export interface FlightToolResults {
-  start_flight: FlightToolReceipt<{ readonly seed: CheckrideSeed; readonly brief: MissionBrief; readonly state: FlightState }>
+  start_flight: FlightToolReceipt<{ readonly seed: CheckrideSeed; readonly mode: FlightMode; readonly brief: MissionBrief; readonly state: FlightState }>
   get_mission_brief: FlightToolReceipt<{ readonly brief: MissionBrief }>
   get_flight_state: FlightToolReceipt<{ readonly state: FlightState; readonly units: Readonly<Record<string, string>> }>
   get_decision_context: FlightToolReceipt<{ readonly context: EmergencyDecisionContext }>
@@ -54,8 +54,8 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_flight', title: 'Start flight', readOnly: false,
-    description: 'Start a reproducible mission on North Field runway 18 and take copilot control. The aircraft remains stopped while the copilot files the preflight route.',
-    inputSchema: { type: 'object', properties: { seed: { type: 'number', enum: checkrideSeeds, default: 17 } }, additionalProperties: false },
+    description: 'Start a reproducible mission on North Field runway 18 and take copilot control. Use full for the ten-minute evaluation or judge for the compressed three-minute demo. The aircraft remains stopped while the copilot files the preflight route.',
+    inputSchema: { type: 'object', properties: { seed: { type: 'number', enum: checkrideSeeds, default: 17 }, mode: { type: 'string', enum: ['full', 'judge'], default: 'full' } }, additionalProperties: false },
   },
   {
     name: 'get_mission_brief', title: 'Read mission brief', readOnly: true,

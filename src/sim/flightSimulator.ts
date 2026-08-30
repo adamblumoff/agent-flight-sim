@@ -2,7 +2,7 @@ import type {
   ActionReceipt, ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotState, AutopilotTargetsInput,
   CheckrideSeed, ConfigurationProcedure, ControlOwner, DebriefEvent, EvidenceSource, FlightEvent,
   FlightEventType, FlightEventWaitInput, FlightEventWaitResult, FlightEvidence,
-  FlightState, FlightStateListener, EmergencyDecisionContext, MissionBrief, MissionOutcome, MissionPhase,
+  FlightMode, FlightState, FlightStateListener, EmergencyDecisionContext, MissionBrief, MissionOutcome, MissionPhase,
   PilotControls, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
   TraceEvent,
 } from './types'
@@ -44,9 +44,11 @@ const PILOT_BANK_TRIM_RATE_DEG_PER_SECOND = 10
 const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 7
 const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 14
 const PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND = 420
-const EMERGENCY_TRIGGER_SECONDS = 45
 const EMERGENCY_DECISION_SECONDS = 60
-const MISSION_DEADLINE_SECONDS = 10 * 60
+const MISSION_CONFIG = Object.freeze({
+  full: Object.freeze({ deadlineSeconds: 10 * 60, wallClockDeadlineSeconds: 10 * 60, simulationRate: 1, emergencyTriggerSeconds: 45, takeoffAccelerationKtPerSecond: TAKEOFF_POWER_ACCEL_KT_PER_SECOND }),
+  judge: Object.freeze({ deadlineSeconds: 9 * 60, wallClockDeadlineSeconds: 3 * 60, simulationRate: 3, emergencyTriggerSeconds: 50, takeoffAccelerationKtPerSecond: 7.8 }),
+} satisfies Record<FlightMode, { readonly deadlineSeconds: number; readonly wallClockDeadlineSeconds: number; readonly simulationRate: number; readonly emergencyTriggerSeconds: number; readonly takeoffAccelerationKtPerSecond: number }>)
 const ROUTE_BANK_DEG = 25
 const MAX_EMERGENCY_TURN_FIXES = 3
 const DEPARTURE_GUIDANCE_RELEASE_AGL_FT = A380_ENVELOPE.departureHeadingReleaseAglFt
@@ -254,7 +256,7 @@ export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   name: 'Rough running over Wheeling',
   objective: 'Depart North Field, assess the emergency, and land at Chicago Executive within ten minutes.',
   start: 'Lined up on North Field runway 18 with the aircraft configured for takeoff.',
-  deadlineSeconds: MISSION_DEADLINE_SECONDS,
+  deadlineSeconds: MISSION_CONFIG.full.deadlineSeconds,
   airports: Object.freeze([NORTH_FIELD_AIRPORT, LAKESIDE_AIRPORT, KPWK_AIRPORT]),
   runways: Object.freeze([NORTH_FIELD_RUNWAY_18, LAKESIDE_RUNWAY_22, LAKESIDE_RUNWAY_04, KPWK_RUNWAY_16]),
   availablePlans: Object.freeze(['return_kpwk', 'continue_klak'] as const),
@@ -360,11 +362,12 @@ const waypoint = (
 const emergencyTurnIntercepts = (
   origin: { lat: number; lon: number; headingDeg?: number },
   target: { lat: number; lon: number },
+  maximumFixes = MAX_EMERGENCY_TURN_FIXES,
 ) => {
   const directBearingDeg = navigationBearingDeg(origin, target)
   const startingHeadingDeg = origin.headingDeg ?? directBearingDeg
   const totalTurnDeg = headingError(directBearingDeg, startingHeadingDeg)
-  const turnCount = Math.min(MAX_EMERGENCY_TURN_FIXES, Math.ceil(Math.abs(totalTurnDeg) / 35))
+  const turnCount = Math.min(maximumFixes, Math.ceil(Math.abs(totalTurnDeg) / 35))
   const radiusNm = coordinatedTurnRadiusNm(A380_ENVELOPE.emergencyTurnSpeedKt, ROUTE_BANK_DEG)
   const intercepts: RouteWaypoint[] = []
   let position = origin
@@ -379,7 +382,7 @@ const emergencyTurnIntercepts = (
   return Object.freeze(intercepts)
 }
 
-const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDeg?: number }, emergencyContinuation = false): RouteState => {
+const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDeg?: number }, emergencyContinuation = false, mode: FlightMode = 'full'): RouteState => {
   if (plan === 'continue_klak') {
     if (emergencyContinuation) {
       const entry = offsetPosition(LAKESIDE_RUNWAY_04_THRESHOLD, normalizeHeading(LAKESIDE_RUNWAY_04.headingDeg + 180), 2.2)
@@ -410,11 +413,12 @@ const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDe
       normalizeHeading(KPWK_RUNWAY_16.headingDeg - 90),
       2.4,
     )
-    const turnFixes = emergencyTurnIntercepts(origin, baseLeg)
+    const turnFixes = emergencyTurnIntercepts(origin, baseLeg, mode === 'judge' ? 1 : MAX_EMERGENCY_TURN_FIXES)
+      .map((fix) => mode === 'judge' ? waypoint(fix.id, fix.name, fix.kind, fix, fix.altitudeFt, fix.airspeedKt, 0.6) : fix)
     return Object.freeze({ plan, destination: 'KPWK', runway: '16', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
       ...turnFixes,
-      waypoint('KPWK_BASE', 'Runway 16 base', 'base', baseLeg, 1_800, A380_ENVELOPE.baseSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('KPWK_FINAL', 'Runway 16 final', 'final', finalPosition, 1_600, A380_ENVELOPE.finalSpeedKt, 0.3),
+      waypoint('KPWK_BASE', 'Runway 16 base', 'base', baseLeg, 1_800, A380_ENVELOPE.baseSpeedKt, mode === 'judge' ? 1.1 : ROUTE_CAPTURE_FLOOR_NM),
+      waypoint('KPWK_FINAL', 'Runway 16 final', 'final', finalPosition, 1_600, A380_ENVELOPE.finalSpeedKt, mode === 'judge' ? 0.5 : 0.3),
       waypoint('KPWK_TOUCHDOWN', 'Runway 16 touchdown', 'touchdown', offsetPosition(KPWK_THRESHOLD, KPWK_RUNWAY_16.headingDeg, 0.14), KPWK_ELEVATION, A380_ENVELOPE.approachSpeedKt, 0.012),
     ]) })
   }
@@ -466,13 +470,13 @@ const configurationProcedureFor = (state: Pick<FlightState, 'aircraftPhase' | 'a
   return Object.freeze({ stage, gearDown, flapsDeg, compliant: state.gearDown === gearDown && state.flapsDeg === flapsDeg, instruction })
 }
 
-const initialState = (seed: CheckrideSeed): FlightState => {
+const initialState = (seed: CheckrideSeed, mode: FlightMode = 'full'): FlightState => {
   const start = NORTH_FIELD_START
   const scenario = NORMAL_DEPARTURE_SCENARIO
   const autopilot = initialAutopilot()
   const fuel = seed === 81 ? 14.5 : 13.5
   const state = {
-    ...start, altitudeFt: NORTH_FIELD_RUNWAY_18.elevationFt, airspeedKt: 0, verticalSpeedFpm: 0, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg,
+    mode, ...start, altitudeFt: NORTH_FIELD_RUNWAY_18.elevationFt, airspeedKt: 0, verticalSpeedFpm: 0, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg,
     pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: A380_ENVELOPE.takeoffFlapsDeg, gearDown: true,
     elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
     agentMode: 'idle', autopilot, route: initialRoute(), scenario,
@@ -481,7 +485,7 @@ const initialState = (seed: CheckrideSeed): FlightState => {
     aircraftPhase: 'takeoff_roll',
     approval: Object.freeze({ status: 'none', question: null, requestedAction: null }),
     mission: Object.freeze({ phase: 'preflight', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, bearingToNextFixDeg: null, closingRateKt: null, captureRadiusNm: null, minimumTurnRadiusNm: coordinatedTurnRadiusNm(A380_ENVELOPE.initialClimbSpeedKt, ROUTE_BANK_DEG), routeStatus: 'idle', distanceToThresholdNm: distanceNm(start, LAKESIDE_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, eventRevision: 0 }),
-    checkride: Object.freeze({ seed, status: 'armed', objective: NORMAL_DEPARTURE_MISSION.objective, deadlineSeconds: MISSION_DEADLINE_SECONDS, decisionSecondsRemaining: null, fuelMinutesRemaining: fuel, alert: null, humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: initialScore(), decision: null }),
+    checkride: Object.freeze({ seed, status: 'armed', objective: NORMAL_DEPARTURE_MISSION.objective, deadlineSeconds: MISSION_CONFIG[mode].deadlineSeconds, wallClockDeadlineSeconds: MISSION_CONFIG[mode].wallClockDeadlineSeconds, simulationRate: MISSION_CONFIG[mode].simulationRate, decisionSecondsRemaining: null, fuelMinutesRemaining: fuel, alert: null, humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: initialScore(), decision: null }),
     passengerSafety: Object.freeze({ loadFactorG: 1, jerkGPerSecond: 0, distress: 0, injuryProbability: 0, status: 'comfortable', summary: 'Cabin motion is smooth.' }),
     debrief: Object.freeze({ status: 'in_progress', elapsedSeconds: 0, decision: 'unassigned', decisionReason: null, events: Object.freeze([]), landing: null }),
   } satisfies Omit<FlightState, 'procedure'>
@@ -539,13 +543,16 @@ class FlightSimulator {
   getInterpolationAlpha = (renderTimeMs: number) => {
     const pendingSeconds = this.lastFrameMs === null
       ? 0
-      : clamp((renderTimeMs - this.lastFrameMs) / 1_000, 0, MAX_FRAME)
+      : clamp((renderTimeMs - this.lastFrameMs) / 1_000, 0, MAX_FRAME) * MISSION_CONFIG[this.state.mode].simulationRate
     return clamp((this.accumulator + pendingSeconds) / STEP, 0, 1)
   }
   getSnapshot = () => this.snapshot
   getTrace = () => this.trace
   getEventRevision = () => this.eventRevision
-  getMissionBrief = () => this.emergencyTriggered ? SHARED_AUTONOMY_MISSION : NORMAL_DEPARTURE_MISSION
+  getMissionBrief = () => {
+    const brief = this.emergencyTriggered ? SHARED_AUTONOMY_MISSION : NORMAL_DEPARTURE_MISSION
+    return Object.freeze({ ...brief, deadlineSeconds: MISSION_CONFIG[this.state.mode].wallClockDeadlineSeconds })
+  }
   subscribe = (listener: FlightStateListener) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
 
   start = () => {
@@ -560,9 +567,9 @@ class FlightSimulator {
     this.lastFrameMs = null
   }
 
-  reset = (seed: CheckrideSeed = this.state.checkride.seed) => {
+  reset = (seed: CheckrideSeed = this.state.checkride.seed, mode: FlightMode = this.state.mode) => {
     this.cancelWaiters()
-    this.state = initialState(seed)
+    this.state = initialState(seed, mode)
     this.snapshot = this.state
     this.events = Object.freeze([])
     this.trace = Object.freeze([])
@@ -590,7 +597,7 @@ class FlightSimulator {
     this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
     this.smoothedPilotControls = { pitchAxis: 0, bankAxis: 0 }
     this.manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
-    this.record('system', 'mission_started', `Normal departure seed ${seed} started`, {})
+    this.record('system', 'mission_started', `${mode === 'judge' ? 'Judge' : 'Full'} mission seed ${seed} started`, { mode })
     this.previousState = this.state
     this.publish(this.state)
   }
@@ -616,8 +623,8 @@ class FlightSimulator {
     }
     const evidence = Object.freeze((['weather', 'cockpit', 'traffic', 'passenger'] as const).map((source) => this.inspectEvidence(source)))
     const kpwkDistanceNm = distanceNm(this.state, KPWK_THRESHOLD)
-    const returnRoute = routeFor('return_kpwk', this.state)
-    const continueRoute = routeFor('continue_klak', this.state, this.emergencyTriggered)
+    const returnRoute = routeFor('return_kpwk', this.state, false, this.state.mode)
+    const continueRoute = routeFor('continue_klak', this.state, this.emergencyTriggered, this.state.mode)
     const klakDistanceNm = distanceNm(this.state, continueRoute.runway === '04' ? LAKESIDE_RUNWAY_04_THRESHOLD : LAKESIDE_THRESHOLD)
     const returnRisk = this.state.scenario.weather.visibilityMiles < 2 || this.state.scenario.traffic.delayMinutes >= 3 ? 'moderate' as const : 'low' as const
     const continueRisk = this.state.scenario.engine.health === 'normal' && this.state.scenario.passenger.condition === 'stable' ? 'moderate' as const : 'high' as const
@@ -768,7 +775,7 @@ class FlightSimulator {
     if (filingPreflight && plan !== 'continue_klak') return this.receipt(false, 'The preflight route is continue_klak to Lakeside Municipal runway 22.')
     if (!filingPreflight && !this.emergencyTriggered) return this.receipt(false, 'The Lakeside route is active. Wait for a new scenario before changing it.')
     if (this.emergencyTriggered && actor === 'agent' && !this.decisionContextRead) return this.receipt(false, 'Read get_decision_context before choosing the emergency route.')
-    const route = Object.freeze({ ...routeFor(plan, this.state, this.emergencyTriggered && plan === 'continue_klak'), reason })
+    const route = Object.freeze({ ...routeFor(plan, this.state, this.emergencyTriggered && plan === 'continue_klak', this.state.mode), reason })
     const activeTarget = route.waypoints[route.activeWaypointIndex]
     const autopilot = activeTarget ? Object.freeze({ enabled: actor === 'agent', headingDeg: navigationBearingDeg(this.state, activeTarget), altitudeFt: activeTarget.altitudeFt, airspeedKt: activeTarget.airspeedKt, verticalMode: activeTarget.altitudeFt < this.state.altitudeFt ? 'descend' as const : 'climb' as const, lateralMode: 'route' as const }) : this.state.autopilot
     this.routeProgress = { waypointId: '', bestDistanceNm: Number.POSITIVE_INFINITY, bestHeadingErrorDeg: Number.POSITIVE_INFINITY, secondsWithoutProgress: 0, eventSent: false }
@@ -896,7 +903,7 @@ class FlightSimulator {
 
   private readonly tick = (timeMs: number) => {
     if (this.lastFrameMs === null) this.lastFrameMs = timeMs
-    this.accumulator += Math.min((timeMs - this.lastFrameMs) / 1_000, MAX_FRAME)
+    this.accumulator += Math.min((timeMs - this.lastFrameMs) / 1_000, MAX_FRAME) * MISSION_CONFIG[this.state.mode].simulationRate
     this.lastFrameMs = timeMs
     while (this.accumulator >= STEP) {
       this.previousState = this.state
@@ -1049,7 +1056,7 @@ class FlightSimulator {
     const acceleration = this.fuelExhausted
       ? -airborneDrag + gravityAlongFlightPath
       : this.state.aircraftPhase === 'takeoff_roll'
-      ? power * TAKEOFF_POWER_ACCEL_KT_PER_SECOND
+      ? power * MISSION_CONFIG[this.state.mode].takeoffAccelerationKtPerSecond
         - (airspeed > 0.05 || power > 0 ? TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND : 0)
         - TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND * (airspeed / ROTATE_SPEED_KT) ** 2
       : power * 8.5 - airborneDrag + gravityAlongFlightPath
@@ -1232,7 +1239,7 @@ class FlightSimulator {
       score = withScoreDeduction(score, 'decision-timeout', elapsedSeconds, 15, 'Emergency route decision exceeded 60 seconds')
     }
     if (elapsedSeconds >= this.state.checkride.deadlineSeconds && outcome === 'in_progress') {
-      score = withScoreDeduction(score, 'mission-overtime', elapsedSeconds, 12, 'Mission exceeded the ten-minute operating window')
+      score = withScoreDeduction(score, 'mission-overtime', elapsedSeconds, 12, `Mission exceeded the ${this.state.mode === 'judge' ? 'three-minute judge' : 'ten-minute'} operating window`)
     }
     // Ignore the brief acceleration transient at rotation; handling penalties
     // start once the wide-body is established above the departure surface.
@@ -1277,7 +1284,7 @@ class FlightSimulator {
       agentMode: status === 'in_progress' ? this.state.agentMode : 'complete',
     })
     for (const deduction of newDeductions) this.addDebrief('system', `−${deduction.points} points: ${deduction.reason}`)
-    if (!this.emergencyTriggered && aircraftPhase === 'airborne' && elapsedSeconds >= EMERGENCY_TRIGGER_SECONDS) {
+    if (!this.emergencyTriggered && aircraftPhase === 'airborne' && elapsedSeconds >= MISSION_CONFIG[this.state.mode].emergencyTriggerSeconds) {
       this.emergencyTriggered = true
       this.decisionContextRead = false
       const humanControlled = this.state.controlOwner === 'human'

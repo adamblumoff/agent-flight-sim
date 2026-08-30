@@ -1,8 +1,62 @@
 # Flightdeck
 
-Flightdeck is a browser-native shared-cockpit experiment. A human pilot and a browser agent operate the same lightweight emergency-flight simulation through WebMCP, with one explicit control owner at a time.
+Flightdeck is a browser-native evaluation environment where a human and a browser agent share control of a live emergency-flight simulator through WebMCP. The core question is simple: can an agent observe a changing world, make a defensible plan, operate safely over time, and recover when that plan stops working?
 
-The aircraft model and autopilot run locally at 60 Hz. Three.js renders a compact procedural airport directly from the live simulator state, while React receives lower-frequency snapshots for instruments and the copilot interface. No map service, Cesium token, webhook, or backend is required.
+**Live app:** [agent-flight-sim-production.up.railway.app](https://agent-flight-sim-production.up.railway.app/)
+
+The aircraft and autopilot run locally in a deterministic 60 Hz fixed-step loop. Three.js renders a procedural airport from the same state exposed to WebMCP. React receives lower-frequency snapshots for instruments and the copilot UI. No map service, Cesium token, webhook, or backend is required.
+
+## Why it is an RL environment
+
+Every WebMCP call forms a transition:
+
+```text
+observation → tool action → simulator transition → reward delta → next observation
+```
+
+After a terminal state, the app exports both a clean WebMCP call list and a separate `flightdeck-trajectory-v1` JSON file containing observations, actions, results, per-step score changes, latency, terminal flags, final score, and outcome. Seeds 17, 42, and 81 vary weather, engine health, traffic, and passenger urgency while preserving reproducibility.
+
+Judge Mode is a three-minute real-time evaluation. It uses the same aircraft dynamics, scoring, tools, and landing envelope as the full mission, but runs the fixed-step simulation at 3× and uses one turn checkpoint plus base and final. Full Mission remains a ten-minute 1× run.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Agent[Browser agent] -->|WebMCP tools| Adapter[Typed tool adapter]
+  Human[Human pilot] -->|Keyboard and cockpit UI| Simulator[60 Hz flight simulator]
+  Adapter --> Simulator
+  Simulator -->|immutable snapshots| Adapter
+  Simulator -->|10 Hz UI snapshots| React[React cockpit]
+  Simulator -->|interpolated transforms| Three[Three.js world]
+  Adapter --> Trace[Live call trace]
+  Trace --> Export[WebMCP log + RL trajectory]
+```
+
+The WebMCP adapter is optional. Browsers without `document.modelContext` retain the complete manual cockpit; only agent control is unavailable.
+
+## WebMCP tools
+
+| Tool | Purpose |
+| --- | --- |
+| `start_flight` | Start seed 17, 42, or 81 in `full` or `judge` mode and take copilot control. |
+| `get_mission_brief` | Read airports, runways, route choices, deadline, and landing criteria. |
+| `get_flight_state` | Read aircraft, navigation, weather, wind, passengers, configuration, score, and route progress. |
+| `get_decision_context` | Read all emergency evidence, comfort limits, fuel, decision time, and ranked route options. |
+| `inspect_flight_evidence` | Read one or all weather, cockpit, traffic, and passenger reports. |
+| `set_route` | File the preflight route or select the emergency route with a reason. |
+| `begin_takeoff` | Begin the takeoff roll after route filing. |
+| `set_autopilot_targets` | Set persistent heading, altitude, speed, and vertical/lateral modes. |
+| `rebuild_active_leg` | Recover a stalled route with a direct intercept, wider pattern, or safe skip. |
+| `configure_aircraft` | Set gear and A380-style flap detents; unsafe phase changes are rejected. |
+| `request_human_approval` | Pause a consequential decision while the aircraft keeps flying. |
+| `wait_for_flight_event` | Wait without polling for checkpoints, emergencies, configuration, landing, or failure. |
+| `transfer_control` | Accept a requested handoff or return control to the pilot. |
+
+The live copilot panel displays tool name, reason, completion state, call latency, summary, and reward change. This makes agent behavior judgeable without opening developer tools.
+
+## Reward and termination
+
+Each episode starts at 100 points. Deductions are event-based and individually listed in the terminal debrief: late emergency decisions, overtime, incorrect configuration, excessive G-load, abrupt control input, hard/off-center landings, and crashes. Passenger distress and deterministic injury probability are separate environment state. Episodes terminate on a safe stop, unsafe touchdown, crash, or fuel exhaustion.
 
 ## Run locally
 
@@ -11,64 +65,26 @@ npm install
 npm run dev
 ```
 
-Open the app in a browser that supports WebMCP. Browsers without `document.modelContext` retain the complete manual cockpit; only agent control is unavailable.
+Open the local URL in a WebMCP-capable browser. Choose Judge Mode for a submission demo or Full Mission for the complete operational episode.
 
-## Fly manually
+Manual controls: `W/S` pitch, `A/D` bank, arrow keys power, `F` flaps, `G` gear, `X` level attitude, and `T` request/cancel/reclaim agent control. Any direct human flight input immediately overrides the agent.
 
-| Input | Action |
-| --- | --- |
-| `W` / `S` | Pitch up or down |
-| `A` / `D` | Bank left or right |
-| `Up` / `Down` | Increase or decrease power |
-| `F` | Cycle flaps |
-| `G` | Toggle landing gear |
-| `T` | Request, cancel, or reclaim agent control |
+## Verification
 
-The on-screen gear, flaps, and power controls do the same work. Any direct pilot input immediately returns control to the human and disconnects the autopilot.
-
-## Fly through WebMCP
-
-The page registers these tools:
-
-```text
-start_flight
-get_mission_brief
-get_flight_state
-get_decision_context
-inspect_flight_evidence
-set_route
-begin_takeoff
-set_autopilot_targets
-rebuild_active_leg
-configure_aircraft
-request_human_approval
-wait_for_flight_event
-transfer_control
+```bash
+npm run lint
+npm run build
+npm run test:sim
+npm run benchmark
 ```
 
-A normal agent flight is procedural and event-driven:
+`test:sim` covers wind, drag, stall behavior, takeoff, timer semantics, checkpoints, route recovery, passenger comfort, all three full-mission seeds, both emergency destinations, and all three Judge Mode seeds. See [BENCHMARK.md](./BENCHMARK.md) for the baseline and the 3-model × 3-seed protocol.
 
-1. Call `start_flight` with seed 17, 42, or 81.
-2. Before takeoff, call `set_route` with `continue_klak` and explain the preflight plan to Lakeside Municipal runway 22. Filing the route leaves the aircraft stopped.
-3. Call `begin_takeoff` when the route is filed and the aircraft is ready to roll.
-4. Respond to `configuration_required` and `checkpoint_reached` events while flying the normal route.
-5. Wait for `emergency_detected`, then call `get_decision_context` once. It returns all evidence, fuel, passenger limits, and ranked KPWK/KLAK options. The 60-second agent decision clock starts when the event or context is delivered.
-6. Choose `return_kpwk` or `continue_klak` and explain the tradeoff. The flight director holds a safe heading and altitude while the agent decides.
-7. Follow each live checkpoint and configuration transition through base, final, and landing. If `route_progress_stalled` arrives, call `rebuild_active_leg` instead of allowing another orbit.
+## Submission evidence
 
-The intent-level tools make route and configuration decisions; the deterministic flight director supplies the continuous control loop. It holds runway heading through 400 feet AGL, limits commanded bank and roll rate, tracks fly-through gates, and uses an outbound intercept when the airplane reaches final pointed the wrong way. Explicit heading commands remain active until the agent resumes route mode. Event waits return after at most 15 seconds and can be resumed from the returned monotonic revision.
+- Public deployment: Railway URL above.
+- Source license: [MIT](./LICENSE).
+- Reproducible environment: three fixed seeds and terminal JSON exports.
+- Challenge-period history: the repository commit log records the WebMCP tool contract, event waits, route recovery, safety scoring, audio, exports, Judge Mode, and submission documentation as separate commits.
 
-The minimap draws only the current aircraft-to-checkpoint leg and advances it when the aircraft crosses that fix's fly-through gate. The original destination is about 12.5 nautical miles away, so the emergency replaces a real preflight route rather than revealing a route that was hidden from the start.
-
-The three seeds vary weather, engine health, traffic, and passenger urgency. Engine power and visibility affect the running simulation and world. Sustained G-load and abrupt changes accumulate passenger distress and deterministic injury risk, which are exposed in the live state and through `passenger_safety_update` events.
-
-Run `npm run test:sim` for the deterministic route, timer, checkpoint, passenger-motion, and full-landing smoke test.
-
-## Architecture
-
-- React 19, TypeScript, Vite, Tailwind CSS, and Base UI
-- Three.js procedural airport and aircraft rendering
-- Renderer-independent TypeScript flight model and deterministic autopilot
-- Native WebMCP imperative API backed by the same simulator used by the manual UI
-
-This is an interactive product prototype, not a certified aviation-training device.
+Flightdeck is an interactive research prototype, not a certified aviation-training device.

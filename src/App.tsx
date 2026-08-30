@@ -18,8 +18,9 @@ import { FlightCompass } from './components/flight-compass'
 import { A380_ENVELOPE } from './sim/a380Envelope'
 import { flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
-import type { FlightState, RoutePlan } from './sim/types'
+import type { FlightMode, FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
+import { createFlightTrajectory } from './webmcp/trajectory'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
@@ -129,7 +130,9 @@ function deriveRecommendation(state: FlightState): string {
 function derivePlan(state: FlightState): readonly string[] {
   if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
     return [
-      'File and fly the Lakeside Municipal runway 22 route, about ten minutes away.',
+      state.mode === 'judge'
+        ? 'File the Lakeside Municipal route; Judge Mode compresses the evaluation to three real-time minutes.'
+        : 'File and fly the Lakeside Municipal runway 22 route, about ten minutes away.',
       'Take off from North Field runway 18, clean up the aircraft, and monitor for changes.',
     ]
   }
@@ -224,13 +227,13 @@ function deriveDebrief(state: FlightState): CopilotDebrief | null {
   return {
     title: state.debrief.status === 'landed' ? 'Safely on the ground' : 'The flight did not finish safely',
     outcome: state.debrief.status === 'landed' ? 'Landed' : 'Failed',
-    elapsed: formatElapsed(state.debrief.elapsedSeconds),
+    elapsed: formatElapsed(state.debrief.elapsedSeconds / state.checkride.simulationRate),
     score: `${state.checkride.score.total}/100`,
     decision: routePlanLabels[state.debrief.decision],
     summary: landingSummary,
     events: state.debrief.events.slice(-4).map((event) => event.summary),
     deductions: state.checkride.score.deductions.map((deduction) => ({
-      elapsed: formatElapsed(deduction.elapsedSeconds),
+      elapsed: formatElapsed(deduction.elapsedSeconds / state.checkride.simulationRate),
       label: deductionLabel(deduction.id),
       points: deduction.points,
       reason: deduction.reason,
@@ -279,12 +282,16 @@ export default function App() {
   const [audioVolume, setAudioVolume] = useState(50)
   const lastAudibleVolumeRef = useRef(50)
   const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
+  const [selectedMode, setSelectedMode] = useState<FlightMode>(() => new URLSearchParams(window.location.search).get('mode') === 'judge' ? 'judge' : 'full')
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
     message: 'Loading the flight world.',
   })
 
+  // The simulator loop is persistent; mode changes reset its episode without
+  // tearing down audio or the 60 Hz clock.
   useEffect(() => {
+    if (selectedMode !== flightSimulator.getState().mode) flightSimulator.reset(undefined, selectedMode)
     flightSimulator.start()
     flightAudio.start()
     return () => {
@@ -313,9 +320,15 @@ export default function App() {
   }, [])
 
   const resetScenario = useCallback(() => {
-    flightSimulator.reset()
+    flightSimulator.reset(undefined, selectedMode)
     clearWebMcpActivities()
     setShowTakeoffBrief(true)
+  }, [clearWebMcpActivities, selectedMode])
+
+  const selectMissionMode = useCallback((mode: FlightMode) => {
+    setSelectedMode(mode)
+    flightSimulator.reset(undefined, mode)
+    clearWebMcpActivities()
   }, [clearWebMcpActivities])
 
   const changeAudioVolume = useCallback((volume: number) => {
@@ -423,7 +436,7 @@ export default function App() {
       : state.route.runway
         ? `Runway ${state.route.runway}`
         : routePlanLabels[state.route.plan]
-  const missionSecondsRemaining = state.checkride.deadlineSeconds - state.elapsedSeconds
+  const missionSecondsRemaining = (state.checkride.deadlineSeconds - state.elapsedSeconds) / state.checkride.simulationRate
   const missionOvertime = missionSecondsRemaining < 0
   const lastDeduction = state.checkride.score.deductions.at(-1)
   const windDirection = state.scenario.weather.windDirectionDeg.toString().padStart(3, '0')
@@ -451,8 +464,16 @@ export default function App() {
             <p>Flight briefing</p>
             <h1 id="takeoff-briefing-title">Fly the North Field departure.</h1>
             <p id="takeoff-briefing-copy">
-              You are lined up on North Field runway 18. First file the normal route to Lakeside Municipal runway 22, about ten minutes away. Conditions may force the route to change after departure.
+              You are lined up on North Field runway 18. First file the normal route to Lakeside Municipal runway 22. Conditions may force the route to change after departure.
             </p>
+            <div className="mission-mode-picker" role="group" aria-label="Mission length">
+              <button type="button" aria-pressed={selectedMode === 'judge'} onClick={() => selectMissionMode('judge')}>
+                <strong>Judge mode</strong><span>3-minute compressed evaluation</span>
+              </button>
+              <button type="button" aria-pressed={selectedMode === 'full'} onClick={() => selectMissionMode('full')}>
+                <strong>Full mission</strong><span>10-minute operational run</span>
+              </button>
+            </div>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
               <li><kbd>W</kbd><span>At {A380_ENVELOPE.rotateSpeedKt} knots, rotate at about {A380_ENVELOPE.rotationRateDegPerSecond}°/s through liftoff near {A380_ENVELOPE.liftoffPitchDeg}°, then target {A380_ENVELOPE.initialClimbPitchDeg}° while accelerating toward {A380_ENVELOPE.initialClimbSpeedKt} knots.</span></li>
@@ -625,10 +646,12 @@ export default function App() {
         approvalPending={state.approval.status === 'pending'}
         approvalPrompt={state.approval.question ?? 'Approve the copilot’s requested action?'}
         debrief={deriveDebrief(state)}
-        webMcpCalls={activities.map((activity) => ({
+        webMcpCalls={activities.filter((activity) => activity.status !== 'running').map((activity) => ({
           tool: activity.tool,
           arguments: activity.arguments,
         }))}
+        webMcpActivities={activities}
+        trajectory={state.debrief.status === 'in_progress' ? null : createFlightTrajectory(activities, state)}
         diagnostics={{
           world: worldStatus.message,
           webMcp: webMcpLabels[webMcpStatus],
