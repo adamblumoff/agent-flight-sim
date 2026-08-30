@@ -428,12 +428,16 @@ const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDe
   const envelope = flightEnvelopeFor(mode)
   if (plan === 'continue_klak') {
     if (emergencyContinuation) {
-      const entry = offsetPosition(LAKESIDE_RUNWAY_04_THRESHOLD, normalizeHeading(LAKESIDE_RUNWAY_04.headingDeg + 180), 2.2)
+      const entryDistanceNm = mode === 'judge' ? 4 : 2.2
+      const entry = offsetPosition(LAKESIDE_RUNWAY_04_THRESHOLD, normalizeHeading(LAKESIDE_RUNWAY_04.headingDeg + 180), entryDistanceNm)
+      const entryAltitudeFt = mode === 'judge'
+        ? LAKESIDE_RUNWAY_04.elevationFt + Math.tan(radians(3)) * entryDistanceNm * FEET_PER_NM
+        : 1_250
       const distanceToEntryNm = distanceNm(origin, entry)
       const recovery = offsetPosition(origin, navigationBearingDeg(origin, entry), Math.max(0.8, distanceToEntryNm - 1.5))
       return Object.freeze({ plan, destination: 'KLAK', runway: '04', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
         waypoint('LAKESIDE_RECOVERY', 'Lakeside runway 04 recovery', 'enroute', recovery, 1_800, envelope.enrouteSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-        waypoint('LAKESIDE_ENTRY', 'Lakeside runway 04 final', 'final', entry, 1_250, envelope.finalSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
+        waypoint('LAKESIDE_ENTRY', 'Lakeside runway 04 final', 'final', entry, entryAltitudeFt, envelope.finalSpeedKt, mode === 'judge' ? 0.8 : ROUTE_CAPTURE_FLOOR_NM),
         waypoint('LAKESIDE_TOUCHDOWN', 'Lakeside runway 04', 'touchdown', offsetPosition(LAKESIDE_RUNWAY_04_THRESHOLD, LAKESIDE_RUNWAY_04.headingDeg, 0.12), LAKESIDE_RUNWAY_04.elevationFt, envelope.approachSpeedKt, 0.06),
       ]) })
     }

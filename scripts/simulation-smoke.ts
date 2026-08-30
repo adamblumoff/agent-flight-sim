@@ -309,6 +309,28 @@ for (const seed of [17, 42, 81] as const) {
   assert.ok(judgeState.elapsedSeconds / judgeState.checkride.simulationRate < 240, `Judge seed ${seed} should finish inside four minutes: ${JSON.stringify(judgeResults.at(-1))}`)
 }
 
+for (const seed of [17, 42, 81] as const) {
+  flightSimulator.reset(seed, 'judge')
+  flightSimulator.transferControl('agent', 'agent', `Judge seed ${seed} Lakeside diversion regression`)
+  flightSimulator.setRoute('continue_klak', 'File the normal route before the Judge diversion test.', 'agent')
+  flightSimulator.beginTakeoff('agent', 'Begin the Judge Lakeside diversion test.')
+  for (let elapsed = 0; elapsed < 720 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+    const state = flightSimulator.getState()
+    if (state.checkride.status === 'decision_required') {
+      flightSimulator.getDecisionContext()
+      flightSimulator.setRoute('continue_klak', 'Continue to Lakeside runway 04 after reviewing the combined context.', 'agent')
+    }
+    const current = flightSimulator.getState()
+    if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
+    flightSimulator.advanceForTesting(0.1)
+  }
+  const lakesideJudgeState = flightSimulator.getState()
+  assert.equal(lakesideJudgeState.mission.outcome, 'landed', `Judge seed ${seed} should complete the advertised Lakeside diversion: ${JSON.stringify({ landing: lakesideJudgeState.debrief.landing, impact: lakesideJudgeState.impact, route: lakesideJudgeState.route.completedWaypointIds })}`)
+  assert.equal(lakesideJudgeState.debrief.landing?.runway, 'KLAK 04')
+  assert.equal(lakesideJudgeState.debrief.landing?.safe, true)
+  assert.ok(lakesideJudgeState.elapsedSeconds / lakesideJudgeState.checkride.simulationRate < 240)
+}
+
 flightSimulator.reset(17, 'judge')
 flightSimulator.transferControl('agent', 'agent', 'Delayed judge decision regression')
 flightSimulator.setRoute('continue_klak', 'Normal route filed before the delayed decision test.', 'agent')
