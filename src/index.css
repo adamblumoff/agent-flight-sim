@@ -567,39 +567,33 @@ summary:focus-visible {
   backdrop-filter: blur(16px) saturate(110%);
 }
 
-.minimap-drag-handle {
+.minimap-collapse-toggle {
   position: absolute;
   z-index: 2;
   top: 12px;
-  right: 12px;
+  left: 12px;
   display: grid;
-  width: 32px;
-  height: 25px;
+  width: 30px;
+  height: 30px;
   place-items: center;
   border: 1px solid rgb(244 239 222 / 12%);
   border-radius: 8px;
   background: rgb(9 13 10 / 72%);
-  color: rgb(244 239 222 / 54%);
-  cursor: grab;
-  touch-action: none;
+  color: rgb(244 239 222 / 72%);
+  cursor: pointer;
   backdrop-filter: blur(8px);
 }
 
-.minimap-drag-handle:hover,
-.minimap-drag-handle:focus-visible {
+.minimap-collapse-toggle:hover,
+.minimap-collapse-toggle:focus-visible {
   border-color: rgb(244 239 222 / 12%);
   background: rgb(244 239 222 / 7%);
   color: var(--cream);
   outline: none;
 }
 
-.minimap-drag-handle:active {
-  cursor: grabbing;
-}
-
-.minimap-drag-handle svg {
-  width: 15px;
-  height: 15px;
+.minimap-collapse-toggle span {
+  font: 500 19px/1 "Atkinson Hyperlegible Next Variable", sans-serif;
 }
 
 .flight-minimap svg {
@@ -611,6 +605,23 @@ summary:focus-visible {
   border-radius: 9px;
   background: #0b100c;
   pointer-events: none;
+}
+
+.flight-minimap.flight-minimap--collapsed {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 12px;
+}
+
+.flight-minimap--collapsed .minimap-collapse-toggle {
+  top: 6px;
+  left: 6px;
+}
+
+.flight-minimap--collapsed .minimap-map,
+.flight-minimap--collapsed .minimap-footer {
+  display: none;
 }
 
 .minimap-surface {

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { executeFlightToolFromUnknown } from '../shared/executeFlightTool'
 import { flightSimulator } from '../sim/flightSimulator'
-import type { FlightState } from '../sim/types'
+import type { FlightMode, FlightState } from '../sim/types'
 import {
-  flightToolDefinitions,
+  flightToolDefinitionsFor,
+  type FlightToolDefinition,
   type FlightToolName,
 } from '../shared/flightTools'
 
@@ -30,8 +31,8 @@ export interface WebMcpActivity {
 type BeginActivity = (activity: Pick<WebMcpActivity, 'tool' | 'title' | 'arguments'>) => number
 type CompleteActivity = (id: number, result: { readonly ok: boolean; readonly summary: string }, failed?: boolean) => void
 
-function createFlightTools(beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
-  return flightToolDefinitions.map((definition) => ({
+function createFlightTools(definitions: readonly FlightToolDefinition[], beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
+  return definitions.map((definition) => ({
     name: definition.name,
     title: definition.title,
     description: definition.description,
@@ -51,7 +52,7 @@ function createFlightTools(beginActivity: BeginActivity, completeActivity: Compl
   }))
 }
 
-export function useWebMcp() {
+export function useWebMcp(mode: FlightMode) {
   const [status, setStatus] = useState<WebMcpStatus>('registering')
   const [activities, setActivities] = useState<readonly WebMcpActivity[]>([])
   const nextActivityId = useRef(1)
@@ -104,7 +105,7 @@ export function useWebMcp() {
     async function registerTools() {
       try {
         await Promise.all(
-          createFlightTools(beginActivity, completeActivity).map((tool) =>
+          createFlightTools(flightToolDefinitionsFor(mode), beginActivity, completeActivity).map((tool) =>
             modelContext.registerTool(tool, { signal: controller.signal }),
           ),
         )
@@ -120,7 +121,7 @@ export function useWebMcp() {
 
     void registerTools()
     return () => controller.abort()
-  }, [])
+  }, [mode])
 
   return { status, activities, clearActivities }
 }

@@ -2,8 +2,8 @@ import type {
   ActionReceipt, ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotTargetsInput, CheckrideSeed,
   ControlOwner, EvidenceSource, FlightEventType, FlightEventWaitResult, FlightEvidence,
   FlightMode, FlightState, EmergencyDecisionContext, MissionBrief, RoutePlan,
-} from '../sim/types'
-import { A380_ENVELOPE, CONCORDE_ENVELOPE } from '../sim/aircraftEnvelope'
+} from '../sim/types.ts'
+import { A380_ENVELOPE, CONCORDE_ENVELOPE } from '../sim/aircraftEnvelope.ts'
 
 type JsonSchema = Readonly<Record<string, unknown>>
 export type ToolReceiptTone = 'neutral' | 'success' | 'warning' | 'critical' | 'automation'
@@ -96,8 +96,8 @@ export const flightToolDefinitions = [
   },
   {
     name: 'configure_aircraft', title: 'Configure aircraft', readOnly: false,
-    description: 'Set landing gear and high-lift configuration. Full mode uses simplified A380 flap detents: 10° is CONF 1+F, 20° is CONF 3, and 30° is FULL. Concorde Judge mode has no conventional flaps and requires 0° throughout. Read state.procedure first; out-of-sequence settings are rejected.',
-    inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0, 10, 20, 30] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
+    description: 'Set the landing gear and, where supported, flap configuration. Copy state.procedure exactly. In Concorde Judge mode, keep the clean delta wing at 0° throughout and never refer to conventional flap detents. Full mode supplies its required flap setting in state.procedure. Out-of-sequence settings are rejected.',
+    inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0, 10, 20, 30] }, reason: { type: 'string', description: 'Explain only the configuration being commanded. In Judge mode, describe the clean delta wing and never mention nonzero flap settings.' } }, minProperties: 1, additionalProperties: false },
   },
   {
     name: 'request_human_approval', title: 'Ask pilot', readOnly: false,
@@ -115,6 +115,22 @@ export const flightToolDefinitions = [
     inputSchema: { type: 'object', properties: { owner: { type: 'string', enum: ['human', 'agent'] }, reason: { type: 'string' } }, required: ['owner'], additionalProperties: false },
   },
 ] as const satisfies readonly FlightToolDefinition[]
+
+export function flightToolDefinitionsFor(mode: FlightMode): readonly FlightToolDefinition[] {
+  return flightToolDefinitions.map((definition) => {
+    if (definition.name !== 'configure_aircraft') return definition
+    return mode === 'judge'
+      ? {
+          ...definition,
+          description: 'Configure the Concorde landing gear and clean delta wing. Copy state.procedure exactly. Concorde has no conventional flaps, so flapsDeg must remain 0 and the reason must not refer to flap detents. Out-of-sequence settings are rejected.',
+          inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0] }, reason: { type: 'string', description: 'Explain the gear command and clean-delta configuration. Do not mention conventional flaps or flap detents.' } }, minProperties: 1, additionalProperties: false },
+        }
+      : {
+          ...definition,
+          description: 'Configure the A380-style landing gear and flap detents. Copy state.procedure exactly. The simplified detents are 10° for CONF 1+F, 20° for CONF 3, and 30° for FULL. Out-of-sequence settings are rejected.',
+        }
+  })
+}
 
 export const flightToolDefinitionsByName = Object.fromEntries(flightToolDefinitions.map((definition) => [definition.name, definition])) as unknown as { readonly [Name in FlightToolName]: FlightToolDefinition<Name> }
 export function isFlightToolName(value: string): value is FlightToolName { return Object.hasOwn(flightToolDefinitionsByName, value) }

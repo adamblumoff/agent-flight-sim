@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { flightToolDefinitionsFor } from '../src/shared/flightTools.ts'
 import { flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg } from '../src/sim/flightSimulator.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from '../src/sim/aerodynamics.ts'
 import { CONCORDE_ENVELOPE } from '../src/sim/aircraftEnvelope.ts'
@@ -274,6 +275,13 @@ for (const seed of [17, 42, 81] as const) {
 }
 
 const judgeResults = []
+const judgeConfigurationTool = flightToolDefinitionsFor('judge').find(({ name }) => name === 'configure_aircraft')
+const fullConfigurationTool = flightToolDefinitionsFor('full').find(({ name }) => name === 'configure_aircraft')
+assert.ok(judgeConfigurationTool)
+assert.ok(fullConfigurationTool)
+assert.deepEqual((judgeConfigurationTool.inputSchema.properties as { flapsDeg: { enum: readonly number[] } }).flapsDeg.enum, [0])
+assert.ok(!judgeConfigurationTool.description.includes('10°'))
+assert.deepEqual((fullConfigurationTool.inputSchema.properties as { flapsDeg: { enum: readonly number[] } }).flapsDeg.enum, [0, 10, 20, 30])
 for (const seed of [17, 42, 81] as const) {
   flightSimulator.reset(seed, 'judge')
   flightSimulator.transferControl('agent', 'agent', `Judge seed ${seed} regression`)

@@ -280,7 +280,7 @@ export default function App() {
     flightSimulator.getSnapshot,
     flightSimulator.getSnapshot,
   )
-  const { status: webMcpStatus, activities, clearActivities: clearWebMcpActivities } = useWebMcp()
+  const { status: webMcpStatus, activities, clearActivities: clearWebMcpActivities } = useWebMcp(state.mode)
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
   const [audioVolume, setAudioVolume] = useState(50)
   const lastAudibleVolumeRef = useRef(50)

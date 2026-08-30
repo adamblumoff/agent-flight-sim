@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { GripHorizontal } from 'lucide-react'
+import { useState } from 'react'
 import { KPWK_RUNWAY_16, LAKESIDE_RUNWAY_04, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
 import { checkpointCaptureRadiusNm } from '../sim/checkpoints'
 import type { FlightState, MissionRunway } from '../sim/types'
@@ -7,35 +6,16 @@ import type { FlightState, MissionRunway } from '../sim/types'
 const WIDTH = 240
 const HEIGHT = 164
 const PADDING = 18
-const PANEL_WIDTH = 520
 
 interface MapPoint { readonly lat: number; readonly lon: number }
-interface PanelPosition { readonly x: number; readonly y: number }
-interface DragOrigin { readonly pointerX: number; readonly pointerY: number; readonly panelX: number; readonly panelY: number }
 
 const runwayPoints = (runway: MissionRunway): readonly MapPoint[] => [
   { lat: runway.thresholdLat, lon: runway.thresholdLon },
   { lat: runway.farEndLat, lon: runway.farEndLon },
 ]
 
-const initialPanelPosition = (): PanelPosition => typeof window !== 'undefined' && window.innerWidth <= 760
-  ? { x: 12, y: 158 }
-  : { x: 20, y: 76 }
-
-const clampPanelPosition = (panel: HTMLElement | null, x: number, y: number): PanelPosition => {
-  const bounds = panel?.getBoundingClientRect()
-  const width = bounds?.width ?? Math.min(PANEL_WIDTH, window.innerWidth - 16)
-  const height = bounds?.height ?? 230
-  return {
-    x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - width - 8)),
-    y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - height - 8)),
-  }
-}
-
 export function FlightMinimap({ state }: { readonly state: FlightState }) {
-  const panelRef = useRef<HTMLElement>(null)
-  const dragOriginRef = useRef<DragOrigin | null>(null)
-  const [panelPosition, setPanelPosition] = useState<PanelPosition>(initialPanelPosition)
+  const [collapsed, setCollapsed] = useState(false)
   const routePoints = state.route.waypoints
   const destinationRunway = state.route.destination === 'KLAK'
     ? state.route.runway === '04' ? LAKESIDE_RUNWAY_04 : LAKESIDE_RUNWAY_22
@@ -76,63 +56,22 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
     ? 'No active leg'
     : `Leg ${Math.min(state.route.activeWaypointIndex + 1, routePoints.length)} / ${routePoints.length}`
 
-  useEffect(() => {
-    const clampCurrentPosition = () => setPanelPosition((current) => clampPanelPosition(panelRef.current, current.x, current.y))
-    const move = (event: PointerEvent) => {
-      const origin = dragOriginRef.current
-      if (!origin) return
-      setPanelPosition(clampPanelPosition(panelRef.current, origin.panelX + event.clientX - origin.pointerX, origin.panelY + event.clientY - origin.pointerY))
-    }
-    const end = () => { dragOriginRef.current = null }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', end)
-    window.addEventListener('pointercancel', end)
-    window.addEventListener('resize', clampCurrentPosition)
-    return () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', end)
-      window.removeEventListener('pointercancel', end)
-      window.removeEventListener('resize', clampCurrentPosition)
-    }
-  }, [])
-
-  const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    dragOriginRef.current = { pointerX: event.clientX, pointerY: event.clientY, panelX: panelPosition.x, panelY: panelPosition.y }
-  }
-
-  const endDrag = () => { dragOriginRef.current = null }
-
-  const moveWithKeyboard = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-    const movement: Readonly<Record<string, readonly [number, number]>> = {
-      ArrowLeft: [-12, 0], ArrowRight: [12, 0], ArrowUp: [0, -12], ArrowDown: [0, 12],
-    }
-    const delta = movement[event.key]
-    if (!delta) return
-    event.preventDefault()
-    setPanelPosition((current) => clampPanelPosition(panelRef.current, current.x + delta[0], current.y + delta[1]))
-  }
-
   return (
     <aside
-      ref={panelRef}
-      className="flight-minimap"
-      style={{ left: panelPosition.x, top: panelPosition.y }}
-      aria-label={`Movable route map. ${status}. ${routeProgress}.`}
+      className={`flight-minimap${collapsed ? ' flight-minimap--collapsed' : ''}`}
+      aria-label={`Route map. ${status}. ${routeProgress}.`}
     >
       <button
         type="button"
-        className="minimap-drag-handle"
-        aria-label="Move route map. Use arrow keys or drag."
-        title="Drag to move map"
-        onPointerDown={beginDrag}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onKeyDown={moveWithKeyboard}
+        className="minimap-collapse-toggle"
+        aria-label={collapsed ? 'Expand route map' : 'Collapse route map'}
+        title={collapsed ? 'Expand route map' : 'Collapse route map'}
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((current) => !current)}
       >
-        <GripHorizontal aria-hidden="true" />
+        <span aria-hidden="true">{collapsed ? '+' : '−'}</span>
       </button>
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={activeWaypoint ? `Aircraft tracking ${activeWaypoint.name}` : 'No active route'}>
+      <svg className="minimap-map" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={activeWaypoint ? `Aircraft tracking ${activeWaypoint.name}` : 'No active route'}>
         <defs>
           <linearGradient id="minimap-surface" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="#172019" />
