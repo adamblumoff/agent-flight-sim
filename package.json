@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "benchmark": "node --experimental-strip-types scripts/benchmark.ts",
     "test:sim": "node --experimental-strip-types scripts/simulation-smoke.ts",
     "preview": "vite preview"
   },

@@ -1,7 +1,7 @@
 import '@fontsource-variable/sora'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Wind } from 'lucide-react'
+import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Volume2, VolumeX, Wind } from 'lucide-react'
 import {
   CopilotPanel,
   type CopilotDebrief,
@@ -16,9 +16,11 @@ import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
 import { A380_ENVELOPE } from './sim/a380Envelope'
+import { flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
-import type { FlightState, RoutePlan } from './sim/types'
+import type { FlightMode, FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
+import { createFlightTrajectory } from './webmcp/trajectory'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
@@ -48,6 +50,11 @@ const formatElapsed = (seconds: number) => {
   const remainingSeconds = Math.floor(seconds % 60)
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
+
+const formatAngleMagnitude = (degrees: number) => (Math.abs(degrees) < 0.05 ? 0 : Math.abs(degrees)).toFixed(1)
+
+const pitchDirection = (degrees: number) => degrees > 0.05 ? '° UP' : degrees < -0.05 ? '° DN' : '° LVL'
+const bankDirection = (degrees: number) => degrees > 0.05 ? '° R' : degrees < -0.05 ? '° L' : '° LVL'
 
 const deductionLabel = (id: string) => {
   if (id === 'mission-overtime') return 'overtime'
@@ -123,7 +130,9 @@ function deriveRecommendation(state: FlightState): string {
 function derivePlan(state: FlightState): readonly string[] {
   if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
     return [
-      'File and fly the Lakeside Municipal runway 22 route, about ten minutes away.',
+      state.mode === 'judge'
+        ? 'File the Lakeside Municipal route; Judge Mode compresses the evaluation to four real-time minutes.'
+        : 'File and fly the Lakeside Municipal runway 22 route, about ten minutes away.',
       'Take off from North Field runway 18, clean up the aircraft, and monitor for changes.',
     ]
   }
@@ -168,7 +177,7 @@ function derivePlan(state: FlightState): readonly string[] {
 
 function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
-  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return `Accelerating on runway 18. Rotate near ${A380_ENVELOPE.rotateSpeedKt} knots.`
+  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return `Accelerating on runway 18. At ${A380_ENVELOPE.rotateSpeedKt} knots, rotate toward ${A380_ENVELOPE.initialClimbPitchDeg}°.`
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
@@ -218,11 +227,17 @@ function deriveDebrief(state: FlightState): CopilotDebrief | null {
   return {
     title: state.debrief.status === 'landed' ? 'Safely on the ground' : 'The flight did not finish safely',
     outcome: state.debrief.status === 'landed' ? 'Landed' : 'Failed',
-    elapsed: formatElapsed(state.debrief.elapsedSeconds),
+    elapsed: formatElapsed(state.debrief.elapsedSeconds / state.checkride.simulationRate),
     score: `${state.checkride.score.total}/100`,
     decision: routePlanLabels[state.debrief.decision],
     summary: landingSummary,
     events: state.debrief.events.slice(-4).map((event) => event.summary),
+    deductions: state.checkride.score.deductions.map((deduction) => ({
+      elapsed: formatElapsed(deduction.elapsedSeconds / state.checkride.simulationRate),
+      label: deductionLabel(deduction.id),
+      points: deduction.points,
+      reason: deduction.reason,
+    })),
   }
 }
 
@@ -262,17 +277,27 @@ export default function App() {
     flightSimulator.getSnapshot,
     flightSimulator.getSnapshot,
   )
-  const { status: webMcpStatus, activities } = useWebMcp()
+  const { status: webMcpStatus, activities, clearActivities: clearWebMcpActivities } = useWebMcp()
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
+  const [audioVolume, setAudioVolume] = useState(50)
+  const lastAudibleVolumeRef = useRef(50)
   const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
+  const [selectedMode, setSelectedMode] = useState<FlightMode>(() => new URLSearchParams(window.location.search).get('mode') === 'judge' ? 'judge' : 'full')
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
     message: 'Loading the flight world.',
   })
 
+  // The simulator loop is persistent; mode changes reset its episode without
+  // tearing down audio or the 60 Hz clock.
   useEffect(() => {
+    if (selectedMode !== flightSimulator.getState().mode) flightSimulator.reset(undefined, selectedMode)
     flightSimulator.start()
-    return () => flightSimulator.stop()
+    flightAudio.start()
+    return () => {
+      flightAudio.stop()
+      flightSimulator.stop()
+    }
   }, [])
 
   const toggleHandoff = useCallback(() => {
@@ -295,9 +320,27 @@ export default function App() {
   }, [])
 
   const resetScenario = useCallback(() => {
-    flightSimulator.reset()
+    flightSimulator.reset(undefined, selectedMode)
+    clearWebMcpActivities()
     setShowTakeoffBrief(true)
+  }, [clearWebMcpActivities, selectedMode])
+
+  const selectMissionMode = useCallback((mode: FlightMode) => {
+    setSelectedMode(mode)
+    flightSimulator.reset(undefined, mode)
+    clearWebMcpActivities()
+  }, [clearWebMcpActivities])
+
+  const changeAudioVolume = useCallback((volume: number) => {
+    const nextVolume = Math.max(0, Math.min(100, Math.round(volume)))
+    if (nextVolume > 0) lastAudibleVolumeRef.current = nextVolume
+    setAudioVolume(nextVolume)
+    flightAudio.setVolume(nextVolume / 100)
   }, [])
+
+  const toggleAudio = useCallback(() => {
+    changeAudioVolume(audioVolume === 0 ? lastAudibleVolumeRef.current : 0)
+  }, [audioVolume, changeAudioVolume])
 
   const filePreflightRoute = useCallback(() => {
     flightSimulator.setRoute('continue_klak', 'Pilot filed the normal route to Lakeside Municipal runway 22 before departure.', 'human')
@@ -326,7 +369,7 @@ export default function App() {
     function handleKeyDown(event: KeyboardEvent) {
       if (showTakeoffBrief) return
       const target = event.target
-      if (target instanceof HTMLElement && target.matches('input:not([type="range"]), textarea, select, [contenteditable="true"]')) return
+      if (target instanceof HTMLElement && target.matches('textarea, select, [contenteditable="true"], input:not([type="range"]):not([type="button"]):not([type="submit"])')) return
 
       const current = flightSimulator.getState()
       const key = event.key.toLowerCase()
@@ -393,7 +436,8 @@ export default function App() {
       : state.route.runway
         ? `Runway ${state.route.runway}`
         : routePlanLabels[state.route.plan]
-  const missionSecondsRemaining = state.checkride.deadlineSeconds - state.elapsedSeconds
+  const missionElapsedSeconds = state.elapsedSeconds / state.checkride.simulationRate
+  const missionSecondsRemaining = state.checkride.wallClockDeadlineSeconds - missionElapsedSeconds
   const missionOvertime = missionSecondsRemaining < 0
   const lastDeduction = state.checkride.score.deductions.at(-1)
   const windDirection = state.scenario.weather.windDirectionDeg.toString().padStart(3, '0')
@@ -405,7 +449,7 @@ export default function App() {
   return (
     <main className="app-shell">
       <Suspense fallback={<div className="flight-world world-loading" />}>
-        <FlightWorld cameraMode={cameraMode} compassRef={compassRef} onStatusChange={setWorldStatus} />
+        <FlightWorld key={state.mode} mode={state.mode} cameraMode={cameraMode} compassRef={compassRef} onStatusChange={setWorldStatus} />
       </Suspense>
       <div className="scene-shade" />
 
@@ -421,16 +465,24 @@ export default function App() {
             <p>Flight briefing</p>
             <h1 id="takeoff-briefing-title">Fly the North Field departure.</h1>
             <p id="takeoff-briefing-copy">
-              You are lined up on North Field runway 18. First file the normal route to Lakeside Municipal runway 22, about ten minutes away. Conditions may force the route to change after departure.
+              You are lined up on North Field runway 18. First file the normal route to Lakeside Municipal runway 22. Conditions may force the route to change after departure.
             </p>
+            <div className="mission-mode-picker" role="group" aria-label="Mission length">
+              <button type="button" aria-pressed={selectedMode === 'judge'} onClick={() => selectMissionMode('judge')}>
+                <strong>Judge mode</strong><span>4-minute compressed evaluation</span>
+              </button>
+              <button type="button" aria-pressed={selectedMode === 'full'} onClick={() => selectMissionMode('full')}>
+                <strong>Full mission</strong><span>10-minute operational run</span>
+              </button>
+            </div>
             <ol>
               <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
-              <li><kbd>W</kbd><span>Near {A380_ENVELOPE.rotateSpeedKt} knots, rotate smoothly and keep takeoff power set while accelerating toward {A380_ENVELOPE.initialClimbSpeedKt} knots.</span></li>
+              <li><kbd>W</kbd><span>At {A380_ENVELOPE.rotateSpeedKt} knots, rotate at about {A380_ENVELOPE.rotationRateDegPerSecond}°/s through liftoff near {A380_ENVELOPE.liftoffPitchDeg}°, then target {A380_ENVELOPE.initialClimbPitchDeg}° while accelerating toward {A380_ENVELOPE.initialClimbSpeedKt} knots.</span></li>
               <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
               <span>Filing arms the departure. Apply power when you are ready to roll.</span>
-              <Button autoFocus onClick={filePreflightRoute}>File route</Button>
+              <Button autoFocus onClick={filePreflightRoute}>Fly route</Button>
             </div>
           </div>
         </section>
@@ -441,7 +493,7 @@ export default function App() {
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
             <strong>Flightdeck</strong>
-            <span>N380FS · Wide-body departure</span>
+            <span>{state.mode === 'judge' ? 'G-BOAC · Concorde evaluation' : 'N380FS · Wide-body departure'}</span>
           </div>
         </div>
 
@@ -457,10 +509,10 @@ export default function App() {
       </header>
 
       <div className="flight-status-strip">
-        <div className="flight-clock" data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(state.elapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
+        <div className="flight-clock" data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(missionElapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
           <Timer aria-hidden="true" />
           <span>Elapsed</span>
-          <strong>{formatElapsed(state.elapsedSeconds)}</strong>
+          <strong>{formatElapsed(missionElapsedSeconds)}</strong>
           <i aria-hidden="true" />
           <span>{missionOvertime ? 'Overtime' : 'Remaining'}</span>
           <strong>{formatElapsed(Math.abs(missionSecondsRemaining))}</strong>
@@ -503,12 +555,38 @@ export default function App() {
             <Icon aria-hidden="true" />
           </button>
         ))}
+        <span className="camera-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className="camera-button"
+          aria-label={audioVolume === 0 ? 'Turn flight audio on' : 'Mute flight audio'}
+          aria-pressed={audioVolume === 0}
+          title={audioVolume === 0 ? 'Flight audio off' : `Flight audio ${audioVolume}%`}
+          onClick={toggleAudio}
+        >
+          {audioVolume === 0 ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+        </button>
+        <label className="audio-volume">
+          <span className="sr-only">Flight audio volume</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={audioVolume}
+            aria-label={`Flight audio volume ${audioVolume}%`}
+            onChange={(event) => changeAudioVolume(event.currentTarget.valueAsNumber)}
+          />
+          <small aria-hidden="true">{audioVolume}%</small>
+        </label>
       </nav>
 
       <section className="instrument-console" aria-label="Flight instruments and controls">
         <div className="instrument-readings">
           <InstrumentStat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
           <InstrumentStat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
+          <InstrumentStat label="Pitch" value={formatAngleMagnitude(state.pitchDeg)} unit={pitchDirection(state.pitchDeg)} />
+          <InstrumentStat label="Bank" value={formatAngleMagnitude(state.bankDeg)} unit={bankDirection(state.bankDeg)} />
           <InstrumentStat label="Vertical" value={Math.round(state.verticalSpeedFpm).toString()} unit="FPM" />
           <InstrumentStat label="Heading" value={Math.round(state.headingDeg).toString().padStart(3, '0')} unit="MAG" />
         </div>
@@ -569,6 +647,12 @@ export default function App() {
         approvalPending={state.approval.status === 'pending'}
         approvalPrompt={state.approval.question ?? 'Approve the copilot’s requested action?'}
         debrief={deriveDebrief(state)}
+        webMcpCalls={activities.filter((activity) => activity.status !== 'running').map((activity) => ({
+          tool: activity.tool,
+          arguments: activity.arguments,
+        }))}
+        webMcpActivities={activities}
+        trajectory={state.debrief.status === 'in_progress' ? null : createFlightTrajectory(activities, state)}
         diagnostics={{
           world: worldStatus.message,
           webMcp: webMcpLabels[webMcpStatus],

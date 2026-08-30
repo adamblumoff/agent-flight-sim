@@ -3,10 +3,13 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  Download,
   RotateCcw,
   ShieldCheck,
 } from 'lucide-react'
 import { Button } from './ui/button'
+import type { WebMcpActivity } from '../webmcp/useWebMcp'
+import type { FlightTrajectory } from '../webmcp/trajectory'
 
 export interface CopilotObservation {
   readonly label: string
@@ -22,6 +25,12 @@ export interface CopilotDebrief {
   readonly decision: string
   readonly summary: string
   readonly events: readonly string[]
+  readonly deductions: readonly {
+    readonly elapsed: string
+    readonly label: string
+    readonly points: number
+    readonly reason: string
+  }[]
 }
 
 export interface CopilotDiagnostics {
@@ -43,6 +52,12 @@ export interface CopilotPanelProps {
   readonly approvalPrompt: string
   readonly debrief: CopilotDebrief | null
   readonly diagnostics: CopilotDiagnostics
+  readonly webMcpCalls: readonly {
+    readonly tool: string
+    readonly arguments: Readonly<Record<string, unknown>>
+  }[]
+  readonly webMcpActivities: readonly WebMcpActivity[]
+  readonly trajectory: FlightTrajectory | null
   readonly onApprove: () => void
   readonly onDeny: () => void
   readonly onReset: () => void
@@ -50,13 +65,21 @@ export interface CopilotPanelProps {
 
 function MissionDebrief({
   debrief,
+  webMcpCalls,
+  trajectory,
   onReset,
 }: {
   readonly debrief: CopilotDebrief
+  readonly webMcpCalls: CopilotPanelProps['webMcpCalls']
+  readonly trajectory: FlightTrajectory | null
   readonly onReset: () => void
 }) {
   const landed = debrief.outcome === 'Landed'
   const DebriefIcon = landed ? Check : CircleAlert
+  const webMcpExportHref = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(webMcpCalls, null, 2))}`
+  const trajectoryExportHref = trajectory
+    ? `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(trajectory, null, 2))}`
+    : null
 
   return (
     <div className="mission-debrief">
@@ -86,10 +109,63 @@ function MissionDebrief({
         </div>
       </dl>
 
+      <section className="debrief-score" aria-labelledby="score-breakdown-title">
+        <div className="debrief-score-heading">
+          <h3 id="score-breakdown-title">Score breakdown</h3>
+          <span>Started at 100</span>
+        </div>
+        {debrief.deductions.length > 0 ? (
+          <ol>
+            {debrief.deductions.map((deduction, index) => (
+              <li key={`${index}-${deduction.elapsed}-${deduction.label}`}>
+                <time>{deduction.elapsed}</time>
+                <div>
+                  <strong>{deduction.reason}</strong>
+                  <span>{deduction.label}</span>
+                </div>
+                <b>−{deduction.points}</b>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p>No points deducted on this run.</p>
+        )}
+      </section>
+
       {debrief.events.length > 0 ? (
         <ol className="debrief-events" aria-label="Key flight events">
           {debrief.events.map((event, index) => <li key={`${index}-${event}`}>{event}</li>)}
         </ol>
+      ) : null}
+
+      {webMcpCalls.length > 0 ? (
+        <section className="debrief-export" aria-labelledby="webmcp-export-title">
+          <div>
+            <h3 id="webmcp-export-title">WebMCP call log</h3>
+            <p>{webMcpCalls.length} calls from this run · JSON only</p>
+          </div>
+          <Button
+            variant="outline"
+            render={<a href={webMcpExportHref} download="flightdeck-webmcp-calls.json" />}
+          >
+            <Download data-icon="inline-start" /> Export JSON
+          </Button>
+        </section>
+      ) : null}
+
+      {trajectoryExportHref ? (
+        <section className="debrief-export" aria-labelledby="trajectory-export-title">
+          <div>
+            <h3 id="trajectory-export-title">RL trajectory</h3>
+            <p>{trajectory?.steps.length ?? 0} observation-action steps · rewards + terminal state</p>
+          </div>
+          <Button
+            variant="outline"
+            render={<a href={trajectoryExportHref} download="flightdeck-trajectory.json" />}
+          >
+            <Download data-icon="inline-start" /> Export trajectory
+          </Button>
+        </section>
       ) : null}
 
       <Button variant="outline" className="debrief-reset" onClick={onReset}>
@@ -110,6 +186,9 @@ export function CopilotPanel({
   approvalPrompt,
   debrief,
   diagnostics,
+  webMcpCalls,
+  webMcpActivities,
+  trajectory,
   onApprove,
   onDeny,
   onReset,
@@ -126,7 +205,7 @@ export function CopilotPanel({
       </header>
 
       {debrief ? (
-        <MissionDebrief debrief={debrief} onReset={onReset} />
+        <MissionDebrief debrief={debrief} webMcpCalls={webMcpCalls} trajectory={trajectory} onReset={onReset} />
       ) : (
         <div className="copilot-body">
           <section className="panel-section observation-section" aria-labelledby="observations-title">
@@ -162,6 +241,34 @@ export function CopilotPanel({
             <span>Now</span>
             <strong>{action}</strong>
           </section>
+
+          {webMcpActivities.length > 0 ? (
+            <section className="agent-trace" aria-labelledby="agent-trace-title" aria-live="polite">
+              <div className="agent-trace-heading">
+                <h2 id="agent-trace-title">Live WebMCP trace</h2>
+                <span>{webMcpActivities.length} calls</span>
+              </div>
+              <ol>
+                {webMcpActivities.slice(-4).reverse().map((activity) => {
+                  const reason = typeof activity.arguments.reason === 'string'
+                    ? activity.arguments.reason
+                    : typeof activity.arguments.requested_action === 'string'
+                      ? activity.arguments.requested_action
+                      : null
+                  return (
+                    <li key={activity.id} data-status={activity.status}>
+                      <div>
+                        <strong>{activity.tool}</strong>
+                        <span>{activity.status === 'running' ? 'thinking…' : `${activity.latencyMs ?? 0} ms · ${activity.rewardDelta && activity.rewardDelta !== 0 ? `${activity.rewardDelta > 0 ? '+' : ''}${activity.rewardDelta} reward` : 'no score change'}`}</span>
+                      </div>
+                      {reason ? <p>{reason}</p> : null}
+                      <small>{activity.summary}</small>
+                    </li>
+                  )
+                })}
+              </ol>
+            </section>
+          ) : null}
 
           {approvalPending ? (
             <section className="approval-request" role="alert" aria-labelledby="approval-title">

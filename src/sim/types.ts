@@ -1,6 +1,7 @@
 export type ControlOwner = 'human' | 'agent'
 export type TraceActor = ControlOwner | 'system'
 export type CheckrideSeed = 17 | 42 | 81
+export type FlightMode = 'full' | 'judge'
 export type AgentMode = 'idle' | 'requested' | 'thinking' | 'flying' | 'awaiting_approval' | 'complete'
 export type EvidenceSource = 'weather' | 'cockpit' | 'traffic' | 'passenger'
 export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
@@ -77,6 +78,8 @@ export interface CheckrideState {
   readonly status: 'armed' | 'decision_required' | 'awaiting_human' | 'resolved' | 'complete'
   readonly objective: string
   readonly deadlineSeconds: number
+  readonly wallClockDeadlineSeconds: number
+  readonly simulationRate: number
   readonly decisionSecondsRemaining: number | null
   readonly fuelMinutesRemaining: number
   readonly alert: string | null
@@ -87,6 +90,7 @@ export interface CheckrideState {
 }
 
 export interface FlightState {
+  readonly mode: FlightMode
   readonly lat: number; readonly lon: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalSpeedFpm: number; readonly headingDeg: number; readonly pitchDeg: number; readonly bankDeg: number; readonly throttle: number; readonly flapsDeg: number; readonly gearDown: boolean
   readonly elapsedSeconds: number; readonly fuelMinutesRemaining: number
   readonly controlOwner: ControlOwner; readonly handoffRequested: boolean; readonly agentMode: AgentMode
