@@ -1185,7 +1185,7 @@ class FlightSimulator {
         aircraftPhase = 'airborne'
         altitude = takeoffContactAltitude
         verticalSpeed = -1
-      } else if (airspeed < (this.state.mode === 'judge' ? envelope.takeoffSafetySpeedKt : envelope.rotateSpeedKt) || pitch < envelope.liftoffPitchDeg) {
+      } else if (airspeed < envelope.rotateSpeedKt || pitch < envelope.liftoffPitchDeg) {
         altitude = takeoffContactAltitude
         verticalSpeed = 0
       } else if (altitude > NORTH_FIELD_RUNWAY_18.elevationFt + LIFTOFF_CONFIRM_AGL_FT && verticalSpeed > 0) {

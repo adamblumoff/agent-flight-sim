@@ -20,7 +20,7 @@ Judge Mode is a four-minute real-time Concorde evaluation. It keeps the same sco
 
 ### Concorde terminal profile
 
-Judge Mode models a representative high-weight Concorde departure and terminal arrival, not the aircraft's complete supersonic operating envelope. It calls V1 at 150 kt, begins rotation at VR 198 kt, remains runway-bound through V2 220 kt, then targets 250 kt in the initial climb. The clean delta wing has no conventional flap settings. Arrival guidance uses 200 kt on base, 175 kt while establishing final, and approximately 165 kt stabilized on approach with a nose-high body attitude.
+Judge Mode models a representative high-weight Concorde departure and terminal arrival, not the aircraft's complete supersonic operating envelope. It calls V1 at 150 kt, begins rotation at VR 198 kt, targets V2 220 kt by the 35-foot screen height, then accelerates toward 250 kt in the initial climb. The clean delta wing has no conventional flap settings. Arrival guidance uses 200 kt on base, 175 kt while establishing final, and approximately 165 kt stabilized on approach with a nose-high body attitude.
 
 The values are grounded in the [FAA's Concorde accident record](https://www.faa.gov/lessons_learned/transport_airplane/accidents/F-BTSC), the [FAA-hosted BEA report](https://www.faa.gov/sites/faa.gov/files/2022-11/Concorde_Accident_Report.pdf), [NASA's operational Concorde report](https://ntrs.nasa.gov/api/citations/20180000699/downloads/20180000699.pdf), and [British Airways' Concorde specifications](https://www.britishairways.com/content/information/about-ba/history-and-heritage/celebrating-concorde). Actual V-speeds varied with weight and conditions. Mach 2 cruise and operation near 60,000 ft are intentionally outside this short terminal scenario.
 

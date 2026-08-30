@@ -304,7 +304,7 @@ for (const seed of [17, 42, 81] as const) {
   assert.equal(judgeState.checkride.wallClockDeadlineSeconds, 240)
   assert.equal(judgeState.checkride.simulationRate, 3)
   assert.ok((rotationSpeedKt ?? 0) >= CONCORDE_ENVELOPE.rotateSpeedKt - 1 && (rotationSpeedKt ?? Number.POSITIVE_INFINITY) <= CONCORDE_ENVELOPE.rotateSpeedKt + 2, `Judge seed ${seed} should begin rotation at VR: ${rotationSpeedKt}`)
-  assert.ok((airborneSpeedKt ?? 0) >= CONCORDE_ENVELOPE.takeoffSafetySpeedKt, `Judge seed ${seed} should remain runway-bound through V2: ${airborneSpeedKt}`)
+  assert.ok((airborneSpeedKt ?? 0) >= CONCORDE_ENVELOPE.takeoffSafetySpeedKt, `Judge seed ${seed} should reach V2 by the 35-foot phase transition: ${airborneSpeedKt}`)
   assert.equal(judgeState.mission.outcome, 'landed', `Judge seed ${seed} should land: ${JSON.stringify(judgeResults.at(-1))}`)
   assert.ok(judgeState.elapsedSeconds / judgeState.checkride.simulationRate < 240, `Judge seed ${seed} should finish inside four minutes: ${JSON.stringify(judgeResults.at(-1))}`)
 }
