@@ -54,7 +54,7 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_flight', title: 'Start flight', readOnly: false,
-    description: 'Start a reproducible mission on North Field runway 18 and take copilot control. Use full for the ten-minute evaluation or judge for the compressed three-minute demo. The aircraft remains stopped while the copilot files the preflight route.',
+    description: 'Start a reproducible mission on North Field runway 18 and take copilot control. Use full for the ten-minute evaluation or judge for the compressed four-minute demo. The aircraft remains stopped while the copilot files the preflight route.',
     inputSchema: { type: 'object', properties: { seed: { type: 'number', enum: checkrideSeeds, default: 17 }, mode: { type: 'string', enum: ['full', 'judge'], default: 'full' } }, additionalProperties: false },
   },
   {
@@ -106,7 +106,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'wait_for_flight_event', title: 'Wait for flight event', readOnly: true,
-    description: 'Wait without polling for route, comfort, configuration, handoff, touchdown, completion, or failure events. route_progress_stalled means the current leg should be rebuilt instead of orbited.',
+    description: 'Wait without polling for route, comfort, configuration, handoff, touchdown, completion, or failure events. Emergency and failure events preempt routine configuration notices. route_progress_stalled means the current leg should be rebuilt instead of orbited.',
     inputSchema: { type: 'object', properties: { after_revision: { type: 'number', minimum: 0 }, events: { type: 'array', items: { type: 'string', enum: flightEventValues }, minItems: 1 }, timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 15000 } }, additionalProperties: false },
   },
   {

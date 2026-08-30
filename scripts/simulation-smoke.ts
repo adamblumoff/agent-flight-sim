@@ -290,12 +290,40 @@ for (const seed of [17, 42, 81] as const) {
   }
   const judgeState = flightSimulator.getState()
   judgeResults.push({ seed, outcome: judgeState.mission.outcome, elapsedSeconds: judgeState.elapsedSeconds, score: judgeState.checkride.score.total, nextFix: judgeState.mission.nextFix, distanceToNextFixNm: judgeState.mission.distanceToNextFixNm, route: judgeState.route.completedWaypointIds, position: { lat: judgeState.lat, lon: judgeState.lon, altitudeFt: judgeState.altitudeFt, headingDeg: judgeState.headingDeg, airspeedKt: judgeState.airspeedKt } })
-  assert.equal(judgeState.checkride.deadlineSeconds, 540)
-  assert.equal(judgeState.checkride.wallClockDeadlineSeconds, 180)
+  assert.equal(judgeState.checkride.deadlineSeconds, 720)
+  assert.equal(judgeState.checkride.wallClockDeadlineSeconds, 240)
   assert.equal(judgeState.checkride.simulationRate, 3)
   assert.equal(judgeState.mission.outcome, 'landed', `Judge seed ${seed} should land: ${JSON.stringify(judgeResults.at(-1))}`)
-  assert.ok(judgeState.elapsedSeconds / judgeState.checkride.simulationRate < 180, `Judge seed ${seed} should finish inside three minutes: ${JSON.stringify(judgeResults.at(-1))}`)
+  assert.ok(judgeState.elapsedSeconds / judgeState.checkride.simulationRate < 240, `Judge seed ${seed} should finish inside four minutes: ${JSON.stringify(judgeResults.at(-1))}`)
 }
+
+flightSimulator.reset(17, 'judge')
+flightSimulator.transferControl('agent', 'agent', 'Delayed judge decision regression')
+flightSimulator.setRoute('continue_klak', 'Normal route filed before the delayed decision test.', 'agent')
+flightSimulator.beginTakeoff('agent', 'Begin delayed judge decision regression')
+flightSimulator.advanceForTesting(51)
+const prioritizedEmergency = await flightSimulator.waitForFlightEvent({
+  afterRevision: 0,
+  events: ['configuration_required', 'emergency_detected'],
+  timeoutMs: 1_000,
+})
+assert.equal(prioritizedEmergency.event, 'emergency_detected')
+const headingBeforeDecisionHold = flightSimulator.getState().headingDeg
+flightSimulator.advanceForTesting(120)
+const heldState = flightSimulator.getState()
+assert.ok(Math.abs(heldState.bankDeg) >= 10 && Math.abs(heldState.bankDeg) <= 13, `Decision hold should use a shallow bank: ${heldState.bankDeg.toFixed(1)}°`)
+assert.ok(Math.abs(((heldState.headingDeg - headingBeforeDecisionHold + 540) % 360) - 180) > 20, 'Decision hold should turn instead of extending the departure heading')
+assert.ok((heldState.checkride.decisionSecondsRemaining ?? 0) >= 19, `Judge decision timer should use wall time: ${heldState.checkride.decisionSecondsRemaining}`)
+flightSimulator.getDecisionContext()
+flightSimulator.setRoute('return_kpwk', 'Return to the priority runway after deliberate model thinking time.', 'agent')
+for (let elapsed = 0; elapsed < 720 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+  const state = flightSimulator.getState()
+  if (!state.procedure.compliant) flightSimulator.configureAircraft({ gearDown: state.procedure.gearDown, flapsDeg: state.procedure.flapsDeg, reason: state.procedure.instruction }, 'agent')
+  flightSimulator.advanceForTesting(0.1)
+}
+const delayedJudgeState = flightSimulator.getState()
+assert.equal(delayedJudgeState.mission.outcome, 'landed', `Delayed Judge flight should land: ${JSON.stringify({ elapsedSeconds: delayedJudgeState.elapsedSeconds, route: delayedJudgeState.route.completedWaypointIds, mission: delayedJudgeState.mission })}`)
+assert.ok(delayedJudgeState.elapsedSeconds / delayedJudgeState.checkride.simulationRate < 240, `Delayed Judge flight should finish inside four minutes: ${delayedJudgeState.elapsedSeconds / delayedJudgeState.checkride.simulationRate}`)
 
 console.log(JSON.stringify({
   checkpoint: checkpoint.message,
@@ -308,4 +336,5 @@ console.log(JSON.stringify({
   missionRemainingSeconds: completedMission.checkride.deadlineSeconds - completedMission.elapsedSeconds,
   landing: completedMission.debrief.landing,
   judgeResults,
+  delayedJudge: { elapsedSeconds: delayedJudgeState.elapsedSeconds, score: delayedJudgeState.checkride.score.total },
 }, null, 2))

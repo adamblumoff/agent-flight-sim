@@ -131,7 +131,7 @@ function derivePlan(state: FlightState): readonly string[] {
   if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
     return [
       state.mode === 'judge'
-        ? 'File the Lakeside Municipal route; Judge Mode compresses the evaluation to three real-time minutes.'
+        ? 'File the Lakeside Municipal route; Judge Mode compresses the evaluation to four real-time minutes.'
         : 'File and fly the Lakeside Municipal runway 22 route, about ten minutes away.',
       'Take off from North Field runway 18, clean up the aircraft, and monitor for changes.',
     ]
@@ -436,7 +436,8 @@ export default function App() {
       : state.route.runway
         ? `Runway ${state.route.runway}`
         : routePlanLabels[state.route.plan]
-  const missionSecondsRemaining = (state.checkride.deadlineSeconds - state.elapsedSeconds) / state.checkride.simulationRate
+  const missionElapsedSeconds = state.elapsedSeconds / state.checkride.simulationRate
+  const missionSecondsRemaining = state.checkride.wallClockDeadlineSeconds - missionElapsedSeconds
   const missionOvertime = missionSecondsRemaining < 0
   const lastDeduction = state.checkride.score.deductions.at(-1)
   const windDirection = state.scenario.weather.windDirectionDeg.toString().padStart(3, '0')
@@ -468,7 +469,7 @@ export default function App() {
             </p>
             <div className="mission-mode-picker" role="group" aria-label="Mission length">
               <button type="button" aria-pressed={selectedMode === 'judge'} onClick={() => selectMissionMode('judge')}>
-                <strong>Judge mode</strong><span>3-minute compressed evaluation</span>
+                <strong>Judge mode</strong><span>4-minute compressed evaluation</span>
               </button>
               <button type="button" aria-pressed={selectedMode === 'full'} onClick={() => selectMissionMode('full')}>
                 <strong>Full mission</strong><span>10-minute operational run</span>
@@ -508,10 +509,10 @@ export default function App() {
       </header>
 
       <div className="flight-status-strip">
-        <div className="flight-clock" data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(state.elapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
+        <div className="flight-clock" data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(missionElapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
           <Timer aria-hidden="true" />
           <span>Elapsed</span>
-          <strong>{formatElapsed(state.elapsedSeconds)}</strong>
+          <strong>{formatElapsed(missionElapsedSeconds)}</strong>
           <i aria-hidden="true" />
           <span>{missionOvertime ? 'Overtime' : 'Remaining'}</span>
           <strong>{formatElapsed(Math.abs(missionSecondsRemaining))}</strong>
