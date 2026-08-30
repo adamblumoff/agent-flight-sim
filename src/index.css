@@ -462,6 +462,54 @@ summary:focus-visible {
   height: 15px;
 }
 
+.audio-volume {
+  display: flex;
+  height: 76px;
+  align-items: center;
+  flex-direction: column;
+  gap: 4px;
+  color: rgb(244 239 222 / 48%);
+  font: 500 7px/1 "Kode Mono Variable", monospace;
+}
+
+.audio-volume input {
+  appearance: none;
+  width: 16px;
+  height: 58px;
+  margin: 0;
+  accent-color: var(--cream);
+  background: transparent;
+  cursor: pointer;
+  direction: rtl;
+  writing-mode: vertical-lr;
+}
+
+.audio-volume input::-webkit-slider-runnable-track {
+  width: 4px;
+  border-radius: 999px;
+  background: rgb(244 239 222 / 20%);
+}
+
+.audio-volume input::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-left: -4px;
+  appearance: none;
+  border: 1px solid rgb(244 239 222 / 36%);
+  border-radius: 50%;
+  background: var(--cream);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 45%);
+}
+
+.audio-volume input:focus-visible {
+  outline: 1px solid var(--cream);
+  outline-offset: 3px;
+}
+
+.audio-volume:focus-within {
+  color: var(--cream);
+}
+
 .camera-divider {
   width: 22px;
   height: 1px;
@@ -985,7 +1033,7 @@ summary:focus-visible {
   bottom: 20px;
   left: 20px;
   display: flex;
-  width: min(760px, calc(100% - 420px));
+  width: min(860px, calc(100% - 420px));
   min-height: 92px;
   border: 1px solid rgb(244 239 222 / 16%);
   border-radius: 15px;
@@ -997,7 +1045,7 @@ summary:focus-visible {
 .instrument-readings {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: repeat(4, minmax(78px, 1fr));
+  grid-template-columns: repeat(6, minmax(62px, 1fr));
   align-items: center;
   min-width: 0;
   padding: 16px 4px 15px 14px;
@@ -1036,7 +1084,7 @@ summary:focus-visible {
 .instrument-value strong {
   overflow: hidden;
   color: var(--cream);
-  font: 520 clamp(19px, 2.2vw, 28px)/1 "Kode Mono Variable", monospace;
+  font: 520 clamp(18px, 1.8vw, 24px)/1 "Kode Mono Variable", monospace;
   letter-spacing: -0.06em;
   text-overflow: ellipsis;
 }
@@ -1636,11 +1684,11 @@ summary:focus-visible {
   }
 
   .instrument-readings {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     row-gap: 12px;
   }
 
-  .instrument-stat:nth-child(2) {
+  .instrument-stat:nth-child(3) {
     border-right: 0;
   }
 
@@ -1694,6 +1742,24 @@ summary:focus-visible {
     margin: auto 2px;
   }
 
+  .audio-volume {
+    width: 76px;
+    height: 34px;
+    flex-direction: row;
+    gap: 5px;
+  }
+
+  .audio-volume input {
+    width: 58px;
+    height: 16px;
+    direction: ltr;
+    writing-mode: horizontal-tb;
+  }
+
+  .audio-volume small {
+    display: none;
+  }
+
   .flight-status-strip {
     top: 112px;
     max-width: calc(100vw - 24px);
@@ -1741,7 +1807,15 @@ summary:focus-visible {
     padding-inline: 8px;
   }
 
-  .instrument-stat:nth-child(n + 3) {
+  .instrument-stat:nth-child(3) {
+    border-right: 1px solid rgb(244 239 222 / 12%);
+  }
+
+  .instrument-stat:nth-child(even) {
+    border-right: 0;
+  }
+
+  .instrument-stat:nth-child(n + 5) {
     display: none;
   }
 

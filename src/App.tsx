@@ -50,6 +50,11 @@ const formatElapsed = (seconds: number) => {
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
+const formatAngleMagnitude = (degrees: number) => (Math.abs(degrees) < 0.05 ? 0 : Math.abs(degrees)).toFixed(1)
+
+const pitchDirection = (degrees: number) => degrees > 0.05 ? '° UP' : degrees < -0.05 ? '° DN' : '° LVL'
+const bankDirection = (degrees: number) => degrees > 0.05 ? '° R' : degrees < -0.05 ? '° L' : '° LVL'
+
 const deductionLabel = (id: string) => {
   if (id === 'mission-overtime') return 'overtime'
   if (id === 'decision-timeout') return 'late decision'
@@ -271,7 +276,8 @@ export default function App() {
   )
   const { status: webMcpStatus, activities } = useWebMcp()
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
-  const [audioMuted, setAudioMuted] = useState(false)
+  const [audioVolume, setAudioVolume] = useState(50)
+  const lastAudibleVolumeRef = useRef(50)
   const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
@@ -310,6 +316,17 @@ export default function App() {
     flightSimulator.reset()
     setShowTakeoffBrief(true)
   }, [])
+
+  const changeAudioVolume = useCallback((volume: number) => {
+    const nextVolume = Math.max(0, Math.min(100, Math.round(volume)))
+    if (nextVolume > 0) lastAudibleVolumeRef.current = nextVolume
+    setAudioVolume(nextVolume)
+    flightAudio.setVolume(nextVolume / 100)
+  }, [])
+
+  const toggleAudio = useCallback(() => {
+    changeAudioVolume(audioVolume === 0 ? lastAudibleVolumeRef.current : 0)
+  }, [audioVolume, changeAudioVolume])
 
   const filePreflightRoute = useCallback(() => {
     flightSimulator.setRoute('continue_klak', 'Pilot filed the normal route to Lakeside Municipal runway 22 before departure.', 'human')
@@ -519,22 +536,34 @@ export default function App() {
         <button
           type="button"
           className="camera-button"
-          aria-label={audioMuted ? 'Turn flight audio on' : 'Mute flight audio'}
-          aria-pressed={audioMuted}
-          title={audioMuted ? 'Flight audio off' : 'Flight audio on'}
-          onClick={() => setAudioMuted((muted) => {
-            flightAudio.setMuted(!muted)
-            return !muted
-          })}
+          aria-label={audioVolume === 0 ? 'Turn flight audio on' : 'Mute flight audio'}
+          aria-pressed={audioVolume === 0}
+          title={audioVolume === 0 ? 'Flight audio off' : `Flight audio ${audioVolume}%`}
+          onClick={toggleAudio}
         >
-          {audioMuted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+          {audioVolume === 0 ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
         </button>
+        <label className="audio-volume">
+          <span className="sr-only">Flight audio volume</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={audioVolume}
+            aria-label={`Flight audio volume ${audioVolume}%`}
+            onChange={(event) => changeAudioVolume(event.currentTarget.valueAsNumber)}
+          />
+          <small aria-hidden="true">{audioVolume}%</small>
+        </label>
       </nav>
 
       <section className="instrument-console" aria-label="Flight instruments and controls">
         <div className="instrument-readings">
           <InstrumentStat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
           <InstrumentStat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
+          <InstrumentStat label="Pitch" value={formatAngleMagnitude(state.pitchDeg)} unit={pitchDirection(state.pitchDeg)} />
+          <InstrumentStat label="Bank" value={formatAngleMagnitude(state.bankDeg)} unit={bankDirection(state.bankDeg)} />
           <InstrumentStat label="Vertical" value={Math.round(state.verticalSpeedFpm).toString()} unit="FPM" />
           <InstrumentStat label="Heading" value={Math.round(state.headingDeg).toString().padStart(3, '0')} unit="MAG" />
         </div>

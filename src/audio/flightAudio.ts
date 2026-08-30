@@ -2,7 +2,7 @@ import { flightSimulator } from '../sim/flightSimulator'
 import type { FlightState } from '../sim/types'
 
 const clamp = (value: number, minimum = 0, maximum = 1) => Math.min(maximum, Math.max(minimum, value))
-const MASTER_LEVEL = 0.5
+const DEFAULT_VOLUME = 0.5
 
 interface AudioSnapshot {
   readonly elapsedSeconds: number
@@ -24,7 +24,7 @@ class FlightAudioController {
   private runwayGain: GainNode | null = null
   private frame = 0
   private running = false
-  private muted = false
+  private volume = DEFAULT_VOLUME
   private previous: AudioSnapshot | null = null
 
   start() {
@@ -39,7 +39,7 @@ class FlightAudioController {
   stop() {
     if (!this.running) return
     this.running = false
-    this.muted = false
+    this.volume = DEFAULT_VOLUME
     cancelAnimationFrame(this.frame)
     window.removeEventListener('pointerdown', this.unlock, { capture: true })
     window.removeEventListener('keydown', this.unlock, { capture: true })
@@ -54,15 +54,15 @@ class FlightAudioController {
     this.runwayGain = null
   }
 
-  setMuted(muted: boolean) {
-    this.muted = muted
-    if (!muted) void this.ensureAudio()
+  setVolume(volume: number) {
+    this.volume = clamp(volume)
+    if (this.volume > 0) void this.ensureAudio()
     const now = this.context?.currentTime ?? 0
-    this.masterGain?.gain.setTargetAtTime(muted ? 0 : MASTER_LEVEL, now, 0.04)
+    this.masterGain?.gain.setTargetAtTime(this.volume, now, 0.04)
   }
 
   private readonly unlock = () => {
-    if (!this.muted) void this.ensureAudio()
+    if (this.volume > 0) void this.ensureAudio()
   }
 
   private async ensureAudio() {
@@ -73,7 +73,7 @@ class FlightAudioController {
 
     const context = new AudioContext({ latencyHint: 'interactive' })
     const masterGain = context.createGain()
-    masterGain.gain.value = this.muted ? 0 : MASTER_LEVEL
+    masterGain.gain.value = this.volume
     masterGain.connect(context.destination)
 
     const engineGain = context.createGain()
@@ -179,7 +179,7 @@ class FlightAudioController {
     const engineLevel = state.aircraftPhase === 'stopped' ? 0.006 : 0.008 + state.throttle * 0.035 + speed * 0.006
     const engineFrequency = 34 + state.throttle * 58 + speed * 22
     const windLevel = (airborne ? 0.008 : 0.002) + speed ** 1.5 * 0.06 + state.scenario.weather.windSpeedKt / 1_200
-    const rainLevel = state.scenario.weather.summary.toLowerCase().includes('rain') ? 0.02 + speed * 0.028 : 0
+    const rainLevel = state.scenario.weather.summary.toLowerCase().includes('rain') ? 0.009 + speed * 0.013 : 0
     const runwayLevel = rolling ? clamp(state.airspeedKt / 150) * 0.055 : 0
 
     this.engineGain?.gain.setTargetAtTime(engineLevel, now, 0.12)
