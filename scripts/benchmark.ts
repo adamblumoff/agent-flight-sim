@@ -9,7 +9,8 @@ for (const seed of seeds) {
   flightSimulator.transferControl('agent', 'agent', 'Reference benchmark policy')
   flightSimulator.setRoute('continue_klak', 'File the normal preflight route.', 'agent')
   flightSimulator.beginTakeoff('agent', 'Begin the judge episode.')
-  for (let step = 0; step < 5_400 && flightSimulator.getState().mission.outcome === 'in_progress'; step += 1) {
+  const maximumSteps = flightSimulator.getState().checkride.deadlineSeconds * 10
+  for (let step = 0; step < maximumSteps && flightSimulator.getState().mission.outcome === 'in_progress'; step += 1) {
     const state = flightSimulator.getState()
     if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
       flightSimulator.getDecisionContext()

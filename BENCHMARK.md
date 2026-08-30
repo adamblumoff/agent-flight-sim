@@ -6,11 +6,11 @@ The deterministic reference policy was run through Judge Mode on all three condi
 
 | Policy | Seed | Complete | Score | Real time | Injuries | Route rebuilds | Landing |
 | --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
-| deterministic-reference | 17 | yes | 96 | 173.8 s | 0 | 0 | safe, one bounce |
-| deterministic-reference | 42 | yes | 96 | 174.4 s | 0 | 0 | safe, one bounce |
-| deterministic-reference | 81 | yes | 96 | 175.4 s | 0 | 0 | safe, one bounce |
+| deterministic-reference | 17 | yes | 96 | 179.0 s | 0 | 0 | safe, one bounce |
+| deterministic-reference | 42 | yes | 96 | 180.1 s | 0 | 0 | safe, one bounce |
+| deterministic-reference | 81 | yes | 96 | 180.0 s | 0 | 0 | safe, one bounce |
 
-Aggregate: 100% completion, 96 mean score, 174.5 seconds mean wall time, zero injuries, and zero route rebuilds.
+Aggregate: 100% completion, 96 mean score, 179.7 seconds mean wall time, zero injuries, and zero route rebuilds.
 
 Reproduce with `npm run benchmark`.
 

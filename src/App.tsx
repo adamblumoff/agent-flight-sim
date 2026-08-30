@@ -1,4 +1,4 @@
-import '@fontsource-variable/sora'
+import '@fontsource-variable/atkinson-hyperlegible-next'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Volume2, VolumeX, Wind } from 'lucide-react'
@@ -15,7 +15,7 @@ import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
-import { A380_ENVELOPE } from './sim/a380Envelope'
+import { flightEnvelopeFor } from './sim/aircraftEnvelope'
 import { flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
 import type { FlightMode, FlightState, RoutePlan } from './sim/types'
@@ -177,7 +177,10 @@ function derivePlan(state: FlightState): readonly string[] {
 
 function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
-  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') return `Accelerating on runway 18. At ${A380_ENVELOPE.rotateSpeedKt} knots, rotate toward ${A380_ENVELOPE.initialClimbPitchDeg}°.`
+  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') {
+    const envelope = flightEnvelopeFor(state.mode)
+    return `Accelerating on runway 18. At ${envelope.rotateSpeedKt} knots, rotate toward ${envelope.initialClimbPitchDeg}°.`
+  }
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
@@ -287,6 +290,7 @@ export default function App() {
     kind: 'loading',
     message: 'Loading the flight world.',
   })
+  const selectedEnvelope = flightEnvelopeFor(selectedMode)
 
   // The simulator loop is persistent; mode changes reset its episode without
   // tearing down audio or the 60 Hz clock.
@@ -384,7 +388,7 @@ export default function App() {
         if (key === 'arrowdown') flightSimulator.setThrottle(current.throttle - 0.05, 'human', 'Pilot throttle input')
         if (key === 'g') flightSimulator.setGear(!current.gearDown, 'human', 'Pilot gear command')
         if (key === 'x') flightSimulator.levelPilotAttitude('human', 'Pilot pressed the level-flight shortcut')
-        if (key === 'f') {
+        if (key === 'f' && flightEnvelopeFor(current.mode).hasConventionalFlaps) {
           const index = flapSettings.indexOf(current.flapsDeg as (typeof flapSettings)[number])
           flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Pilot flap command')
         }
@@ -476,9 +480,9 @@ export default function App() {
               </button>
             </div>
             <ol>
-              <li><kbd>↑</kbd><span>Hold to set full power, or drag Power to 100%.</span></li>
-              <li><kbd>W</kbd><span>At {A380_ENVELOPE.rotateSpeedKt} knots, rotate at about {A380_ENVELOPE.rotationRateDegPerSecond}°/s through liftoff near {A380_ENVELOPE.liftoffPitchDeg}°, then target {A380_ENVELOPE.initialClimbPitchDeg}° while accelerating toward {A380_ENVELOPE.initialClimbSpeedKt} knots.</span></li>
-              <li><kbd>G</kbd><span>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</span></li>
+              <li><kbd>↑</kbd><span>{selectedMode === 'judge' ? 'Set full power for takeoff; Judge mode models reheat as part of takeoff thrust.' : 'Hold to set full power, or drag Power to 100%.'}</span></li>
+              <li><kbd>W</kbd><span>{selectedMode === 'judge' ? `V1 is ${selectedEnvelope.decisionSpeedKt} knots. Rotate at ${selectedEnvelope.rotateSpeedKt}, cross V2 at ${selectedEnvelope.takeoffSafetySpeedKt}, then accelerate toward ${selectedEnvelope.initialClimbSpeedKt} knots at ${selectedEnvelope.initialClimbPitchDeg}°.` : `At ${selectedEnvelope.rotateSpeedKt} knots, rotate at about ${selectedEnvelope.rotationRateDegPerSecond}°/s through liftoff near ${selectedEnvelope.liftoffPitchDeg}°, then target ${selectedEnvelope.initialClimbPitchDeg}° while accelerating toward ${selectedEnvelope.initialClimbSpeedKt} knots.`}</span></li>
+              <li><kbd>G</kbd><span>{selectedEnvelope.hasConventionalFlaps ? <>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</> : <>Retract the gear after positive rate. Concorde has no conventional flaps; use <kbd>X</kbd> to level.</>}</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
               <span>Filing arms the departure. Apply power when you are ready to roll.</span>
@@ -605,15 +609,15 @@ export default function App() {
           <Button
             variant="outline"
             size="sm"
-            disabled={state.controlOwner === 'agent'}
+            disabled={state.controlOwner === 'agent' || !flightEnvelopeFor(state.mode).hasConventionalFlaps}
             aria-keyshortcuts="F"
             onClick={() => {
               const index = flapSettings.indexOf(state.flapsDeg as (typeof flapSettings)[number])
               flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Cockpit flap control')
             }}
           >
-            <span className="control-label">Flaps <kbd className="control-shortcut">(F)</kbd></span>
-            <span className="control-value">{state.flapsDeg}°</span>
+            <span className="control-label">Flaps {flightEnvelopeFor(state.mode).hasConventionalFlaps ? <kbd className="control-shortcut">(F)</kbd> : null}</span>
+            <span className="control-value">{flightEnvelopeFor(state.mode).hasConventionalFlaps ? `${state.flapsDeg}°` : 'None'}</span>
           </Button>
           <label className="throttle-control">
             <span>Power</span>

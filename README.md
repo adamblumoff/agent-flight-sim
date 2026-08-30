@@ -16,7 +16,13 @@ observation → tool action → simulator transition → reward delta → next o
 
 After a terminal state, the app exports both a clean WebMCP call list and a separate `flightdeck-trajectory-v1` JSON file containing observations, actions, results, per-step score changes, latency, terminal flags, final score, and outcome. Seeds 17, 42, and 81 vary weather, engine health, traffic, and passenger urgency while preserving reproducibility.
 
-Judge Mode is a three-minute real-time evaluation. It uses the same aircraft dynamics, scoring, tools, and landing envelope as the full mission, but runs the fixed-step simulation at 3× and uses one turn checkpoint plus base and final. Full Mission remains a ten-minute 1× run.
+Judge Mode is a four-minute real-time Concorde evaluation. It keeps the same scoring and WebMCP contract as the full mission, but uses a Concorde-specific terminal envelope, runs the fixed-step simulation at 3×, and uses one turn checkpoint plus base and final. Full Mission remains a ten-minute 1× A380-style run.
+
+### Concorde terminal profile
+
+Judge Mode models a representative high-weight Concorde departure and terminal arrival, not the aircraft's complete supersonic operating envelope. It calls V1 at 150 kt, begins rotation at VR 198 kt, targets V2 220 kt by the 35-foot screen height, then accelerates toward 250 kt in the initial climb. The clean delta wing has no conventional flap settings. Arrival guidance uses 200 kt on base, 175 kt while establishing final, and approximately 165 kt stabilized on approach with a nose-high body attitude.
+
+The values are grounded in the [FAA's Concorde accident record](https://www.faa.gov/lessons_learned/transport_airplane/accidents/F-BTSC), the [FAA-hosted BEA report](https://www.faa.gov/sites/faa.gov/files/2022-11/Concorde_Accident_Report.pdf), [NASA's operational Concorde report](https://ntrs.nasa.gov/api/citations/20180000699/downloads/20180000699.pdf), and [British Airways' Concorde specifications](https://www.britishairways.com/content/information/about-ba/history-and-heritage/celebrating-concorde). Actual V-speeds varied with weight and conditions. Mach 2 cruise and operation near 60,000 ft are intentionally outside this short terminal scenario.
 
 ## Architecture
 
@@ -47,7 +53,7 @@ The WebMCP adapter is optional. Browsers without `document.modelContext` retain 
 | `begin_takeoff` | Begin the takeoff roll after route filing. |
 | `set_autopilot_targets` | Set persistent heading, altitude, speed, and vertical/lateral modes. |
 | `rebuild_active_leg` | Recover a stalled route with a direct intercept, wider pattern, or safe skip. |
-| `configure_aircraft` | Set gear and A380-style flap detents; unsafe phase changes are rejected. |
+| `configure_aircraft` | Set gear and high-lift configuration. Full mode uses simplified A380 flap detents; Concorde Judge mode enforces a clean delta wing with no conventional flaps. |
 | `request_human_approval` | Pause a consequential decision while the aircraft keeps flying. |
 | `wait_for_flight_event` | Wait without polling for checkpoints, emergencies, configuration, landing, or failure. |
 | `transfer_control` | Accept a requested handoff or return control to the pilot. |
@@ -67,7 +73,7 @@ npm run dev
 
 Open the local URL in a WebMCP-capable browser. Choose Judge Mode for a submission demo or Full Mission for the complete operational episode.
 
-Manual controls: `W/S` pitch, `A/D` bank, arrow keys power, `F` flaps, `G` gear, `X` level attitude, and `T` request/cancel/reclaim agent control. Any direct human flight input immediately overrides the agent.
+Manual controls: `W/S` pitch, `A/D` bank, arrow keys power, `F` flaps in Full Mission, `G` gear, `X` level attitude, and `T` request/cancel/reclaim agent control. Any direct human flight input immediately overrides the agent.
 
 ## Verification
 

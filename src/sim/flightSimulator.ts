@@ -7,7 +7,7 @@ import type {
   TraceEvent,
 } from './types'
 import { checkpointCaptureRadiusNm } from './checkpoints.ts'
-import { A380_ENVELOPE } from './a380Envelope.ts'
+import { CONCORDE_ENVELOPE, flightEnvelopeFor } from './aircraftEnvelope.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from './aerodynamics.ts'
 import {
   KPWK_AIRPORT,
@@ -31,14 +31,11 @@ const KPWK_ELEVATION = KPWK_RUNWAY_16.elevationFt
 const MAX_SAFE_TOUCHDOWN_FPM = 600
 const BOUNCE_THRESHOLD_FPM = 240
 const MAX_TOUCHDOWN_BANK_DEG = 18
-const MAX_TOUCHDOWN_SPEED_KT = A380_ENVELOPE.maxTouchdownSpeedKt
 const MAX_BOUNCES = 2
 const CRASH_SLIDE_SECONDS = 2.5
-const ROTATE_SPEED_KT = A380_ENVELOPE.rotateSpeedKt
 const TAKEOFF_POWER_ACCEL_KT_PER_SECOND = 5.8
 const TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND = 0.2
 const TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND = 0.65
-const MAX_GROUND_PITCH_DEG = A380_ENVELOPE.liftoffPitchDeg
 const PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND = 5
 const PILOT_BANK_TRIM_RATE_DEG_PER_SECOND = 10
 const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 7
@@ -53,7 +50,6 @@ const ROUTE_BANK_DEG = 25
 const DECISION_HOLD_BANK_DEG = 12
 const DECISION_HOLD_HEADING_LEAD_DEG = 20
 const MAX_EMERGENCY_TURN_FIXES = 3
-const DEPARTURE_GUIDANCE_RELEASE_AGL_FT = A380_ENVELOPE.departureHeadingReleaseAglFt
 const LIFTOFF_CONFIRM_AGL_FT = 35
 const ROUTE_STALL_SECONDS = 20
 const ROUTE_PROGRESS_EPSILON_NM = 0.015
@@ -81,6 +77,7 @@ const isDestructiveImpact = ({
   airspeedKt,
   bankDeg,
   pitchDeg,
+  maxTouchdownSpeedKt,
 }: {
   onRunway: boolean
   gearDown: boolean
@@ -88,12 +85,13 @@ const isDestructiveImpact = ({
   airspeedKt: number
   bankDeg: number
   pitchDeg: number
+  maxTouchdownSpeedKt: number
 }) => impactFpm > 900
-  || airspeedKt > 175
+  || airspeedKt > maxTouchdownSpeedKt + 20
   || Math.abs(bankDeg) > 32
   || pitchDeg < -12
-  || (!onRunway && (impactFpm > 650 || airspeedKt > 145 || Math.abs(bankDeg) > 24))
-  || (!gearDown && (impactFpm > 350 || airspeedKt > 155))
+  || (!onRunway && (impactFpm > 650 || airspeedKt > maxTouchdownSpeedKt - 10 || Math.abs(bankDeg) > 24))
+  || (!gearDown && (impactFpm > 350 || airspeedKt > maxTouchdownSpeedKt))
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 const approach = (value: number, target: number, change: number) => value < target ? Math.min(value + change, target) : Math.max(value - change, target)
@@ -255,7 +253,7 @@ const routeEstimatedMinutes = (
   let previous = origin
   let airborneMinutes = 0
   for (const fix of route.waypoints.slice(route.activeWaypointIndex)) {
-    airborneMinutes += distanceNm(previous, fix) / Math.max(fix.airspeedKt, A380_ENVELOPE.approachSpeedKt) * 60
+    airborneMinutes += distanceNm(previous, fix) / Math.max(fix.airspeedKt, 120) * 60
     previous = fix
   }
   // Configuration, threshold crossing, touchdown, and rollout are real parts of
@@ -298,10 +296,40 @@ const NORMAL_DEPARTURE_MISSION: MissionBrief = Object.freeze({
   ]),
 })
 
+const CONCORDE_SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
+  ...SHARED_AUTONOMY_MISSION,
+  name: 'Concorde emergency evaluation',
+  objective: 'Fly the short Concorde terminal profile, assess the emergency, and make a safe diversion within the accelerated evaluation window.',
+  successConditions: Object.freeze([
+    'Take off from North Field runway 18.',
+    `Call V1 at ${CONCORDE_ENVELOPE.decisionSpeedKt} knots, rotate at ${CONCORDE_ENVELOPE.rotateSpeedKt} knots, and cross V2 at ${CONCORDE_ENVELOPE.takeoffSafetySpeedKt} knots.`,
+    `Retract the gear after a positive climb rate and accelerate clean toward ${CONCORDE_ENVELOPE.initialClimbSpeedKt} knots. Concorde has no conventional flaps.`,
+    'Read the combined emergency decision context before selecting a route.',
+    `Slow toward ${CONCORDE_ENVELOPE.baseSpeedKt} knots on base and ${CONCORDE_ENVELOPE.finalSpeedKt} knots on final, then lower the landing gear.`,
+    `Stabilize near ${CONCORDE_ENVELOPE.approachSpeedKt} knots with the clean delta wing and touch down below ${CONCORDE_ENVELOPE.maxTouchdownSpeedKt} knots and 600 feet per minute.`,
+  ]),
+})
+
+const CONCORDE_NORMAL_DEPARTURE_MISSION: MissionBrief = Object.freeze({
+  ...NORMAL_DEPARTURE_MISSION,
+  name: 'Concorde North Field departure',
+  objective: 'Fly a representative Concorde terminal departure and monitor for an enroute update.',
+  successConditions: Object.freeze([
+    'File the Lakeside Municipal runway 22 route before takeoff.',
+    `Call V1 at ${CONCORDE_ENVELOPE.decisionSpeedKt} knots, rotate at ${CONCORDE_ENVELOPE.rotateSpeedKt} knots, and cross V2 at ${CONCORDE_ENVELOPE.takeoffSafetySpeedKt} knots.`,
+    `Retract the gear after a positive climb rate and accelerate clean toward ${CONCORDE_ENVELOPE.initialClimbSpeedKt} knots. Concorde has no conventional flaps.`,
+    'Monitor for an enroute update before changing the route.',
+  ]),
+})
+
+const missionBriefFor = (mode: FlightMode, emergency: boolean) => mode === 'judge'
+  ? emergency ? CONCORDE_SHARED_AUTONOMY_MISSION : CONCORDE_NORMAL_DEPARTURE_MISSION
+  : emergency ? SHARED_AUTONOMY_MISSION : NORMAL_DEPARTURE_MISSION
+
 const scenarios: Readonly<Record<CheckrideSeed, ScenarioConditions>> = Object.freeze({
   17: Object.freeze({
     weather: Object.freeze({ visibilityMiles: 4, ceilingFt: 1_800, windDirectionDeg: 190, windSpeedKt: 12, summary: 'Rain. KPWK remains above minimums with a 9 knot crosswind.' }),
-    engine: Object.freeze({ health: 'rough' as const, maximumPower: 0.72, summary: 'Cylinder temperatures are uneven. Available power is falling.' }),
+    engine: Object.freeze({ health: 'rough' as const, maximumPower: 0.72, summary: 'Exhaust gas temperatures are uneven. Available thrust is falling.' }),
     passenger: Object.freeze({ condition: 'urgent' as const, summary: 'The passenger is conscious but has chest pain.' }),
     traffic: Object.freeze({ delayMinutes: 0, priorityAvailable: true, summary: 'KPWK can clear a direct return to runway 16.' }),
   }),
@@ -375,12 +403,14 @@ const emergencyTurnIntercepts = (
   origin: { lat: number; lon: number; headingDeg?: number },
   target: { lat: number; lon: number },
   maximumFixes = MAX_EMERGENCY_TURN_FIXES,
+  mode: FlightMode = 'full',
 ) => {
+  const envelope = flightEnvelopeFor(mode)
   const directBearingDeg = navigationBearingDeg(origin, target)
   const startingHeadingDeg = origin.headingDeg ?? directBearingDeg
   const totalTurnDeg = headingError(directBearingDeg, startingHeadingDeg)
   const turnCount = Math.min(maximumFixes, Math.ceil(Math.abs(totalTurnDeg) / 35))
-  const radiusNm = coordinatedTurnRadiusNm(A380_ENVELOPE.emergencyTurnSpeedKt, ROUTE_BANK_DEG)
+  const radiusNm = coordinatedTurnRadiusNm(envelope.emergencyTurnSpeedKt, ROUTE_BANK_DEG)
   const intercepts: RouteWaypoint[] = []
   let position = origin
   let headingDeg = startingHeadingDeg
@@ -389,32 +419,37 @@ const emergencyTurnIntercepts = (
     const chordNm = Math.max(0.9, 2 * radiusNm * Math.sin(radians(Math.abs(turnStepDeg)) / 2))
     position = offsetPosition(position, normalizeHeading(headingDeg + turnStepDeg / 2), chordNm)
     headingDeg = normalizeHeading(headingDeg + turnStepDeg)
-    intercepts.push(waypoint(`KPWK_TURN_${index + 1}`, `KPWK turn ${index + 1}`, 'enroute', position, 1_500, A380_ENVELOPE.emergencyTurnSpeedKt, ROUTE_CAPTURE_FLOOR_NM))
+    intercepts.push(waypoint(`KPWK_TURN_${index + 1}`, `KPWK turn ${index + 1}`, 'enroute', position, 1_500, envelope.emergencyTurnSpeedKt, ROUTE_CAPTURE_FLOOR_NM))
   }
   return Object.freeze(intercepts)
 }
 
 const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDeg?: number }, emergencyContinuation = false, mode: FlightMode = 'full'): RouteState => {
+  const envelope = flightEnvelopeFor(mode)
   if (plan === 'continue_klak') {
     if (emergencyContinuation) {
-      const entry = offsetPosition(LAKESIDE_RUNWAY_04_THRESHOLD, normalizeHeading(LAKESIDE_RUNWAY_04.headingDeg + 180), 2.2)
+      const entryDistanceNm = mode === 'judge' ? 4 : 2.2
+      const entry = offsetPosition(LAKESIDE_RUNWAY_04_THRESHOLD, normalizeHeading(LAKESIDE_RUNWAY_04.headingDeg + 180), entryDistanceNm)
+      const entryAltitudeFt = mode === 'judge'
+        ? LAKESIDE_RUNWAY_04.elevationFt + Math.tan(radians(3)) * entryDistanceNm * FEET_PER_NM
+        : 1_250
       const distanceToEntryNm = distanceNm(origin, entry)
       const recovery = offsetPosition(origin, navigationBearingDeg(origin, entry), Math.max(0.8, distanceToEntryNm - 1.5))
       return Object.freeze({ plan, destination: 'KLAK', runway: '04', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
-        waypoint('LAKESIDE_RECOVERY', 'Lakeside runway 04 recovery', 'enroute', recovery, 1_800, A380_ENVELOPE.enrouteSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-        waypoint('LAKESIDE_ENTRY', 'Lakeside runway 04 final', 'final', entry, 1_250, A380_ENVELOPE.finalSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-        waypoint('LAKESIDE_TOUCHDOWN', 'Lakeside runway 04', 'touchdown', offsetPosition(LAKESIDE_RUNWAY_04_THRESHOLD, LAKESIDE_RUNWAY_04.headingDeg, 0.12), LAKESIDE_RUNWAY_04.elevationFt, A380_ENVELOPE.approachSpeedKt, 0.06),
+        waypoint('LAKESIDE_RECOVERY', 'Lakeside runway 04 recovery', 'enroute', recovery, 1_800, envelope.enrouteSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
+        waypoint('LAKESIDE_ENTRY', 'Lakeside runway 04 final', 'final', entry, entryAltitudeFt, envelope.finalSpeedKt, mode === 'judge' ? 0.8 : ROUTE_CAPTURE_FLOOR_NM),
+        waypoint('LAKESIDE_TOUCHDOWN', 'Lakeside runway 04', 'touchdown', offsetPosition(LAKESIDE_RUNWAY_04_THRESHOLD, LAKESIDE_RUNWAY_04.headingDeg, 0.12), LAKESIDE_RUNWAY_04.elevationFt, envelope.approachSpeedKt, 0.06),
       ]) })
     }
     const reciprocalHeading = normalizeHeading(LAKESIDE_RUNWAY_22.headingDeg + 180)
     const entry = offsetPosition(LAKESIDE_THRESHOLD, reciprocalHeading, 3)
     const base = offsetPosition(entry, normalizeHeading(LAKESIDE_RUNWAY_22.headingDeg + 90), 2.2)
     return Object.freeze({ plan, destination: 'KLAK', runway: '22', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
-      waypoint('NORTH_FIELD_CLIMB', 'North Field climb', 'departure', offsetPosition(NORTH_FIELD_START, NORTH_FIELD_RUNWAY_18.headingDeg, 0.65), 1_200, A380_ENVELOPE.initialClimbSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('LAKESIDE_ENROUTE', 'Lakeside enroute', 'enroute', offsetPosition(origin, 28, 6.4), 1_800, A380_ENVELOPE.enrouteSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('LAKESIDE_BASE', 'Lakeside runway 22 base', 'base', base, 1_800, A380_ENVELOPE.emergencyTurnSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('LAKESIDE_ENTRY', 'Lakeside runway 22 entry', 'final', entry, 1_250, A380_ENVELOPE.finalSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('LAKESIDE_TOUCHDOWN', 'Lakeside runway 22', 'touchdown', offsetPosition(LAKESIDE_THRESHOLD, LAKESIDE_RUNWAY_22.headingDeg, 0.12), LAKESIDE_RUNWAY_22.elevationFt, A380_ENVELOPE.approachSpeedKt, 0.06),
+      waypoint('NORTH_FIELD_CLIMB', 'North Field climb', 'departure', offsetPosition(NORTH_FIELD_START, NORTH_FIELD_RUNWAY_18.headingDeg, 0.65), 1_200, envelope.initialClimbSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
+      waypoint('LAKESIDE_ENROUTE', 'Lakeside enroute', 'enroute', offsetPosition(origin, 28, 6.4), 1_800, envelope.enrouteSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
+      waypoint('LAKESIDE_BASE', 'Lakeside runway 22 base', 'base', base, 1_800, envelope.emergencyTurnSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
+      waypoint('LAKESIDE_ENTRY', 'Lakeside runway 22 entry', 'final', entry, 1_250, envelope.finalSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
+      waypoint('LAKESIDE_TOUCHDOWN', 'Lakeside runway 22', 'touchdown', offsetPosition(LAKESIDE_THRESHOLD, LAKESIDE_RUNWAY_22.headingDeg, 0.12), LAKESIDE_RUNWAY_22.elevationFt, envelope.approachSpeedKt, 0.06),
     ]) })
   }
   if (plan === 'return_kpwk') {
@@ -425,58 +460,73 @@ const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDe
       normalizeHeading(KPWK_RUNWAY_16.headingDeg - 90),
       2.4,
     )
-    const turnFixes = emergencyTurnIntercepts(origin, baseLeg, mode === 'judge' ? 1 : MAX_EMERGENCY_TURN_FIXES)
+    const turnFixes = emergencyTurnIntercepts(origin, baseLeg, mode === 'judge' ? 1 : MAX_EMERGENCY_TURN_FIXES, mode)
       .map((fix) => mode === 'judge' ? waypoint(fix.id, fix.name, fix.kind, fix, fix.altitudeFt, fix.airspeedKt, 0.6) : fix)
     return Object.freeze({ plan, destination: 'KPWK', runway: '16', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
       ...turnFixes,
-      waypoint('KPWK_BASE', 'Runway 16 base', 'base', baseLeg, 1_800, A380_ENVELOPE.baseSpeedKt, mode === 'judge' ? 1.1 : ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('KPWK_FINAL', 'Runway 16 final', 'final', finalPosition, 1_600, A380_ENVELOPE.finalSpeedKt, mode === 'judge' ? 0.5 : 0.3),
-      waypoint('KPWK_TOUCHDOWN', 'Runway 16 touchdown', 'touchdown', offsetPosition(KPWK_THRESHOLD, KPWK_RUNWAY_16.headingDeg, 0.14), KPWK_ELEVATION, A380_ENVELOPE.approachSpeedKt, 0.012),
+      waypoint('KPWK_BASE', 'Runway 16 base', 'base', baseLeg, 1_800, envelope.baseSpeedKt, mode === 'judge' ? 1.1 : ROUTE_CAPTURE_FLOOR_NM),
+      waypoint('KPWK_FINAL', 'Runway 16 final', 'final', finalPosition, 1_600, envelope.finalSpeedKt, mode === 'judge' ? 1 : 0.3),
+      waypoint('KPWK_TOUCHDOWN', 'Runway 16 touchdown', 'touchdown', offsetPosition(KPWK_THRESHOLD, KPWK_RUNWAY_16.headingDeg, 0.14), KPWK_ELEVATION, envelope.approachSpeedKt, 0.012),
     ]) })
   }
   return Object.freeze({ plan, destination: null, runway: null, reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([]) })
 }
 
-const initialAutopilot = (): AutopilotState => Object.freeze({ enabled: false, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg, altitudeFt: 1_200, airspeedKt: A380_ENVELOPE.initialClimbSpeedKt, verticalMode: 'climb', lateralMode: 'route' })
+const initialAutopilot = (mode: FlightMode): AutopilotState => Object.freeze({ enabled: false, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg, altitudeFt: 1_200, airspeedKt: flightEnvelopeFor(mode).initialClimbSpeedKt, verticalMode: 'climb', lateralMode: 'route' })
 const initialRoute = (): RouteState => Object.freeze({ plan: 'unassigned', destination: null, runway: null, waypoints: Object.freeze([]), activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: NORTH_FIELD_START.lat, lon: NORTH_FIELD_START.lon }), reason: null })
 
-const configurationProcedureFor = (state: Pick<FlightState, 'aircraftPhase' | 'altitudeFt' | 'airspeedKt' | 'route' | 'gearDown' | 'flapsDeg'>): ConfigurationProcedure => {
+const configurationProcedureFor = (state: Pick<FlightState, 'mode' | 'aircraftPhase' | 'altitudeFt' | 'airspeedKt' | 'route' | 'gearDown' | 'flapsDeg'>): ConfigurationProcedure => {
   if (state.aircraftPhase === 'landing_roll' || state.aircraftPhase === 'stopped' || state.aircraftPhase === 'crash_slide') {
     return Object.freeze({ stage: 'complete', gearDown: state.gearDown, flapsDeg: state.flapsDeg as 0 | 10 | 20 | 30, compliant: true, instruction: 'Configuration sequence complete.' })
   }
+  const envelope = flightEnvelopeFor(state.mode)
   let stage: ConfigurationProcedure['stage'] = 'takeoff'
   let gearDown = true
-  let flapsDeg: ConfigurationProcedure['flapsDeg'] = A380_ENVELOPE.takeoffFlapsDeg
-  let instruction = 'Takeoff: gear down, flaps 10° (CONF 1+F); at 170 kt rotate at 3°/s toward 12.5° initial pitch.'
+  let flapsDeg: ConfigurationProcedure['flapsDeg'] = envelope.takeoffFlapsDeg
+  let instruction = envelope.hasConventionalFlaps
+    ? 'Takeoff: gear down, flaps 10° (CONF 1+F); at 170 kt rotate at 3°/s toward 12.5° initial pitch.'
+    : `Takeoff: gear down, clean delta wing. V1 ${envelope.decisionSpeedKt} kt, VR ${envelope.rotateSpeedKt} kt, V2 ${envelope.takeoffSafetySpeedKt} kt.`
   if (state.aircraftPhase === 'airborne') {
     const aglFt = state.altitudeFt - NORTH_FIELD_RUNWAY_18.elevationFt
     const activeKind = state.route.waypoints[state.route.activeWaypointIndex]?.kind
     if (activeKind === 'departure' && aglFt < 180) {
       stage = 'positive_rate'
       gearDown = false
-      instruction = 'Positive rate: retract the landing gear; hold flaps 10° (CONF 1+F).'
-    } else if ((!activeKind || activeKind === 'departure' || activeKind === 'enroute') && (aglFt < 1_000 || state.airspeedKt < A380_ENVELOPE.flapRetractionSpeedKt)) {
+      instruction = envelope.hasConventionalFlaps
+        ? 'Positive rate: retract the landing gear; hold flaps 10° (CONF 1+F).'
+        : `Positive rate: retract the landing gear and accelerate clean through ${envelope.takeoffSafetySpeedKt} kt.`
+    } else if ((!activeKind || activeKind === 'departure' || activeKind === 'enroute') && (aglFt < 1_000 || state.airspeedKt < envelope.flapRetractionSpeedKt)) {
       stage = 'positive_rate'
       gearDown = false
-      instruction = 'Climb: hold flaps 10° until 1,000 ft AGL and 210 kt while maintaining takeoff power.'
+      instruction = envelope.hasConventionalFlaps
+        ? 'Climb: hold flaps 10° until 1,000 ft AGL and 210 kt while maintaining takeoff power.'
+        : `Climb: keep the clean delta wing and accelerate toward ${envelope.initialClimbSpeedKt} kt.`
     } else if (!activeKind || activeKind === 'departure' || activeKind === 'enroute') {
       stage = 'climb_cleanup'
       gearDown = false
       flapsDeg = 0
-      instruction = 'Above 1,000 ft AGL and 210 kt: retract flaps to 0° and accelerate toward 230 kt.'
+      instruction = envelope.hasConventionalFlaps
+        ? 'Above 1,000 ft AGL and 210 kt: retract flaps to 0° and accelerate toward 230 kt.'
+        : `Clean climb: gear up, no flaps, target ${envelope.enrouteSpeedKt} kt.`
     } else if (activeKind === 'base') {
       stage = 'base'
       gearDown = false
-      flapsDeg = 10
-      instruction = 'Base leg near 185 kt: select flaps 10°; keep the gear up.'
+      flapsDeg = envelope.hasConventionalFlaps ? 10 : 0
+      instruction = envelope.hasConventionalFlaps
+        ? 'Base leg near 185 kt: select flaps 10°; keep the gear up.'
+        : `Base leg: keep the clean delta wing and gear up near ${envelope.baseSpeedKt} kt.`
     } else if (activeKind === 'final') {
       stage = 'final'
-      flapsDeg = A380_ENVELOPE.approachFlapsDeg
-      instruction = 'Final near 155 kt: gear down, flaps 20° (CONF 3).'
+      flapsDeg = envelope.approachFlapsDeg
+      instruction = envelope.hasConventionalFlaps
+        ? 'Final near 155 kt: gear down, flaps 20° (CONF 3).'
+        : `Final: gear down, clean delta wing, target ${envelope.finalSpeedKt} kt before slowing to ${envelope.approachSpeedKt} kt.`
     } else {
       stage = 'landing'
-      flapsDeg = A380_ENVELOPE.landingFlapsDeg
-      instruction = 'Landing: select flaps 30° (FULL), verify gear down, target 140 kt.'
+      flapsDeg = envelope.landingFlapsDeg
+      instruction = envelope.hasConventionalFlaps
+        ? 'Landing: select flaps 30° (FULL), verify gear down, target 140 kt.'
+        : `Landing: gear down, no flaps, stabilize near ${envelope.approachSpeedKt} kt.`
     }
   }
   return Object.freeze({ stage, gearDown, flapsDeg, compliant: state.gearDown === gearDown && state.flapsDeg === flapsDeg, instruction })
@@ -485,19 +535,20 @@ const configurationProcedureFor = (state: Pick<FlightState, 'aircraftPhase' | 'a
 const initialState = (seed: CheckrideSeed, mode: FlightMode = 'full'): FlightState => {
   const start = NORTH_FIELD_START
   const scenario = NORMAL_DEPARTURE_SCENARIO
-  const autopilot = initialAutopilot()
+  const envelope = flightEnvelopeFor(mode)
+  const autopilot = initialAutopilot(mode)
   const fuel = seed === 81 ? 14.5 : 13.5
   const state = {
     mode, ...start, altitudeFt: NORTH_FIELD_RUNWAY_18.elevationFt, airspeedKt: 0, verticalSpeedFpm: 0, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg,
-    pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: A380_ENVELOPE.takeoffFlapsDeg, gearDown: true,
+    pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: envelope.takeoffFlapsDeg, gearDown: true,
     elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
     agentMode: 'idle', autopilot, route: initialRoute(), scenario,
     motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0, groundSpeedKt: 0, trackDeg: NORTH_FIELD_RUNWAY_18.headingDeg, headwindKt: NORMAL_DEPARTURE_SCENARIO.weather.windSpeedKt, crosswindKt: 0, angleOfAttackDeg: 0, stalled: false, turbulenceLevel: 'none' }),
     impact: null,
     aircraftPhase: 'takeoff_roll',
     approval: Object.freeze({ status: 'none', question: null, requestedAction: null }),
-    mission: Object.freeze({ phase: 'preflight', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, bearingToNextFixDeg: null, closingRateKt: null, captureRadiusNm: null, minimumTurnRadiusNm: coordinatedTurnRadiusNm(A380_ENVELOPE.initialClimbSpeedKt, ROUTE_BANK_DEG), routeStatus: 'idle', distanceToThresholdNm: distanceNm(start, LAKESIDE_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, eventRevision: 0 }),
-    checkride: Object.freeze({ seed, status: 'armed', objective: NORMAL_DEPARTURE_MISSION.objective, deadlineSeconds: MISSION_CONFIG[mode].deadlineSeconds, wallClockDeadlineSeconds: MISSION_CONFIG[mode].wallClockDeadlineSeconds, simulationRate: MISSION_CONFIG[mode].simulationRate, decisionSecondsRemaining: null, fuelMinutesRemaining: fuel, alert: null, humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: initialScore(), decision: null }),
+    mission: Object.freeze({ phase: 'preflight', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, bearingToNextFixDeg: null, closingRateKt: null, captureRadiusNm: null, minimumTurnRadiusNm: coordinatedTurnRadiusNm(envelope.initialClimbSpeedKt, ROUTE_BANK_DEG), routeStatus: 'idle', distanceToThresholdNm: distanceNm(start, LAKESIDE_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, eventRevision: 0 }),
+    checkride: Object.freeze({ seed, status: 'armed', objective: missionBriefFor(mode, false).objective, deadlineSeconds: MISSION_CONFIG[mode].deadlineSeconds, wallClockDeadlineSeconds: MISSION_CONFIG[mode].wallClockDeadlineSeconds, simulationRate: MISSION_CONFIG[mode].simulationRate, decisionSecondsRemaining: null, fuelMinutesRemaining: fuel, alert: null, humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: initialScore(), decision: null }),
     passengerSafety: Object.freeze({ loadFactorG: 1, jerkGPerSecond: 0, distress: 0, injuryProbability: 0, status: 'comfortable', summary: 'Cabin motion is smooth.' }),
     debrief: Object.freeze({ status: 'in_progress', elapsedSeconds: 0, decision: 'unassigned', decisionReason: null, events: Object.freeze([]), landing: null }),
   } satisfies Omit<FlightState, 'procedure'>
@@ -563,7 +614,7 @@ class FlightSimulator {
   getTrace = () => this.trace
   getEventRevision = () => this.eventRevision
   getMissionBrief = () => {
-    const brief = this.emergencyTriggered ? SHARED_AUTONOMY_MISSION : NORMAL_DEPARTURE_MISSION
+    const brief = missionBriefFor(this.state.mode, this.emergencyTriggered)
     return Object.freeze({ ...brief, deadlineSeconds: MISSION_CONFIG[this.state.mode].wallClockDeadlineSeconds })
   }
   subscribe = (listener: FlightStateListener) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
@@ -681,13 +732,14 @@ class FlightSimulator {
       const firstDistanceNm = strategy === 'wider_pattern'
         ? 1.4
         : clamp(targetDistanceNm * 0.45, 0.85, 1.35)
+      const envelope = flightEnvelopeFor(this.state.mode)
       const intercept = waypoint(
         `REJOIN_${this.traceId}`,
         strategy === 'wider_pattern' ? 'Wider pattern rejoin' : 'Direct route rejoin',
         'enroute',
         offsetPosition(this.state, firstHeadingDeg, firstDistanceNm),
         clamp(this.state.altitudeFt, 1_300, 1_800),
-        clamp(this.state.airspeedKt, A380_ENVELOPE.minCommandSpeedKt, A380_ENVELOPE.emergencyTurnSpeedKt),
+        clamp(this.state.airspeedKt, envelope.minCommandSpeedKt, envelope.emergencyTurnSpeedKt),
         ROUTE_CAPTURE_FLOOR_NM,
       )
       waypoints = Object.freeze([
@@ -813,11 +865,12 @@ class FlightSimulator {
   setAutopilotTargets = (input: AutopilotTargetsInput | Partial<AutopilotState>, actor: TraceActor = 'agent', reason?: string): ActionReceipt => {
     if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
     const current = this.state.autopilot
+    const envelope = flightEnvelopeFor(this.state.mode)
     const autopilot: AutopilotState = Object.freeze({
       enabled: 'enabled' in input && typeof input.enabled === 'boolean' ? input.enabled : true,
       headingDeg: normalizeHeading(input.headingDeg ?? current.headingDeg),
       altitudeFt: clamp(input.altitudeFt ?? current.altitudeFt, KPWK_ELEVATION, 4_000),
-      airspeedKt: clamp(input.airspeedKt ?? current.airspeedKt, A380_ENVELOPE.minCommandSpeedKt, A380_ENVELOPE.maxCommandSpeedKt),
+      airspeedKt: clamp(input.airspeedKt ?? current.airspeedKt, envelope.minCommandSpeedKt, envelope.maxCommandSpeedKt),
       verticalMode: input.verticalMode ?? current.verticalMode,
       lateralMode: input.lateralMode ?? (input.headingDeg !== undefined ? 'heading' : current.lateralMode),
     })
@@ -946,7 +999,8 @@ class FlightSimulator {
       return
     }
     const scenario = this.state.scenario
-    if (!this.departureGuidanceReleased && this.state.altitudeFt - NORTH_FIELD_RUNWAY_18.elevationFt >= DEPARTURE_GUIDANCE_RELEASE_AGL_FT) this.departureGuidanceReleased = true
+    const envelope = flightEnvelopeFor(this.state.mode)
+    if (!this.departureGuidanceReleased && this.state.altitudeFt - NORTH_FIELD_RUNWAY_18.elevationFt >= envelope.departureHeadingReleaseAglFt) this.departureGuidanceReleased = true
     let { headingDeg: heading, bankDeg: bank, pitchDeg: pitch, throttle, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed } = this.state
 
     if (this.state.debrief.landing) {
@@ -966,12 +1020,12 @@ class FlightSimulator {
       if (this.state.aircraftPhase === 'takeoff_roll') {
         bank = approach(bank, clamp(headingError(NORTH_FIELD_RUNWAY_18.headingDeg, heading) * 0.65, -12, 12), 24 * dt)
         throttle = approach(throttle, 1, 0.55 * dt)
-        const rotating = airspeed >= ROTATE_SPEED_KT
-        verticalSpeed = approach(verticalSpeed, rotating ? A380_ENVELOPE.initialClimbVerticalSpeedFpm : 0, 700 * dt)
+        const rotating = airspeed >= envelope.rotateSpeedKt
+        verticalSpeed = approach(verticalSpeed, rotating ? envelope.initialClimbVerticalSpeedFpm : 0, 700 * dt)
         pitch = approach(
           pitch,
-          rotating ? A380_ENVELOPE.initialClimbPitchDeg : 0,
-          A380_ENVELOPE.rotationRateDegPerSecond * dt,
+          rotating ? envelope.initialClimbPitchDeg : 0,
+          envelope.rotationRateDegPerSecond * dt,
         )
       } else {
         const target = this.state.autopilot
@@ -1045,7 +1099,11 @@ class FlightSimulator {
           desiredFpm = clamp(desiredFpm, -320, -100)
         }
         verticalSpeed = approach(verticalSpeed, desiredFpm, 420 * dt)
-        pitch = approach(pitch, clamp(verticalSpeed / 130, -6, 7), 6 * dt)
+        const concordeLandingAoADeg = this.state.mode === 'judge'
+          && (activeWaypoint?.kind === 'final' || activeWaypoint?.kind === 'touchdown')
+          ? 10.5
+          : 0
+        pitch = approach(pitch, clamp(verticalSpeed / 130 + concordeLandingAoADeg, -6, 14), 6 * dt)
       }
     } else {
       const onTakeoffRoll = this.state.aircraftPhase === 'takeoff_roll'
@@ -1054,19 +1112,21 @@ class FlightSimulator {
       this.manualAttitudeTarget.pitchDeg = clamp(
         this.manualAttitudeTarget.pitchDeg + this.smoothedPilotControls.pitchAxis * PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND * dt,
         onTakeoffRoll ? 0 : -55,
-        onTakeoffRoll ? MAX_GROUND_PITCH_DEG : 55,
+        onTakeoffRoll ? envelope.liftoffPitchDeg : 55,
       )
       this.manualAttitudeTarget.bankDeg = onTakeoffRoll
         ? 0
         : clamp(this.manualAttitudeTarget.bankDeg + this.smoothedPilotControls.bankAxis * PILOT_BANK_TRIM_RATE_DEG_PER_SECOND * dt, -60, 60)
-      const targetPitch = onTakeoffRoll && airspeed < ROTATE_SPEED_KT ? 0 : this.manualAttitudeTarget.pitchDeg
+      const targetPitch = onTakeoffRoll && airspeed < envelope.rotateSpeedKt ? 0 : this.manualAttitudeTarget.pitchDeg
       pitch = approach(
         pitch,
         targetPitch,
-        (onTakeoffRoll ? A380_ENVELOPE.rotationRateDegPerSecond : PILOT_PITCH_RESPONSE_DEG_PER_SECOND) * dt,
+        (onTakeoffRoll ? envelope.rotationRateDegPerSecond : PILOT_PITCH_RESPONSE_DEG_PER_SECOND) * dt,
       )
       bank = approach(bank, this.manualAttitudeTarget.bankDeg, PILOT_BANK_RESPONSE_DEG_PER_SECOND * dt)
-      const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch)), -4_500, 4_500)
+      const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
+      const concordeLandingAoADeg = this.state.mode === 'judge' && (activeKind === 'final' || activeKind === 'touchdown') ? 10.5 : 0
+      const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch - concordeLandingAoADeg)), -4_500, 4_500)
       verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND * dt)
     }
 
@@ -1077,19 +1137,21 @@ class FlightSimulator {
     }
 
     const power = throttle * scenario.engine.maximumPower
-    const gravityAlongFlightPath = -Math.sin(radians(pitch)) * 5.5
-    const airborneDrag = airborneDragKtPerSecond(airspeed, this.state.flapsDeg, this.state.gearDown, bank)
+    const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
+    const concordeLandingAoADeg = this.state.mode === 'judge' && (activeKind === 'final' || activeKind === 'touchdown') ? 10.5 : 0
+    const gravityAlongFlightPath = -Math.sin(radians(pitch - concordeLandingAoADeg)) * 5.5
+    const airborneDrag = airborneDragKtPerSecond(airspeed, this.state.flapsDeg, this.state.gearDown, bank, this.state.mode)
     const acceleration = this.fuelExhausted
       ? -airborneDrag + gravityAlongFlightPath
       : this.state.aircraftPhase === 'takeoff_roll'
       ? power * MISSION_CONFIG[this.state.mode].takeoffAccelerationKtPerSecond
         - (airspeed > 0.05 || power > 0 ? TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND : 0)
-        - TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND * (airspeed / ROTATE_SPEED_KT) ** 2
+        - TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND * (airspeed / envelope.rotateSpeedKt) ** 2
       : power * 8.5 - airborneDrag + gravityAlongFlightPath
-    airspeed = clamp(airspeed + acceleration * dt, 0, 270)
+    airspeed = clamp(airspeed + acceleration * dt, 0, envelope.maxSimulationSpeedKt)
     const turnRate = airspeed > 20 ? 1_091 * Math.tan(radians(clamp(bank, -60, 60))) / airspeed : 0
     heading = normalizeHeading(heading + turnRate * dt)
-    const stall = stallResponseFor(airspeed, pitch, verticalSpeed, bank, this.state.flapsDeg)
+    const stall = stallResponseFor(airspeed, pitch, verticalSpeed, bank, this.state.flapsDeg, this.state.mode)
     if (this.state.aircraftPhase === 'airborne' && stall.severity > 0) {
       verticalSpeed = approach(verticalSpeed, Math.min(verticalSpeed, -stall.sinkRateFpm), (520 + stall.severity * 480) * dt)
       pitch = approach(pitch, Math.min(pitch, 4 - stall.severity * 13), (5 + stall.severity * 5) * dt)
@@ -1127,7 +1189,7 @@ class FlightSimulator {
         aircraftPhase = 'airborne'
         altitude = takeoffContactAltitude
         verticalSpeed = -1
-      } else if (airspeed < ROTATE_SPEED_KT || pitch < A380_ENVELOPE.liftoffPitchDeg) {
+      } else if (airspeed < envelope.rotateSpeedKt || pitch < envelope.liftoffPitchDeg) {
         altitude = takeoffContactAltitude
         verticalSpeed = 0
       } else if (altitude > NORTH_FIELD_RUNWAY_18.elevationFt + LIFTOFF_CONFIRM_AGL_FT && verticalSpeed > 0) {
@@ -1148,8 +1210,8 @@ class FlightSimulator {
       const safeContact = !this.fuelExhausted
         && onRunway
         && this.state.gearDown
-        && this.state.flapsDeg >= 20
-        && airspeed <= MAX_TOUCHDOWN_SPEED_KT
+        && (envelope.hasConventionalFlaps ? this.state.flapsDeg >= envelope.approachFlapsDeg : this.state.flapsDeg === 0)
+        && airspeed <= envelope.maxTouchdownSpeedKt
         && impactFpm <= MAX_SAFE_TOUCHDOWN_FPM
         && Math.abs(bank) <= MAX_TOUCHDOWN_BANK_DEG
         && pitch >= -6
@@ -1190,6 +1252,7 @@ class FlightSimulator {
           airspeedKt: airspeed,
           bankDeg: bank,
           pitchDeg: pitch,
+          maxTouchdownSpeedKt: envelope.maxTouchdownSpeedKt,
         })
         landing = Object.freeze({ runway: runway.id, sinkRateFpm: Math.round(impactFpm), airspeedKt: Math.round(airspeed), centerlineErrorFt: Math.round(Math.abs(frame.crossNm) * FEET_PER_NM), touchdownDistanceFt: Math.round(frame.alongNm * FEET_PER_NM), bounces: this.bounceCount, onRunway, safe: false })
         this.impactRevision += 1
@@ -1321,7 +1384,7 @@ class FlightSimulator {
         enabled: this.state.controlOwner === 'agent',
         headingDeg: normalizeHeading(this.state.headingDeg + this.decisionHoldTurnDirection * DECISION_HOLD_HEADING_LEAD_DEG),
         altitudeFt: Math.max(1_200, this.state.altitudeFt),
-        airspeedKt: A380_ENVELOPE.initialClimbSpeedKt,
+        airspeedKt: envelope.initialClimbSpeedKt,
         verticalMode: 'level' as const,
         lateralMode: 'heading' as const,
       })
@@ -1334,7 +1397,7 @@ class FlightSimulator {
           ...this.state.checkride,
           status: 'decision_required',
           decisionSecondsRemaining: EMERGENCY_DECISION_SECONDS,
-          objective: SHARED_AUTONOMY_MISSION.objective,
+          objective: missionBriefFor(this.state.mode, true).objective,
           alert: EMERGENCY_ALERT,
           inspectedSources: Object.freeze([]),
         }),
@@ -1459,6 +1522,10 @@ class FlightSimulator {
     const captureRadiusNm = checkpointCaptureRadiusNm(active, this.state.controlOwner)
     const runwayAlignedFinal = active.kind === 'final' && route.destination === 'KPWK'
       ? (() => {
+          if (this.state.mode === 'judge') {
+            return horizontalDistanceNm <= captureRadiusNm
+              && Math.abs(headingError(KPWK_RUNWAY_16.headingDeg, _headingDeg)) <= 25
+          }
           const positionFrame = runwayFrame(position, KPWK_THRESHOLD, KPWK_RUNWAY_16.headingDeg)
           const finalFrame = runwayFrame(active, KPWK_THRESHOLD, KPWK_RUNWAY_16.headingDeg)
           return positionFrame.alongNm >= finalFrame.alongNm
@@ -1548,6 +1615,7 @@ class FlightSimulator {
   }
 
   private navigation(state: FlightState, phase: MissionPhase, outcome: MissionOutcome, runway: ReturnType<FlightSimulator['runway']>) {
+    const envelope = flightEnvelopeFor(state.mode)
     const active = state.route.waypoints[state.route.activeWaypointIndex]
     const bearingToNextFixDeg = active ? navigationBearingDeg(state, active) : null
     const closingRateKt = active && bearingToNextFixDeg !== null
@@ -1555,7 +1623,7 @@ class FlightSimulator {
       : null
     const frame = runwayFrame(state, runway.threshold, runway.heading)
     const glidepathErrorFt = state.altitudeFt - this.glidepathAltitude(state, runway.threshold, runway.elevation)
-    const stableApproach = phase === 'approach' && Math.abs(frame.crossNm) < 0.08 && Math.abs(glidepathErrorFt) < 180 && state.airspeedKt >= A380_ENVELOPE.stableApproachMinKt && state.airspeedKt <= A380_ENVELOPE.stableApproachMaxKt && state.gearDown && state.flapsDeg >= A380_ENVELOPE.approachFlapsDeg
+    const stableApproach = phase === 'approach' && Math.abs(frame.crossNm) < 0.08 && Math.abs(glidepathErrorFt) < 180 && state.airspeedKt >= envelope.stableApproachMinKt && state.airspeedKt <= envelope.stableApproachMaxKt && state.gearDown && (envelope.hasConventionalFlaps ? state.flapsDeg >= envelope.approachFlapsDeg : state.flapsDeg === 0)
     return Object.freeze({
       phase: outcome === 'in_progress' ? phase : outcome === 'landed' ? 'complete' : 'failed',
       outcome, nextFix: active?.id ?? null,
@@ -1563,7 +1631,7 @@ class FlightSimulator {
       bearingToNextFixDeg,
       closingRateKt,
       captureRadiusNm: active ? checkpointCaptureRadiusNm(active, state.controlOwner) : null,
-      minimumTurnRadiusNm: coordinatedTurnRadiusNm(Math.max(state.airspeedKt, A380_ENVELOPE.minCommandSpeedKt), ROUTE_BANK_DEG),
+      minimumTurnRadiusNm: coordinatedTurnRadiusNm(Math.max(state.airspeedKt, envelope.minCommandSpeedKt), ROUTE_BANK_DEG),
       routeStatus: active ? (this.routeProgress.eventSent ? 'stalled' : 'tracking') : 'idle',
       distanceToThresholdNm: distanceNm(state, state.route.destination === 'KLAK' ? LAKESIDE_THRESHOLD : runway.threshold), centerlineErrorNm: frame.crossNm,
       glidepathErrorFt, stableApproach, eventRevision: this.eventRevision,
