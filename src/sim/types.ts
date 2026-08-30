@@ -74,6 +74,7 @@ export interface MissionNavigationState { readonly phase: MissionPhase; readonly
 
 /** Temporary compact view for the old panel while it is replaced in parallel. */
 export interface CheckrideState {
+  readonly runId: string
   readonly seed: CheckrideSeed
   readonly status: 'armed' | 'decision_required' | 'awaiting_human' | 'resolved' | 'complete'
   readonly objective: string
@@ -81,6 +82,7 @@ export interface CheckrideState {
   readonly wallClockDeadlineSeconds: number
   readonly simulationRate: number
   readonly decisionSecondsRemaining: number | null
+  readonly decisionContextRead: boolean
   readonly fuelMinutesRemaining: number
   readonly alert: string | null
   readonly humanApproval: 'not_required' | 'pending' | 'approved' | 'denied'
@@ -107,7 +109,19 @@ export interface PilotControls { readonly pitchAxis: number; readonly bankAxis: 
 export interface TraceEvent { readonly id: number; readonly time: number; readonly elapsedSeconds: number; readonly actor: TraceActor; readonly action: string; readonly reason: string; readonly details: Readonly<Record<string, unknown>> }
 export interface Airport { readonly code: 'KPWK' | 'KNFD' | 'KLAK'; readonly name: string; readonly lat: number; readonly lon: number; readonly elevationFt: number }
 export interface MissionRunway { readonly id: string; readonly airport: Airport['code']; readonly thresholdLat: number; readonly thresholdLon: number; readonly farEndLat: number; readonly farEndLon: number; readonly headingDeg: number; readonly lengthFt: number; readonly widthFt: number; readonly elevationFt: number }
-export interface MissionBrief { readonly id: string; readonly name: string; readonly objective: string; readonly start: string; readonly deadlineSeconds: number; readonly airports: readonly Airport[]; readonly runways: readonly MissionRunway[]; readonly availablePlans: readonly RoutePlan[]; readonly evidenceSources: readonly EvidenceSource[]; readonly successConditions: readonly string[] }
+export interface MissionBrief {
+  readonly id: string
+  readonly name: string
+  readonly objective: string
+  readonly start: string
+  readonly deadlineSeconds: number
+  readonly airports: readonly Airport[]
+  readonly runways: readonly MissionRunway[]
+  readonly assignedRoute: { readonly plan: 'continue_klak'; readonly destination: 'KLAK'; readonly runway: '22' }
+  readonly availablePlans: readonly RoutePlan[]
+  readonly evidenceSources: readonly EvidenceSource[]
+  readonly successConditions: readonly string[]
+}
 
 export interface DecisionRouteOption { readonly plan: Exclude<RoutePlan, 'unassigned'>; readonly destination: 'KLAK' | 'KPWK'; readonly runway: '04' | '22' | '16'; readonly distanceNm: number; readonly estimatedMinutes: number; readonly risk: 'low' | 'moderate' | 'high'; readonly summary: string; readonly recommended: boolean }
 export interface EmergencyDecisionContext { readonly evidence: readonly FlightEvidence[]; readonly decisionSecondsRemaining: number | null; readonly fuelMinutesRemaining: number; readonly comfortLimits: { readonly maximumBankDeg: number; readonly warningLoadFactorG: number; readonly warningJerkGPerSecond: number }; readonly routeOptions: readonly DecisionRouteOption[] }

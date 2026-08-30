@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { flightToolDefinitionsFor } from '../src/shared/flightTools.ts'
+import { executeFlightTool, executeFlightToolFromUnknown } from '../src/shared/executeFlightTool.ts'
 import { flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg } from '../src/sim/flightSimulator.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from '../src/sim/aerodynamics.ts'
 import { CONCORDE_ENVELOPE } from '../src/sim/aircraftEnvelope.ts'
@@ -29,7 +30,7 @@ assert.equal(flightSimulator.getState().checkride.deadlineSeconds, 600)
 flightSimulator.transferControl('agent', 'agent', 'Simulation smoke test')
 assert.equal(flightSimulator.getState().mission.phase, 'preflight')
 assert.equal(flightSimulator.getState().route.plan, 'unassigned')
-flightSimulator.getDecisionContext()
+assert.throws(() => flightSimulator.getDecisionContext(), /sealed until emergency_detected/)
 
 const preflight = flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
 assert.equal(preflight.accepted, true)
@@ -375,6 +376,89 @@ const saturatedScore = flightSimulator.getState().checkride.score
 const displayedDeductions = saturatedScore.deductions.reduce((total, deduction) => total + deduction.points, 0)
 assert.equal(saturatedScore.total, 0)
 assert.equal(displayedDeductions, 100, 'Displayed deductions should reconcile exactly with the final score')
+
+const startTool = flightToolDefinitionsFor('judge').find(({ name }) => name === 'start_flight')
+assert.ok(startTool)
+assert.deepEqual(startTool.inputSchema.properties, {}, 'The agent must not choose a scenario seed or evaluation mode')
+await assert.rejects(
+  executeFlightToolFromUnknown('start_flight', { seed: 81 }),
+  /takes no arguments/,
+)
+
+const preflightStates = ([17, 42, 81] as const).map((seed) => {
+  flightSimulator.reset(seed, 'judge')
+  const state = flightSimulator.getState()
+  return { fuelMinutesRemaining: state.fuelMinutesRemaining, scenario: state.scenario }
+})
+assert.deepEqual(preflightStates[0], preflightStates[1])
+assert.deepEqual(preflightStates[1], preflightStates[2])
+
+const sealedDepartureStates = ([17, 42, 81] as const).map((seed) => {
+  flightSimulator.reset(seed, 'judge')
+  flightSimulator.transferControl('agent', 'agent', 'Sealed departure trajectory regression')
+  flightSimulator.setRoute('continue_klak', 'File the same assigned route.', 'agent')
+  flightSimulator.beginTakeoff('agent', 'Begin the same assigned departure.')
+  flightSimulator.advanceForTesting(40)
+  const state = flightSimulator.getState()
+  const { seed: _seed, runId: _runId, ...checkride } = state.checkride
+  return { ...state, checkride }
+})
+assert.deepEqual(sealedDepartureStates[0], sealedDepartureStates[1])
+assert.deepEqual(sealedDepartureStates[1], sealedDepartureStates[2])
+
+flightSimulator.reset(17, 'judge')
+const rawStart = await executeFlightTool('start_flight', {})
+const hasPrivateSeed = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.some(hasPrivateSeed)
+  if (typeof value !== 'object' || value === null) return false
+  return Object.entries(value).some(([key, nested]) => key === 'seed' || hasPrivateSeed(nested))
+}
+const assertSafeAgentResult = (value: unknown) => {
+  const serialized = JSON.stringify(value)
+  assert.equal(hasPrivateSeed(value), false, 'Live WebMCP results must not expose the private scenario seed')
+  assert.doesNotMatch(serialized, /Oil pressure is dropping|intermittently unresponsive|heavy rain puts runway 16/i)
+  assert.match(serialized, /recommendedNextTool/)
+}
+assertSafeAgentResult(rawStart)
+assert.equal(rawStart.guidance.recommendedNextTool, 'get_mission_brief')
+assert.equal(rawStart.details.mode, 'judge')
+assert.equal(rawStart.details.runId, rawStart.details.state.checkride.runId)
+const sealedDecision = await executeFlightTool('get_decision_context', {})
+assert.equal(sealedDecision.details.available, false)
+assert.equal(sealedDecision.details.context, null)
+assert.equal(sealedDecision.guidance.recommendedNextTool, 'get_mission_brief')
+
+const rawBrief = await executeFlightTool('get_mission_brief', {})
+assertSafeAgentResult(rawBrief)
+assert.deepEqual(rawBrief.details.brief.assignedRoute, { plan: 'continue_klak', destination: 'KLAK', runway: '22' })
+assert.equal(rawBrief.guidance.recommendedNextTool, 'set_route')
+const rawRoute = await executeFlightTool('set_route', { plan: 'continue_klak', reason: 'File the assigned preflight route.' })
+assertSafeAgentResult(rawRoute)
+assert.equal(rawRoute.guidance.recommendedNextTool, 'begin_takeoff')
+const rawTakeoff = await executeFlightTool('begin_takeoff', { reason: 'Assigned route filed and takeoff configuration verified.' })
+assertSafeAgentResult(rawTakeoff)
+assert.equal(rawTakeoff.guidance.recommendedNextTool, 'wait_for_flight_event')
+
+flightSimulator.advanceForTesting(51)
+const rawEmergency = await executeFlightTool('wait_for_flight_event', { after_revision: 0, events: ['emergency_detected'], timeout_ms: 1_000 })
+assert.equal(hasPrivateSeed(rawEmergency), false)
+assert.equal(rawEmergency.event, 'emergency_detected')
+assert.equal(rawEmergency.guidance.recommendedNextTool, 'get_decision_context')
+const rawEvidence = await executeFlightTool('inspect_flight_evidence', {})
+assert.equal(rawEvidence.details.inspectedSources.length, 4)
+assert.equal(rawEvidence.guidance.recommendedNextTool, 'get_decision_context')
+const prematureRoute = await executeFlightTool('set_route', { plan: 'return_kpwk', reason: 'Attempt a route before combined decision context.' })
+assert.equal(prematureRoute.accepted, false)
+assert.equal(prematureRoute.guidance.recommendedNextTool, 'get_decision_context')
+const rawDecision = await executeFlightTool('get_decision_context', {})
+assert.equal(hasPrivateSeed(rawDecision), false)
+assert.equal(rawDecision.details.available, true)
+assert.equal(rawDecision.details.context?.evidence.length, 4)
+assert.equal(rawDecision.guidance.recommendedNextTool, 'set_route')
+const humanControl = await executeFlightTool('transfer_control', { owner: 'human', reason: 'Return control for ownership guidance regression.' })
+assert.equal(humanControl.details.controlOwner, 'human')
+assert.equal(humanControl.guidance.recommendedNextTool, 'wait_for_flight_event')
+assert.deepEqual(humanControl.guidance.allowedNextTools, ['get_flight_state', 'wait_for_flight_event'])
 
 console.log(JSON.stringify({
   checkpoint: checkpoint.message,

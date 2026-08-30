@@ -1,13 +1,34 @@
 import type {
-  ActionReceipt, ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotTargetsInput, CheckrideSeed,
-  ControlOwner, EvidenceSource, FlightEventType, FlightEventWaitResult, FlightEvidence,
-  FlightMode, FlightState, EmergencyDecisionContext, MissionBrief, RoutePlan,
+  ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotTargetsInput, CheckrideSeed,
+  ConfigurationProcedure, ControlOwner, EvidenceSource, FlightEventType, FlightEvidence,
+  FlightMode, FlightState, EmergencyDecisionContext, MissionBrief, MissionPhase, RoutePlan,
 } from '../sim/types.ts'
 import { A380_ENVELOPE, CONCORDE_ENVELOPE } from '../sim/aircraftEnvelope.ts'
 
 type JsonSchema = Readonly<Record<string, unknown>>
 export type ToolReceiptTone = 'neutral' | 'success' | 'warning' | 'critical' | 'automation'
-export interface FlightToolReceipt<T> { readonly ok: true; readonly summary: string; readonly tone: ToolReceiptTone; readonly details: T }
+export type AgentFlightState = Omit<FlightState, 'checkride'> & {
+  readonly checkride: Omit<FlightState['checkride'], 'seed'>
+}
+
+export interface FlightToolGuidance {
+  readonly phase: MissionPhase
+  readonly requiredAction: string
+  readonly recommendedNextTool: FlightToolName | null
+  readonly recommendedArguments: Readonly<Record<string, unknown>> | null
+  readonly allowedNextTools: readonly FlightToolName[]
+  readonly procedure: ConfigurationProcedure
+  readonly eventRevision: number
+  readonly decisionSecondsRemaining: number | null
+}
+
+export interface FlightToolReceipt<T> {
+  readonly ok: true
+  readonly summary: string
+  readonly tone: ToolReceiptTone
+  readonly guidance: FlightToolGuidance
+  readonly details: T
+}
 
 export const checkrideSeeds = [17, 42, 81] as const satisfies readonly CheckrideSeed[]
 export const evidenceSources = ['weather', 'cockpit', 'traffic', 'passenger'] as const satisfies readonly EvidenceSource[]
@@ -15,7 +36,7 @@ export const routePlans = ['continue_klak', 'return_kpwk'] as const satisfies re
 export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'plan_updated', 'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
 export interface FlightToolArguments {
-  start_flight: { readonly seed?: CheckrideSeed; readonly mode?: FlightMode }
+  start_flight: Record<string, never>
   get_mission_brief: Record<string, never>
   get_flight_state: Record<string, never>
   get_decision_context: Record<string, never>
@@ -31,19 +52,40 @@ export interface FlightToolArguments {
 }
 
 export interface FlightToolResults {
-  start_flight: FlightToolReceipt<{ readonly seed: CheckrideSeed; readonly mode: FlightMode; readonly brief: MissionBrief; readonly state: FlightState }>
+  start_flight: FlightToolReceipt<{ readonly runId: string; readonly mode: FlightMode; readonly state: AgentFlightState }>
   get_mission_brief: FlightToolReceipt<{ readonly brief: MissionBrief }>
-  get_flight_state: FlightToolReceipt<{ readonly state: FlightState; readonly units: Readonly<Record<string, string>> }>
-  get_decision_context: FlightToolReceipt<{ readonly context: EmergencyDecisionContext }>
+  get_flight_state: FlightToolReceipt<{ readonly state: AgentFlightState; readonly units: Readonly<Record<string, string>> }>
+  get_decision_context: FlightToolReceipt<{ readonly available: boolean; readonly context: EmergencyDecisionContext | null }>
   inspect_flight_evidence: FlightToolReceipt<{ readonly evidence: FlightEvidence | readonly FlightEvidence[]; readonly inspectedSources: readonly EvidenceSource[] }>
-  set_route: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
-  begin_takeoff: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
-  set_autopilot_targets: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
-  rebuild_active_leg: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
-  configure_aircraft: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
-  request_human_approval: ActionReceipt & { readonly ok: boolean; readonly tone: ToolReceiptTone }
-  wait_for_flight_event: FlightEventWaitResult & { readonly ok: true; readonly summary: string; readonly tone: ToolReceiptTone }
-  transfer_control: FlightToolReceipt<{ readonly controlOwner: ControlOwner; readonly state: FlightState }>
+  set_route: FlightToolActionResult
+  begin_takeoff: FlightToolActionResult
+  set_autopilot_targets: FlightToolActionResult
+  rebuild_active_leg: FlightToolActionResult
+  configure_aircraft: FlightToolActionResult
+  request_human_approval: FlightToolActionResult
+  wait_for_flight_event: FlightToolWaitResult
+  transfer_control: FlightToolReceipt<{ readonly controlOwner: ControlOwner; readonly state: AgentFlightState }>
+}
+
+export interface FlightToolActionResult {
+  readonly accepted: boolean
+  readonly ok: boolean
+  readonly summary: string
+  readonly eventRevision: number
+  readonly state: AgentFlightState
+  readonly tone: ToolReceiptTone
+  readonly guidance: FlightToolGuidance
+}
+
+export interface FlightToolWaitResult {
+  readonly revision: number
+  readonly event: FlightEventType | 'timeout'
+  readonly message: string
+  readonly state: AgentFlightState
+  readonly ok: true
+  readonly summary: string
+  readonly tone: ToolReceiptTone
+  readonly guidance: FlightToolGuidance
 }
 
 export type FlightToolName = keyof FlightToolArguments
@@ -54,29 +96,29 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_flight', title: 'Start flight', readOnly: false,
-    description: 'Start a reproducible mission on North Field runway 18 and take copilot control. Use full for the ten-minute evaluation or judge for the compressed four-minute demo. The aircraft remains stopped while the copilot files the preflight route.',
-    inputSchema: { type: 'object', properties: { seed: { type: 'number', enum: checkrideSeeds, default: 17 }, mode: { type: 'string', enum: ['full', 'judge'], default: 'full' } }, additionalProperties: false },
+    description: 'Start the page-selected flight and take copilot control. The environment privately selects a reproducible scenario; no future condition is disclosed before its flight event. This tool takes no arguments. Follow guidance.recommendedNextTool in every result. The lifecycle is start_flight, get_mission_brief, set_route, begin_takeoff, then wait_for_flight_event.',
+    inputSchema: emptySchema,
   },
   {
     name: 'get_mission_brief', title: 'Read mission brief', readOnly: true,
-    description: 'Read the start, airports, runways, route choices, deadline, and landing criteria.', inputSchema: emptySchema,
+    description: 'Read the assigned preflight route, start, airports, runways, deadline, aircraft procedures, and landing criteria. File brief.assignedRoute with set_route before takeoff. Future conditions remain sealed.', inputSchema: emptySchema,
   },
   {
     name: 'get_flight_state', title: 'Read flight state', readOnly: true,
-    description: 'Read live flight data. Navigation includes bearing, closing rate, checkpoint width, achievable turn radius, and whether progress has stalled. Passenger safety includes current G-load and jerk.', inputSchema: emptySchema,
+    description: 'Read current flight data and machine-readable guidance. Navigation includes bearing, closing rate, checkpoint width, achievable turn radius, and whether progress has stalled. Passenger safety includes current G-load and jerk. The private scenario seed is never returned during a run.', inputSchema: emptySchema,
   },
   {
     name: 'get_decision_context', title: 'Read emergency options', readOnly: true,
-    description: 'After emergency_detected, read all evidence, the comfort envelope, fuel, decision time, and ranked KPWK/KLAK route options in one call. This starts the agent decision clock if it has not started.', inputSchema: emptySchema,
+    description: 'Available only after emergency_detected. Read the newly available evidence, comfort envelope, fuel, decision time, and ranked route options. Before the event it returns available false without revealing routes or future conditions. This starts the agent decision clock if it has not started.', inputSchema: emptySchema,
   },
   {
     name: 'inspect_flight_evidence', title: 'Inspect evidence', readOnly: true,
-    description: 'Read current weather, cockpit, traffic, or passenger evidence. Omit source to inspect all four reports.',
+    description: 'Read weather, cockpit, traffic, or passenger evidence currently available to the crew. Before an enroute event this contains only normal preflight reports, never the sealed future condition. Omit source to inspect all reports.',
     inputSchema: { type: 'object', properties: { source: { type: 'string', enum: evidenceSources } }, additionalProperties: false },
   },
   {
-    name: 'set_route', title: 'Choose route', readOnly: false,
-    description: 'Before takeoff, file continue_klak to Lakeside Municipal runway 22. Filing does not move the aircraft. After emergency_detected, read get_decision_context and choose return_kpwk or continue_klak. The flight director follows a physically achievable route and emits checkpoint_reached at each fly-through gate.',
+    name: 'set_route', title: 'File or revise route', readOnly: false,
+    description: 'Before takeoff, file the plan in get_mission_brief.brief.assignedRoute. Filing does not move the aircraft. Do not revise it until emergency_detected. After that event, read get_decision_context and select a route from context.routeOptions. The flight director emits checkpoint_reached at each fly-through gate.',
     inputSchema: { type: 'object', properties: { plan: { type: 'string', enum: routePlans }, reason: { type: 'string', minLength: 1 } }, required: ['plan', 'reason'], additionalProperties: false },
   },
   {

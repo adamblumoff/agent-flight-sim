@@ -44,10 +44,10 @@ The WebMCP adapter is optional. Browsers without `document.modelContext` retain 
 
 | Tool | Purpose |
 | --- | --- |
-| `start_flight` | Start seed 17, 42, or 81 in `full` or `judge` mode and take copilot control. |
-| `get_mission_brief` | Read airports, runways, route choices, deadline, and landing criteria. |
+| `start_flight` | Start the page-selected mode with a privately selected scenario and take copilot control. |
+| `get_mission_brief` | Read the assigned preflight route, airports, runways, deadline, and landing criteria. |
 | `get_flight_state` | Read aircraft, navigation, weather, wind, passengers, configuration, score, and route progress. |
-| `get_decision_context` | Read all emergency evidence, comfort limits, fuel, decision time, and ranked route options. |
+| `get_decision_context` | After `emergency_detected`, read the newly available evidence, comfort limits, fuel, decision time, and ranked route options. |
 | `inspect_flight_evidence` | Read one or all weather, cockpit, traffic, and passenger reports. |
 | `set_route` | File the preflight route or select the emergency route with a reason. |
 | `begin_takeoff` | Begin the takeoff roll after route filing. |
@@ -59,6 +59,8 @@ The WebMCP adapter is optional. Browsers without `document.modelContext` retain 
 | `transfer_control` | Accept a requested handoff or return control to the pilot. |
 
 The live copilot panel displays tool name, reason, completion state, call latency, summary, and reward change. This makes agent behavior judgeable without opening developer tools.
+
+Every live tool result includes `guidance` with the required action, recommended tool and arguments, allowed tools, current procedure, event revision, and decision time. The scenario seed and future conditions stay out of live WebMCP results. The seed appears only in the completed trajectory so an evaluator can replay the episode.
 
 ## Reward and termination
 

@@ -661,7 +661,7 @@ export default function App() {
           world: worldStatus.message,
           webMcp: webMcpLabels[webMcpStatus],
           missionRevision: state.mission.eventRevision,
-          scenarioId: `Seed ${state.checkride.seed}`,
+          scenarioId: state.debrief.status === 'in_progress' ? 'Sealed until debrief' : `Seed ${state.checkride.seed}`,
           recentTools: activities.slice(-4).reverse().map((activity) => `${activity.title} · ${activity.status}`),
         }}
         onApprove={() => resolveApproval(true)}
