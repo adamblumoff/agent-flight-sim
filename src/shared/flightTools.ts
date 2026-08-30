@@ -3,7 +3,7 @@ import type {
   ControlOwner, EvidenceSource, FlightEventType, FlightEventWaitResult, FlightEvidence,
   FlightMode, FlightState, EmergencyDecisionContext, MissionBrief, RoutePlan,
 } from '../sim/types'
-import { A380_ENVELOPE } from '../sim/a380Envelope'
+import { A380_ENVELOPE, CONCORDE_ENVELOPE } from '../sim/aircraftEnvelope'
 
 type JsonSchema = Readonly<Record<string, unknown>>
 export type ToolReceiptTone = 'neutral' | 'success' | 'warning' | 'critical' | 'automation'
@@ -81,13 +81,13 @@ export const flightToolDefinitions = [
   },
   {
     name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
-    description: `Begin the takeoff roll after filing continue_klak. At ${A380_ENVELOPE.rotateSpeedKt} knots the flight director rotates at about ${A380_ENVELOPE.rotationRateDegPerSecond} degrees per second, lifts off near ${A380_ENVELOPE.liftoffPitchDeg} degrees, and targets ${A380_ENVELOPE.initialClimbPitchDeg} degrees before following climb guidance. It holds runway heading through ${A380_ENVELOPE.departureHeadingReleaseAglFt} ft AGL. A runway excursion or surface strike causes a crash.`,
+    description: `Begin the takeoff roll after filing continue_klak. Full mode uses the A380-style ${A380_ENVELOPE.rotateSpeedKt}-knot rotation profile. Judge mode models Concorde: V1 ${CONCORDE_ENVELOPE.decisionSpeedKt}, VR ${CONCORDE_ENVELOPE.rotateSpeedKt}, V2 ${CONCORDE_ENVELOPE.takeoffSafetySpeedKt}, then ${CONCORDE_ENVELOPE.initialClimbSpeedKt} knots. Both hold runway heading through ${A380_ENVELOPE.departureHeadingReleaseAglFt} ft AGL. A runway excursion or surface strike causes a crash.`,
     inputSchema: { type: 'object', properties: { reason: { type: 'string', minLength: 1 } }, required: ['reason'], additionalProperties: false },
   },
   {
     name: 'set_autopilot_targets', title: 'Set autopilot targets', readOnly: false,
-    description: 'Set persistent intent-level heading, altitude, speed, or vertical mode. Supplying heading selects heading hold. Set lateralMode to route to resume route guidance. Commands remain active until changed.',
-    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: 645, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: A380_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, lateralMode: { type: 'string', enum: ['route', 'heading'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
+    description: `Set persistent intent-level heading, altitude, speed, or vertical mode. Full mode accepts ${A380_ENVELOPE.minCommandSpeedKt}-${A380_ENVELOPE.maxCommandSpeedKt} kt; Concorde Judge mode accepts ${CONCORDE_ENVELOPE.minCommandSpeedKt}-${CONCORDE_ENVELOPE.maxCommandSpeedKt} kt. Out-of-envelope speeds are clamped. Supplying heading selects heading hold. Set lateralMode to route to resume route guidance. Commands remain active until changed.`,
+    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: 645, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: CONCORDE_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, lateralMode: { type: 'string', enum: ['route', 'heading'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
   },
   {
     name: 'rebuild_active_leg', title: 'Rebuild active leg', readOnly: false,
@@ -96,7 +96,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'configure_aircraft', title: 'Configure aircraft', readOnly: false,
-    description: 'Set A380-style landing gear and simplified flap detents: 10° represents CONF 1+F, 20° represents CONF 3, and 30° represents FULL. Read state.procedure first; out-of-sequence settings are rejected.',
+    description: 'Set landing gear and high-lift configuration. Full mode uses simplified A380 flap detents: 10° is CONF 1+F, 20° is CONF 3, and 30° is FULL. Concorde Judge mode has no conventional flaps and requires 0° throughout. Read state.procedure first; out-of-sequence settings are rejected.',
     inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0, 10, 20, 30] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
   },
   {

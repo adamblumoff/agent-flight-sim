@@ -1,5 +1,5 @@
 import type { Airport, MissionRunway } from './types'
-import { A380_ENVELOPE } from './a380Envelope.ts'
+import { A380_ENVELOPE } from './aircraftEnvelope.ts'
 
 const EARTH_RADIUS_NM = 3_440.065
 const radians = (degrees: number) => degrees * Math.PI / 180

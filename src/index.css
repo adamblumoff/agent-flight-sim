@@ -3,7 +3,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: "Sora Variable", sans-serif;
+  --font-sans: "Atkinson Hyperlegible Next Variable", sans-serif;
   --font-mono: "Kode Mono Variable", monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -59,7 +59,7 @@
   --red: #e78068;
   color: var(--foreground);
   background: #151710;
-  font-family: "Sora Variable", sans-serif;
+  font-family: "Atkinson Hyperlegible Next Variable", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }

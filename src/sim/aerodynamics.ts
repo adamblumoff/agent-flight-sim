@@ -1,4 +1,4 @@
-import type { CheckrideSeed, ScenarioConditions } from './types'
+import type { CheckrideSeed, FlightMode, ScenarioConditions } from './types'
 
 const radians = (degrees: number) => degrees * Math.PI / 180
 const degrees = (value: number) => value * 180 / Math.PI
@@ -136,15 +136,16 @@ export function windCorrectedHeadingDeg(
   return normalizeHeading(desiredTrackDeg + correctionDeg)
 }
 
-/** Tuned A380-class drag expressed as knots-per-second of deceleration. */
-export function airborneDragKtPerSecond(airspeedKt: number, flapsDeg: number, gearDown: boolean, bankDeg: number) {
-  const speedRatio = Math.max(airspeedKt, 35) / 230
+/** Simplified terminal-area drag expressed as knots-per-second of deceleration. */
+export function airborneDragKtPerSecond(airspeedKt: number, flapsDeg: number, gearDown: boolean, bankDeg: number, mode: FlightMode = 'full') {
+  const concorde = mode === 'judge'
+  const speedRatio = Math.max(airspeedKt, 35) / (concorde ? 250 : 230)
   const dynamicPressure = speedRatio ** 2
   const loadFactor = 1 / Math.max(0.45, Math.cos(radians(Math.min(63, Math.abs(bankDeg)))))
-  const parasiteDrag = 2.9 * dynamicPressure
-  const configurationDrag = (flapsDeg / 30 * 1.2 + (gearDown ? 0.9 : 0)) * Math.max(0.35, dynamicPressure)
-  const inducedDrag = 0.55 * (150 / Math.max(airspeedKt, 90)) ** 2 * loadFactor
-  return 0.22 + parasiteDrag + configurationDrag + inducedDrag
+  const parasiteDrag = (concorde ? 3.1 : 2.9) * dynamicPressure
+  const configurationDrag = ((concorde ? 0 : flapsDeg / 30 * 1.2) + (gearDown ? concorde ? 1.05 : 0.9 : 0)) * Math.max(0.35, dynamicPressure)
+  const inducedDrag = (concorde ? 0.8 : 0.55) * ((concorde ? 160 : 150) / Math.max(airspeedKt, 90)) ** 2 * loadFactor
+  return (concorde ? 0.25 : 0.22) + parasiteDrag + configurationDrag + inducedDrag
 }
 
 export function stallResponseFor(
@@ -153,15 +154,17 @@ export function stallResponseFor(
   verticalSpeedFpm: number,
   bankDeg: number,
   flapsDeg: number,
+  mode: FlightMode = 'full',
 ): StallResponse {
   const verticalSpeedKt = verticalSpeedFpm * 60 / 6_076.12
   const flightPathDeg = degrees(Math.atan2(verticalSpeedKt, Math.max(airspeedKt, 1)))
   const angleOfAttackDeg = pitchDeg - flightPathDeg
-  const baseStallSpeedKt = flapsDeg >= 30 ? 110 : flapsDeg >= 20 ? 116 : flapsDeg >= 10 ? 123 : 132
+  const concorde = mode === 'judge'
+  const baseStallSpeedKt = concorde ? 150 : flapsDeg >= 30 ? 110 : flapsDeg >= 20 ? 116 : flapsDeg >= 10 ? 123 : 132
   const bankLoadFactor = 1 / Math.max(0.5, Math.cos(radians(Math.min(60, Math.abs(bankDeg)))))
   const stallSpeedKt = baseStallSpeedKt * Math.sqrt(bankLoadFactor)
   const speedSeverity = clamp((stallSpeedKt - airspeedKt) / 32, 0, 1)
-  const angleSeverity = clamp((angleOfAttackDeg - 13) / 10, 0, 1)
+  const angleSeverity = clamp((angleOfAttackDeg - (concorde ? 18 : 13)) / 10, 0, 1)
   const severity = Math.max(speedSeverity, angleSeverity)
   return Object.freeze({
     angleOfAttackDeg,

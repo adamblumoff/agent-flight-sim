@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg } from '../src/sim/flightSimulator.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from '../src/sim/aerodynamics.ts'
+import { CONCORDE_ENVELOPE } from '../src/sim/aircraftEnvelope.ts'
 
 const headwind = groundMotionFor(170, 180, { visibilityMiles: 10, ceilingFt: 6_500, windDirectionDeg: 180, windSpeedKt: 12, summary: 'Test wind' }, 0, 17)
 assert.ok(headwind.groundSpeedKt < 170)
@@ -276,8 +277,13 @@ const judgeResults = []
 for (const seed of [17, 42, 81] as const) {
   flightSimulator.reset(seed, 'judge')
   flightSimulator.transferControl('agent', 'agent', `Judge seed ${seed} regression`)
+  assert.equal(flightSimulator.getState().flapsDeg, 0)
+  assert.ok(flightSimulator.getMissionBrief().successConditions.some((condition) => condition.includes('no conventional flaps')))
+  assert.equal(flightSimulator.configureAircraft({ flapsDeg: 10, reason: 'Reject conventional flap use on Concorde.' }, 'agent').accepted, false)
   flightSimulator.setRoute('continue_klak', 'Normal route filed for the judge episode.', 'agent')
   flightSimulator.beginTakeoff('agent', 'Begin compressed judge episode')
+  let rotationSpeedKt: number | null = null
+  let airborneSpeedKt: number | null = null
   for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
     const state = flightSimulator.getState()
     if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
@@ -287,12 +293,18 @@ for (const seed of [17, 42, 81] as const) {
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
     flightSimulator.advanceForTesting(0.1)
+    const advanced = flightSimulator.getState()
+    if (rotationSpeedKt === null && advanced.pitchDeg > 0.1) rotationSpeedKt = advanced.airspeedKt
+    if (airborneSpeedKt === null && advanced.aircraftPhase === 'airborne') airborneSpeedKt = advanced.airspeedKt
+    assert.equal(advanced.flapsDeg, 0)
   }
   const judgeState = flightSimulator.getState()
-  judgeResults.push({ seed, outcome: judgeState.mission.outcome, elapsedSeconds: judgeState.elapsedSeconds, score: judgeState.checkride.score.total, nextFix: judgeState.mission.nextFix, distanceToNextFixNm: judgeState.mission.distanceToNextFixNm, route: judgeState.route.completedWaypointIds, position: { lat: judgeState.lat, lon: judgeState.lon, altitudeFt: judgeState.altitudeFt, headingDeg: judgeState.headingDeg, airspeedKt: judgeState.airspeedKt } })
+  judgeResults.push({ seed, outcome: judgeState.mission.outcome, elapsedSeconds: judgeState.elapsedSeconds, score: judgeState.checkride.score.total, rotationSpeedKt, airborneSpeedKt, nextFix: judgeState.mission.nextFix, distanceToNextFixNm: judgeState.mission.distanceToNextFixNm, route: judgeState.route.completedWaypointIds, position: { lat: judgeState.lat, lon: judgeState.lon, altitudeFt: judgeState.altitudeFt, headingDeg: judgeState.headingDeg, airspeedKt: judgeState.airspeedKt } })
   assert.equal(judgeState.checkride.deadlineSeconds, 720)
   assert.equal(judgeState.checkride.wallClockDeadlineSeconds, 240)
   assert.equal(judgeState.checkride.simulationRate, 3)
+  assert.ok((rotationSpeedKt ?? 0) >= CONCORDE_ENVELOPE.rotateSpeedKt - 1 && (rotationSpeedKt ?? Number.POSITIVE_INFINITY) <= CONCORDE_ENVELOPE.rotateSpeedKt + 2, `Judge seed ${seed} should begin rotation at VR: ${rotationSpeedKt}`)
+  assert.ok((airborneSpeedKt ?? 0) >= CONCORDE_ENVELOPE.takeoffSafetySpeedKt, `Judge seed ${seed} should remain runway-bound through V2: ${airborneSpeedKt}`)
   assert.equal(judgeState.mission.outcome, 'landed', `Judge seed ${seed} should land: ${JSON.stringify(judgeResults.at(-1))}`)
   assert.ok(judgeState.elapsedSeconds / judgeState.checkride.simulationRate < 240, `Judge seed ${seed} should finish inside four minutes: ${JSON.stringify(judgeResults.at(-1))}`)
 }
