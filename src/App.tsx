@@ -355,7 +355,7 @@ export default function App() {
     function handleKeyDown(event: KeyboardEvent) {
       if (showTakeoffBrief) return
       const target = event.target
-      if (target instanceof HTMLElement && target.matches('input:not([type="range"]), textarea, select, [contenteditable="true"]')) return
+      if (target instanceof HTMLElement && target.matches('input, textarea, select, [contenteditable="true"]')) return
 
       const current = flightSimulator.getState()
       const key = event.key.toLowerCase()

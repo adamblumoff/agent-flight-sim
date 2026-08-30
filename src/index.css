@@ -1732,17 +1732,18 @@ summary:focus-visible {
     top: 66px;
     right: 12px;
     left: auto;
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(3, 34px);
+    border-radius: 20px;
     transform: none;
   }
 
   .camera-divider {
-    width: 1px;
-    height: 22px;
-    margin: auto 2px;
+    display: none;
   }
 
   .audio-volume {
+    grid-column: 2 / 4;
     width: 76px;
     height: 34px;
     flex-direction: row;
