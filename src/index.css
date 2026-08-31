@@ -291,6 +291,7 @@ summary:focus-visible {
   display: grid;
   width: 34px;
   height: 34px;
+  margin: 0;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid rgb(244 239 222 / 24%);
@@ -300,6 +301,7 @@ summary:focus-visible {
 }
 
 .flight-brand-mark svg {
+  display: block;
   width: 16px;
   height: 16px;
   transform: rotate(-12deg);
@@ -315,7 +317,7 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
-.flight-brand span {
+.flight-brand > div > span {
   display: block;
   margin-top: 3px;
   color: rgb(244 239 222 / 62%);
@@ -592,11 +594,14 @@ summary:focus-visible {
   outline: none;
 }
 
-.minimap-collapse-toggle span {
-  font: 500 19px/1 "Atkinson Hyperlegible Next Variable", sans-serif;
+.minimap-collapse-toggle svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.25;
 }
 
-.flight-minimap svg {
+.flight-minimap > .minimap-map {
   display: block;
   width: 100%;
   height: auto;

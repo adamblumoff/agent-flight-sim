@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Minus, Plus } from 'lucide-react'
 import { KPWK_RUNWAY_16, LAKESIDE_RUNWAY_04, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
 import { checkpointCaptureRadiusNm } from '../sim/checkpoints'
 import type { FlightState, MissionRunway } from '../sim/types'
@@ -69,7 +70,7 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
         aria-expanded={!collapsed}
         onClick={() => setCollapsed((current) => !current)}
       >
-        <span aria-hidden="true">{collapsed ? '+' : '−'}</span>
+        {collapsed ? <Plus aria-hidden="true" /> : <Minus aria-hidden="true" />}
       </button>
       <svg className="minimap-map" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={activeWaypoint ? `Aircraft tracking ${activeWaypoint.name}` : 'No active route'}>
         <defs>
