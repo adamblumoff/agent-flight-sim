@@ -1,8 +1,8 @@
 import type {
-  ActionReceipt, ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotState, AutopilotTargetsInput,
+  ActionReceipt, ActiveLegRebuildStrategy, AircraftConfigurationInput, AtcClearance, AutopilotState, AutopilotTargetsInput,
   CheckrideSeed, ConfigurationProcedure, ControlOwner, DebriefEvent, EvidenceSource, FlightEvent,
   FlightEventType, FlightEventWaitInput, FlightEventWaitResult, FlightEvidence,
-  FlightMode, FlightState, FlightStateListener, EmergencyDecisionContext, MissionBrief, MissionOutcome, MissionPhase,
+  DiversionPlan, FlightMode, FlightState, FlightStateListener, EmergencyDecisionContext, MissionBrief, MissionOutcome, MissionPhase,
   PilotControls, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
   TraceEvent,
 } from './types'
@@ -42,6 +42,7 @@ const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 7
 const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 14
 const PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND = 420
 const EMERGENCY_DECISION_SECONDS = 60
+const ATC_RESPONSE_WALL_SECONDS = 2
 const MISSION_CONFIG = Object.freeze({
   full: Object.freeze({ deadlineSeconds: 10 * 60, wallClockDeadlineSeconds: 10 * 60, simulationRate: 1, emergencyTriggerSeconds: 45, takeoffAccelerationKtPerSecond: TAKEOFF_POWER_ACCEL_KT_PER_SECOND }),
   judge: Object.freeze({ deadlineSeconds: 12 * 60, wallClockDeadlineSeconds: 4 * 60, simulationRate: 3, emergencyTriggerSeconds: 50, takeoffAccelerationKtPerSecond: TAKEOFF_POWER_ACCEL_KT_PER_SECOND }),
@@ -65,6 +66,7 @@ const PASSENGER_INJURY_DRAW: Readonly<Record<CheckrideSeed, number>> = Object.fr
 const FLIGHT_EVENT_PRIORITY: Readonly<Partial<Record<FlightEventType, number>>> = Object.freeze({
   mission_failed: 100,
   emergency_detected: 90,
+  atc_clearance_received: 85,
   decision_timer_expired: 80,
   approval_required: 70,
   route_progress_stalled: 60,
@@ -550,7 +552,7 @@ const initialState = (seed: CheckrideSeed, mode: FlightMode = 'full'): FlightSta
     mode, ...start, altitudeFt: NORTH_FIELD_RUNWAY_18.elevationFt, airspeedKt: 0, verticalSpeedFpm: 0, headingDeg: NORTH_FIELD_RUNWAY_18.headingDeg,
     pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: envelope.takeoffFlapsDeg, gearDown: true,
     elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
-    agentMode: 'idle', autopilot, route: initialRoute(), scenario,
+    agentMode: 'idle', autopilot, route: initialRoute(), atc: Object.freeze({ status: 'none', requestedPlan: null, requestReason: null, clearance: null }), scenario,
     motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0, groundSpeedKt: 0, trackDeg: NORTH_FIELD_RUNWAY_18.headingDeg, headwindKt: NORMAL_DEPARTURE_SCENARIO.weather.windSpeedKt, crosswindKt: 0, angleOfAttackDeg: 0, stalled: false, turbulenceLevel: 'none' }),
     impact: null,
     aircraftPhase: 'takeoff_roll',
@@ -589,6 +591,7 @@ class FlightSimulator {
   private emergencyTriggered = false
   private decisionTimerExpired = false
   private decisionTimerRunning = false
+  private atcClearanceDueElapsedSeconds: number | null = null
   private decisionHoldTurnDirection: -1 | 1 = 1
   private departureGuidanceReleased = false
   private fuelExhausted = false
@@ -654,6 +657,7 @@ class FlightSimulator {
     this.emergencyTriggered = false
     this.decisionTimerExpired = false
     this.decisionTimerRunning = false
+    this.atcClearanceDueElapsedSeconds = null
     this.decisionHoldTurnDirection = 1
     this.departureGuidanceReleased = false
     this.fuelExhausted = false
@@ -841,13 +845,63 @@ class FlightSimulator {
   setFlaps = (degrees: number, actor: TraceActor = 'human', reason = 'Set flaps') => this.configureAircraft({ flapsDeg: clamp(degrees, 0, 30) as 0 | 10 | 20 | 30, reason }, actor)
   setGear = (down: boolean, actor: TraceActor = 'human', reason = 'Set gear') => this.configureAircraft({ gearDown: down, reason }, actor)
   setRoute = (plan: RoutePlan, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
-    if (plan === 'unassigned') return this.receipt(false, 'Choose continue_klak before departure or return_kpwk after the emergency.')
+    if (plan === 'unassigned') return this.receipt(false, 'Choose the assigned preflight route.')
     if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
     const filingPreflight = this.state.mission.phase === 'preflight'
     if (filingPreflight && plan !== 'continue_klak') return this.receipt(false, 'The preflight route is continue_klak to Lakeside Municipal runway 22.')
-    if (!filingPreflight && !this.emergencyTriggered) return this.receipt(false, 'The Lakeside route is active. Wait for a new scenario before changing it.')
-    if (this.emergencyTriggered && actor === 'agent' && !this.state.checkride.decisionContextRead) return this.receipt(false, 'Read get_decision_context before choosing the emergency route.')
-    const route = Object.freeze({ ...routeFor(plan, this.state, this.emergencyTriggered && plan === 'continue_klak', this.state.mode), reason })
+    if (!filingPreflight) {
+      if (actor === 'system' && this.emergencyTriggered) return this.activateRoute(plan, reason, false, actor)
+      return this.receipt(false, this.emergencyTriggered
+        ? 'Emergency routes require request_diversion, an ATC clearance, and accept_clearance.'
+        : 'The filed route remains active until a new clearance is issued.')
+    }
+    return this.activateRoute(plan, reason, true, actor)
+  }
+
+  requestDiversion = (plan: DiversionPlan, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
+    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    if (!this.emergencyTriggered || this.state.checkride.status !== 'decision_required') return this.receipt(false, 'No emergency diversion decision is active.')
+    if (!this.state.checkride.decisionContextRead) return this.receipt(false, 'Read get_decision_context before requesting a diversion.')
+    if (this.state.atc.status !== 'none') return this.receipt(false, `ATC is already ${this.state.atc.status}; continue the current clearance flow.`)
+    this.decisionTimerRunning = false
+    this.atcClearanceDueElapsedSeconds = this.state.elapsedSeconds + ATC_RESPONSE_WALL_SECONDS * MISSION_CONFIG[this.state.mode].simulationRate
+    this.state = Object.freeze({
+      ...this.state,
+      atc: Object.freeze({ status: 'requested', requestedPlan: plan, requestReason: reason, clearance: null }),
+      checkride: Object.freeze({ ...this.state.checkride, alert: 'Diversion requested. Maintain the hold and wait for ATC clearance.' }),
+    })
+    this.record(actor, 'atc_diversion_requested', reason, { plan })
+    this.addDebrief(actor, `Requested ${plan.replaceAll('_', ' ')} from ATC`)
+    this.publish(this.state)
+    return this.receipt(true, 'Diversion request sent. Maintain present guidance and wait for atc_clearance_received.')
+  }
+
+  acceptAtcClearance = (clearanceId: string, readback: string, actor: TraceActor = 'agent'): ActionReceipt => {
+    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const clearance = this.state.atc.clearance
+    if (this.state.atc.status !== 'cleared' || !clearance) return this.receipt(false, 'No ATC clearance is ready for readback.')
+    if (clearance.id !== clearanceId) return this.receipt(false, 'The clearance_id does not match the current ATC clearance.')
+    const normalized = readback.toUpperCase()
+    const runwayReadBack = normalized.includes(clearance.runway) || normalized.includes(String(Number(clearance.runway)))
+    const requiredReadbackPresent = normalized.includes(clearance.destination)
+      && runwayReadBack
+      && normalized.includes(String(clearance.altitudeFt))
+      && normalized.includes(String(Math.round(clearance.headingDeg)))
+    if (!requiredReadbackPresent) return this.receipt(false, 'Read back the clearance destination, runway, altitude, and initial heading exactly as issued.')
+    this.atcClearanceDueElapsedSeconds = null
+    this.state = Object.freeze({
+      ...this.state,
+      atc: Object.freeze({ ...this.state.atc, status: 'accepted' }),
+      checkride: Object.freeze({ ...this.state.checkride, alert: `ATC clearance accepted: ${clearance.instruction}` }),
+    })
+    this.record(actor, 'atc_clearance_readback', readback, { clearanceId, plan: clearance.plan })
+    this.addDebrief(actor, `Accepted ATC clearance ${clearance.id}`)
+    this.queueEvent('atc_clearance_accepted', `Readback correct. ${clearance.instruction}`)
+    return this.activateRoute(clearance.plan, readback, false, actor)
+  }
+
+  private activateRoute(plan: DiversionPlan, reason: string, filingPreflight: boolean, actor: TraceActor): ActionReceipt {
+    const route = Object.freeze({ ...routeFor(plan, this.state, !filingPreflight && plan === 'continue_klak', this.state.mode), reason })
     const activeTarget = route.waypoints[route.activeWaypointIndex]
     const autopilot = activeTarget ? Object.freeze({ enabled: actor === 'agent', headingDeg: navigationBearingDeg(this.state, activeTarget), altitudeFt: activeTarget.altitudeFt, airspeedKt: activeTarget.airspeedKt, verticalMode: activeTarget.altitudeFt < this.state.altitudeFt ? 'descend' as const : 'climb' as const, lateralMode: 'route' as const }) : this.state.autopilot
     this.routeProgress = { waypointId: '', bestDistanceNm: Number.POSITIVE_INFINITY, bestHeadingErrorDeg: Number.POSITIVE_INFINITY, secondsWithoutProgress: 0, eventSent: false }
@@ -1411,20 +1465,19 @@ class FlightSimulator {
       })
       this.record('system', 'scenario_triggered', EMERGENCY_ALERT, { seed: this.state.checkride.seed })
       this.addDebrief('system', 'Unexpected emergency scenario received')
-      this.queueEvent('emergency_detected', `${EMERGENCY_ALERT} Weather: ${this.selectedScenario.weather.summary} Engine: ${this.selectedScenario.engine.summary} Passenger: ${this.selectedScenario.passenger.summary} Traffic: ${this.selectedScenario.traffic.summary} Read get_decision_context once, then choose return_kpwk or continue_klak within 60 seconds.`)
+      this.queueEvent('emergency_detected', `${EMERGENCY_ALERT} Weather: ${this.selectedScenario.weather.summary} Engine: ${this.selectedScenario.engine.summary} Passenger: ${this.selectedScenario.passenger.summary} Traffic: ${this.selectedScenario.traffic.summary} Read get_decision_context once, then request return_kpwk or continue_klak from ATC within 60 seconds.`)
       if (humanControlled) {
-        this.setRoute(
-          'return_kpwk',
-          'The safest emergency route was loaded automatically for the human pilot: return to KPWK runway 16.',
-          'system',
-        )
+        this.ensureHumanEmergencyRoute()
       }
     }
+    if (this.state.atc.status === 'requested'
+      && this.atcClearanceDueElapsedSeconds !== null
+      && elapsedSeconds >= this.atcClearanceDueElapsedSeconds) this.issueAtcClearance()
     if (decisionTimerJustExpired) {
       this.decisionTimerExpired = true
-      this.state = Object.freeze({ ...this.state, checkride: Object.freeze({ ...this.state.checkride, alert: 'The emergency decision window expired. Choose and execute a route immediately.' }) })
+      this.state = Object.freeze({ ...this.state, checkride: Object.freeze({ ...this.state.checkride, alert: 'The emergency decision window expired. Request a diversion immediately.' }) })
       this.record('system', 'decision_timer_expired', 'Emergency route decision took longer than 60 seconds', {})
-      this.queueEvent('decision_timer_expired', 'The 60 second emergency decision window expired. Commit to a route immediately.')
+      this.queueEvent('decision_timer_expired', 'The 60 second emergency decision window expired. Request a diversion immediately.')
     }
     if (fuelJustExhausted && outcome === 'in_progress') {
       this.record('system', 'fuel_exhausted', 'The engine stopped after fuel exhaustion', {})
@@ -1665,8 +1718,51 @@ class FlightSimulator {
 
   private ensureHumanEmergencyRoute() {
     if (!this.emergencyTriggered || this.state.controlOwner !== 'human' || this.state.checkride.status !== 'decision_required') return
-    this.decisionTimerRunning = true
-    this.setRoute('return_kpwk', 'The safest emergency route was loaded automatically after the pilot took control: return to KPWK runway 16.', 'system')
+    const reason = 'Request the safest preprogrammed emergency return for the human pilot.'
+    this.decisionTimerRunning = false
+    this.state = Object.freeze({
+      ...this.state,
+      atc: Object.freeze({ status: 'requested', requestedPlan: 'return_kpwk', requestReason: reason, clearance: null }),
+    })
+    this.issueAtcClearance()
+    const clearance = this.state.atc.clearance
+    if (!clearance) return
+    this.acceptAtcClearance(
+      clearance.id,
+      `${clearance.destination} runway ${clearance.runway}, maintain ${clearance.altitudeFt} feet, initial heading ${Math.round(clearance.headingDeg)} degrees.`,
+      'system',
+    )
+  }
+
+  private issueAtcClearance() {
+    const plan = this.state.atc.requestedPlan
+    if (this.state.atc.status !== 'requested' || !plan) return
+    const route = routeFor(plan, this.state, plan === 'continue_klak', this.state.mode)
+    const initial = route.waypoints[route.activeWaypointIndex]
+    if (!initial || !route.destination || !route.runway || route.runway === '22') return
+    const headingDeg = navigationBearingDeg(this.state, initial)
+    const clearance: AtcClearance = Object.freeze({
+      id: `ATC-${this.state.checkride.runId.slice(0, 8)}-${this.eventRevision + 1}`,
+      plan,
+      destination: route.destination,
+      runway: route.runway,
+      routing: plan === 'return_kpwk' ? 'vectors' : 'direct',
+      initialFix: initial.name,
+      headingDeg,
+      altitudeFt: initial.altitudeFt,
+      airspeedKt: initial.airspeedKt,
+      approach: `${route.destination} runway ${route.runway}`,
+      instruction: `${plan === 'return_kpwk' ? 'Radar vectors' : `Cleared direct ${initial.name}`} to ${route.destination}; fly heading ${Math.round(headingDeg).toString().padStart(3, '0')}°, maintain ${initial.altitudeFt} ft and ${initial.airspeedKt} kt, expect runway ${route.runway}.`,
+    })
+    this.atcClearanceDueElapsedSeconds = null
+    this.state = Object.freeze({
+      ...this.state,
+      atc: Object.freeze({ ...this.state.atc, status: 'cleared', clearance }),
+      checkride: Object.freeze({ ...this.state.checkride, alert: `ATC clearance received: ${clearance.instruction}` }),
+    })
+    this.record('system', 'atc_clearance_issued', clearance.instruction, { clearanceId: clearance.id, plan })
+    this.addDebrief('system', `ATC issued ${clearance.id}`)
+    this.queueEvent('atc_clearance_received', `${clearance.instruction} Read back clearance ${clearance.id} with destination, runway, altitude, and initial heading.`)
   }
 
   private addDebrief(actor: TraceActor, summary: string) {

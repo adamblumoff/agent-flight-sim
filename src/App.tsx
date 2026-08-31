@@ -111,6 +111,11 @@ function deriveRecommendation(state: FlightState): string {
   if (!state.procedure.compliant) return state.procedure.instruction
   if (state.mission.routeStatus === 'stalled') return 'The active leg is no longer converging. Rebuild it from the current position instead of continuing the orbit.'
   if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
+  if (state.checkride.status === 'decision_required') {
+    if (state.atc.status === 'requested') return 'Maintain the current hold while ATC prepares the diversion clearance.'
+    if (state.atc.status === 'cleared') return `Read back and accept clearance ${state.atc.clearance?.id ?? ''} before changing course.`
+    return 'Review the emergency evidence, choose a diversion, and request clearance from ATC.'
+  }
   if (state.controlOwner === 'human' && state.route.plan === 'return_kpwk') {
     return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KPWK runway 16.'
   }
@@ -134,6 +139,20 @@ function derivePlan(state: FlightState): readonly string[] {
         ? 'File the Lakeside Municipal route; Judge Mode compresses the evaluation to four real-time minutes.'
         : 'File and fly the Lakeside Municipal runway 22 route, about ten minutes away.',
       'Take off from North Field runway 18, clean up the aircraft, and monitor for changes.',
+    ]
+  }
+  if (state.checkride.status === 'decision_required') {
+    if (state.atc.status === 'requested') return [
+      `ATC is evaluating the ${routePlanLabels[state.atc.requestedPlan ?? 'unassigned'].toLowerCase()} request.`,
+      'Maintain the current hold and wait for the clearance event.',
+    ]
+    if (state.atc.status === 'cleared' && state.atc.clearance) return [
+      state.atc.clearance.instruction,
+      `Read back clearance ${state.atc.clearance.id}; the FMS route loads only after acceptance.`,
+    ]
+    return [
+      'Read the combined emergency context and compare the two usable diversions.',
+      'Request one route from ATC; do not change course until it is cleared and read back.',
     ]
   }
   if (state.route.plan === 'unassigned') {
@@ -185,6 +204,11 @@ function deriveAction(state: FlightState): string {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
   }
   if (state.checkride.status === 'armed') return 'Normal departure. Monitoring the aircraft and surrounding conditions.'
+  if (state.checkride.status === 'decision_required') {
+    if (state.atc.status === 'requested') return 'Diversion requested. Holding while ATC prepares the clearance.'
+    if (state.atc.status === 'cleared') return `ATC clearance ${state.atc.clearance?.id ?? ''} is awaiting readback.`
+    return 'Assessing the emergency before requesting a diversion clearance.'
+  }
   if (state.mission.routeStatus === 'stalled') return 'Route progress stalled. Waiting for a leg rebuild.'
   if (state.controlOwner === 'human' && state.route.plan === 'return_kpwk') {
     const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
@@ -209,6 +233,11 @@ function deriveHeadline(state: FlightState): string {
   if (state.mission.phase === 'preflight') return 'Preflight route required'
   if (state.mission.phase === 'takeoff') return 'Departing runway 18'
   if (state.checkride.status === 'armed') return 'Normal departure'
+  if (state.checkride.status === 'decision_required') {
+    if (state.atc.status === 'requested') return 'Waiting for ATC clearance'
+    if (state.atc.status === 'cleared') return 'ATC clearance received'
+    return 'Diversion decision required'
+  }
   if (state.approval.status === 'pending') return 'Holding for your decision'
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') return 'Assessing the emergency'
   if (state.agentMode === 'flying') {

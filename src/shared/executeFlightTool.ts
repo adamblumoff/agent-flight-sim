@@ -58,7 +58,19 @@ const guidanceFor = (state = flightSimulator.getState()): FlightToolGuidance => 
     if (!state.checkride.decisionContextRead) {
       return next(state, 'assess_new_flight_condition', 'get_decision_context', {}, ['get_flight_state', 'get_decision_context', 'inspect_flight_evidence', 'wait_for_flight_event'])
     }
-    return next(state, 'select_route_from_decision_context', 'set_route', null, ['get_flight_state', 'get_decision_context', 'inspect_flight_evidence', 'set_route'])
+    if (state.atc.status === 'none') {
+      return next(state, 'request_atc_diversion', 'request_diversion', null, ['get_flight_state', 'get_decision_context', 'inspect_flight_evidence', 'request_diversion'])
+    }
+    if (state.atc.status === 'requested') {
+      return next(state, 'wait_for_atc_clearance', 'wait_for_flight_event', { after_revision: state.mission.eventRevision, events: ['atc_clearance_received'], timeout_ms: 15_000 }, ['get_flight_state', 'wait_for_flight_event'])
+    }
+    if (state.atc.status === 'cleared' && state.atc.clearance) {
+      const clearance = state.atc.clearance
+      return next(state, 'read_back_and_accept_atc_clearance', 'accept_clearance', {
+        clearance_id: clearance.id,
+        readback: `${clearance.destination} runway ${clearance.runway}, maintain ${clearance.altitudeFt} feet, initial heading ${Math.round(clearance.headingDeg)} degrees.`,
+      }, ['get_flight_state', 'accept_clearance'])
+    }
   }
   if (state.mission.routeStatus === 'stalled') {
     return next(state, 'recover_active_route_leg', 'rebuild_active_leg', null, ['get_flight_state', 'rebuild_active_leg', 'wait_for_flight_event'])
@@ -110,7 +122,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     units: { altitude: 'feet MSL', airspeed: 'knots', verticalSpeed: 'feet per minute', angles: 'degrees', distance: 'nautical miles', fuelEndurance: 'minutes' },
   }),
   get_decision_context: async () => flightSimulator.getState().checkride.status === 'decision_required'
-    ? receipt('New flight condition assessed. Select a route from context.routeOptions.', 'neutral', { available: true, context: flightSimulator.getDecisionContext() })
+    ? receipt('New flight condition assessed. Request one route from context.routeOptions through ATC.', 'neutral', { available: true, context: flightSimulator.getDecisionContext() })
     : receipt('Decision context is sealed until emergency_detected. Continue the assigned flight.', 'warning', { available: false, context: null }),
   inspect_flight_evidence: async (input) => {
     if (input.source !== undefined && !evidenceSet.has(input.source)) throw new TypeError('source must be weather, cockpit, traffic, or passenger')
@@ -123,6 +135,16 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kpwk')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
     return action(flightSimulator.setRoute(input.plan as RoutePlan, input.reason.trim(), 'agent'))
+  },
+  request_diversion: async (input) => {
+    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kpwk')
+    if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
+    return action(flightSimulator.requestDiversion(input.plan as Exclude<RoutePlan, 'unassigned'>, input.reason.trim(), 'agent'))
+  },
+  accept_clearance: async (input) => {
+    if (typeof input.clearance_id !== 'string' || !input.clearance_id.trim()) throw new TypeError('clearance_id is required')
+    if (typeof input.readback !== 'string' || !input.readback.trim()) throw new TypeError('readback is required')
+    return action(flightSimulator.acceptAtcClearance(input.clearance_id.trim(), input.readback.trim(), 'agent'))
   },
   begin_takeoff: async (input) => {
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')

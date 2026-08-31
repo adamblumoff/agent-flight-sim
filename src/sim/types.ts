@@ -8,6 +8,7 @@ export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
 
 export interface FlightEvidence { readonly source: EvidenceSource; readonly headline: string; readonly detail: string; readonly reliability: EvidenceReliability }
 export type RoutePlan = 'unassigned' | 'continue_klak' | 'return_kpwk'
+export type DiversionPlan = Exclude<RoutePlan, 'unassigned'>
 export type VerticalMode = 'climb' | 'level' | 'descend' | 'approach'
 export type LateralMode = 'route' | 'heading'
 export type MissionPhase = 'preflight' | 'takeoff' | 'planning' | 'enroute' | 'approach' | 'flare' | 'rollout' | 'complete' | 'failed'
@@ -33,6 +34,26 @@ export interface ConfigurationProcedure { readonly stage: ConfigurationStage; re
 export type RouteWaypointKind = 'departure' | 'enroute' | 'base' | 'final' | 'touchdown'
 export interface RouteWaypoint { readonly id: string; readonly name: string; readonly kind: RouteWaypointKind; readonly lat: number; readonly lon: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly captureRadiusNm: number }
 export interface RouteState { readonly plan: RoutePlan; readonly destination: 'KLAK' | 'KPWK' | null; readonly runway: '04' | '22' | '16' | null; readonly waypoints: readonly RouteWaypoint[]; readonly activeWaypointIndex: number; readonly completedWaypointIds: readonly string[]; readonly activeLegOrigin: { readonly lat: number; readonly lon: number }; readonly reason: string | null }
+
+export interface AtcClearance {
+  readonly id: string
+  readonly plan: DiversionPlan
+  readonly destination: 'KLAK' | 'KPWK'
+  readonly runway: '04' | '16'
+  readonly routing: 'direct' | 'vectors'
+  readonly initialFix: string
+  readonly headingDeg: number
+  readonly altitudeFt: number
+  readonly airspeedKt: number
+  readonly approach: string
+  readonly instruction: string
+}
+export interface AtcState {
+  readonly status: 'none' | 'requested' | 'cleared' | 'accepted'
+  readonly requestedPlan: DiversionPlan | null
+  readonly requestReason: string | null
+  readonly clearance: AtcClearance | null
+}
 
 export interface ScenarioConditions {
   readonly weather: { readonly visibilityMiles: number; readonly ceilingFt: number; readonly windDirectionDeg: number; readonly windSpeedKt: number; readonly summary: string }
@@ -68,7 +89,7 @@ export interface LandingResult { readonly runway: string; readonly sinkRateFpm: 
 export interface DebriefEvent { readonly elapsedSeconds: number; readonly actor: TraceActor; readonly summary: string }
 export interface DebriefState { readonly status: 'in_progress' | 'landed' | 'failed'; readonly elapsedSeconds: number; readonly decision: RoutePlan; readonly decisionReason: string | null; readonly events: readonly DebriefEvent[]; readonly landing: LandingResult | null }
 
-export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'decision_timer_expired' | 'plan_updated' | 'route_progress_stalled' | 'checkpoint_reached' | 'comfort_limit_approaching' | 'passenger_safety_update' | 'configuration_required' | 'configuration_confirmed' | 'approval_required' | 'approval_resolved' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
+export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'decision_timer_expired' | 'atc_clearance_received' | 'atc_clearance_accepted' | 'plan_updated' | 'route_progress_stalled' | 'checkpoint_reached' | 'comfort_limit_approaching' | 'passenger_safety_update' | 'configuration_required' | 'configuration_confirmed' | 'approval_required' | 'approval_resolved' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
 export interface FlightEvent { readonly revision: number; readonly type: FlightEventType; readonly elapsedSeconds: number; readonly message: string; readonly phase: MissionPhase; readonly routePlan: RoutePlan }
 export interface MissionNavigationState { readonly phase: MissionPhase; readonly outcome: MissionOutcome; readonly nextFix: string | null; readonly distanceToNextFixNm: number | null; readonly bearingToNextFixDeg: number | null; readonly closingRateKt: number | null; readonly captureRadiusNm: number | null; readonly minimumTurnRadiusNm: number; readonly routeStatus: 'idle' | 'tracking' | 'stalled'; readonly distanceToThresholdNm: number; readonly centerlineErrorNm: number; readonly glidepathErrorFt: number; readonly stableApproach: boolean; readonly eventRevision: number }
 
@@ -100,7 +121,7 @@ export interface FlightState {
   readonly motion: MotionState
   readonly impact: ImpactState | null
   readonly aircraftPhase: AircraftPhase
-  readonly route: RouteState; readonly scenario: ScenarioConditions; readonly procedure: ConfigurationProcedure
+  readonly route: RouteState; readonly atc: AtcState; readonly scenario: ScenarioConditions; readonly procedure: ConfigurationProcedure
   readonly passengerSafety: PassengerSafetyState
   readonly approval: HumanApprovalState; readonly mission: MissionNavigationState; readonly checkride: CheckrideState; readonly debrief: DebriefState
 }

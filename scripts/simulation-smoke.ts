@@ -4,6 +4,17 @@ import { executeFlightTool, executeFlightToolFromUnknown } from '../src/shared/e
 import { flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg } from '../src/sim/flightSimulator.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from '../src/sim/aerodynamics.ts'
 import { CONCORDE_ENVELOPE } from '../src/sim/aircraftEnvelope.ts'
+import type { AtcClearance, DiversionPlan } from '../src/sim/types.ts'
+
+const clearanceReadback = (clearance: AtcClearance) => `${clearance.destination} runway ${clearance.runway}, maintain ${clearance.altitudeFt} feet, initial heading ${Math.round(clearance.headingDeg)} degrees.`
+const manageEmergencyClearance = (plan: DiversionPlan, reason: string) => {
+  const state = flightSimulator.getState()
+  if (state.checkride.status !== 'decision_required') return
+  if (!state.checkride.decisionContextRead) flightSimulator.getDecisionContext()
+  const atc = flightSimulator.getState().atc
+  if (atc.status === 'none') flightSimulator.requestDiversion(plan, reason, 'agent')
+  if (atc.status === 'cleared' && atc.clearance) flightSimulator.acceptAtcClearance(atc.clearance.id, clearanceReadback(atc.clearance), 'agent')
+}
 
 const headwind = groundMotionFor(170, 180, { visibilityMiles: 10, ceilingFt: 6_500, windDirectionDeg: 180, windSpeedKt: 12, summary: 'Test wind' }, 0, 17)
 assert.ok(headwind.groundSpeedKt < 170)
@@ -79,8 +90,22 @@ assert.ok((lakesideOption?.estimatedMinutes ?? 0) > 3)
 assert.ok((lakesideOption?.estimatedMinutes ?? Number.POSITIVE_INFINITY) * 60 + flightSimulator.getState().elapsedSeconds < flightSimulator.getState().checkride.deadlineSeconds)
 assert.equal(flightSimulator.getState().checkride.inspectedSources.length, 4)
 assert.equal(flightSimulator.rebuildActiveLeg('direct_intercept', 'Do not rewrite a healthy route.', 'agent').accepted, false)
-const reroute = flightSimulator.setRoute('return_kpwk', 'Weather remains usable, but engine indications require the nearby priority runway.', 'agent')
+assert.equal(flightSimulator.setRoute('return_kpwk', 'Attempt to bypass ATC after reading the context.', 'agent').accepted, false)
+const diversionRequest = flightSimulator.requestDiversion('return_kpwk', 'Weather remains usable, but engine indications require the nearby priority runway.', 'agent')
+assert.equal(diversionRequest.accepted, true)
+assert.equal(diversionRequest.state.atc.status, 'requested')
+assert.equal(diversionRequest.state.route.destination, 'KLAK')
+flightSimulator.advanceForTesting(2.1)
+const atcEvent = await flightSimulator.waitForFlightEvent({ afterRevision: emergency.revision, events: ['atc_clearance_received'], timeoutMs: 1_000 })
+assert.equal(atcEvent.event, 'atc_clearance_received')
+assert.equal(atcEvent.state.atc.status, 'cleared')
+assert.equal(atcEvent.state.route.destination, 'KLAK')
+const clearance = atcEvent.state.atc.clearance
+assert.ok(clearance)
+assert.equal(flightSimulator.acceptAtcClearance(clearance.id, 'KPWK runway 16', 'agent').accepted, false)
+const reroute = flightSimulator.acceptAtcClearance(clearance.id, clearanceReadback(clearance), 'agent')
 assert.equal(reroute.accepted, true)
+assert.equal(reroute.state.atc.status, 'accepted')
 assert.equal(reroute.state.route.destination, 'KPWK')
 assert.equal(reroute.state.checkride.decisionSecondsRemaining, null)
 assert.equal(reroute.state.route.completedWaypointIds.length, 0)
@@ -196,11 +221,7 @@ flightSimulator.transferControl('agent', 'agent', 'Full mission smoke test')
 flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
 flightSimulator.beginTakeoff('agent', 'Begin full mission departure')
 for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
-  const state = flightSimulator.getState()
-  if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
-    flightSimulator.getDecisionContext()
-    flightSimulator.setRoute('return_kpwk', 'Immediate KPWK return after reassessing the changed conditions.', 'agent')
-  }
+  manageEmergencyClearance('return_kpwk', 'Immediate KPWK return after reassessing the changed conditions.')
   const current = flightSimulator.getState()
   if (!current.procedure.compliant) {
     flightSimulator.configureAircraft({
@@ -238,11 +259,7 @@ for (const seed of [42, 81] as const) {
   flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
   flightSimulator.beginTakeoff('agent', `Begin seed ${seed} departure`)
   for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
-    const state = flightSimulator.getState()
-    if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
-      flightSimulator.getDecisionContext()
-      flightSimulator.setRoute('return_kpwk', 'The combined context favors the nearby priority runway.', 'agent')
-    }
+    manageEmergencyClearance('return_kpwk', 'The combined context favors the nearby priority runway.')
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
     flightSimulator.advanceForTesting(0.1)
@@ -258,11 +275,7 @@ for (const seed of [17, 42, 81] as const) {
   flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
   flightSimulator.beginTakeoff('agent', 'Begin Lakeside continuation')
   for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
-    const state = flightSimulator.getState()
-    if (state.checkride.status === 'decision_required') {
-      flightSimulator.getDecisionContext()
-      flightSimulator.setRoute('continue_klak', 'Continue to Lakeside after reviewing the combined context.', 'agent')
-    }
+    manageEmergencyClearance('continue_klak', 'Continue to Lakeside after reviewing the combined context.')
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
     flightSimulator.advanceForTesting(0.1)
@@ -294,11 +307,7 @@ for (const seed of [17, 42, 81] as const) {
   let rotationSpeedKt: number | null = null
   let airborneSpeedKt: number | null = null
   for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
-    const state = flightSimulator.getState()
-    if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
-      flightSimulator.getDecisionContext()
-      flightSimulator.setRoute('return_kpwk', 'Use the nearby priority runway in judge mode.', 'agent')
-    }
+    manageEmergencyClearance('return_kpwk', 'Use the nearby priority runway in judge mode.')
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
     flightSimulator.advanceForTesting(0.1)
@@ -324,11 +333,7 @@ for (const seed of [17, 42, 81] as const) {
   flightSimulator.setRoute('continue_klak', 'File the normal route before the Judge diversion test.', 'agent')
   flightSimulator.beginTakeoff('agent', 'Begin the Judge Lakeside diversion test.')
   for (let elapsed = 0; elapsed < 720 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
-    const state = flightSimulator.getState()
-    if (state.checkride.status === 'decision_required') {
-      flightSimulator.getDecisionContext()
-      flightSimulator.setRoute('continue_klak', 'Continue to Lakeside runway 04 after reviewing the combined context.', 'agent')
-    }
+    manageEmergencyClearance('continue_klak', 'Continue to Lakeside runway 04 after reviewing the combined context.')
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
     flightSimulator.advanceForTesting(0.1)
@@ -358,7 +363,11 @@ assert.ok(Math.abs(heldState.bankDeg) >= 10 && Math.abs(heldState.bankDeg) <= 13
 assert.ok(Math.abs(((heldState.headingDeg - headingBeforeDecisionHold + 540) % 360) - 180) > 20, 'Decision hold should turn instead of extending the departure heading')
 assert.ok((heldState.checkride.decisionSecondsRemaining ?? 0) >= 19, `Judge decision timer should use wall time: ${heldState.checkride.decisionSecondsRemaining}`)
 flightSimulator.getDecisionContext()
-flightSimulator.setRoute('return_kpwk', 'Return to the priority runway after deliberate model thinking time.', 'agent')
+flightSimulator.requestDiversion('return_kpwk', 'Return to the priority runway after deliberate model thinking time.', 'agent')
+flightSimulator.advanceForTesting(6.1)
+const delayedClearance = flightSimulator.getState().atc.clearance
+assert.ok(delayedClearance)
+flightSimulator.acceptAtcClearance(delayedClearance.id, clearanceReadback(delayedClearance), 'agent')
 for (let elapsed = 0; elapsed < 720 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
   const state = flightSimulator.getState()
   if (!state.procedure.compliant) flightSimulator.configureAircraft({ gearDown: state.procedure.gearDown, flapsDeg: state.procedure.flapsDeg, reason: state.procedure.instruction }, 'agent')
@@ -454,7 +463,21 @@ const rawDecision = await executeFlightTool('get_decision_context', {})
 assert.equal(hasPrivateSeed(rawDecision), false)
 assert.equal(rawDecision.details.available, true)
 assert.equal(rawDecision.details.context?.evidence.length, 4)
-assert.equal(rawDecision.guidance.recommendedNextTool, 'set_route')
+assert.equal(rawDecision.guidance.recommendedNextTool, 'request_diversion')
+const rawDiversion = await executeFlightTool('request_diversion', { plan: 'return_kpwk', reason: 'Request the nearby priority runway after reviewing all evidence.' })
+assert.equal(rawDiversion.accepted, true)
+assert.equal(rawDiversion.state.atc.status, 'requested')
+assert.equal(rawDiversion.guidance.recommendedNextTool, 'wait_for_flight_event')
+flightSimulator.advanceForTesting(6.1)
+const rawAtcEvent = await executeFlightTool('wait_for_flight_event', { after_revision: rawEmergency.revision, events: ['atc_clearance_received'], timeout_ms: 1_000 })
+assert.equal(rawAtcEvent.event, 'atc_clearance_received')
+assert.equal(rawAtcEvent.state.atc.status, 'cleared')
+assert.equal(rawAtcEvent.guidance.recommendedNextTool, 'accept_clearance')
+const rawClearance = rawAtcEvent.state.atc.clearance
+assert.ok(rawClearance)
+const rawAcceptance = await executeFlightTool('accept_clearance', { clearance_id: rawClearance.id, readback: clearanceReadback(rawClearance) })
+assert.equal(rawAcceptance.state.atc.status, 'accepted')
+assert.equal(rawAcceptance.guidance.recommendedNextTool, 'configure_aircraft')
 const humanControl = await executeFlightTool('transfer_control', { owner: 'human', reason: 'Return control for ownership guidance regression.' })
 assert.equal(humanControl.details.controlOwner, 'human')
 assert.equal(humanControl.guidance.recommendedNextTool, 'wait_for_flight_event')

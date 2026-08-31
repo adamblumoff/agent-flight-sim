@@ -1,6 +1,6 @@
 import type {
   ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotTargetsInput, CheckrideSeed,
-  ConfigurationProcedure, ControlOwner, EvidenceSource, FlightEventType, FlightEvidence,
+  ConfigurationProcedure, ControlOwner, DiversionPlan, EvidenceSource, FlightEventType, FlightEvidence,
   FlightMode, FlightState, EmergencyDecisionContext, MissionBrief, MissionPhase, RoutePlan,
 } from '../sim/types.ts'
 import { A380_ENVELOPE, CONCORDE_ENVELOPE } from '../sim/aircraftEnvelope.ts'
@@ -33,7 +33,7 @@ export interface FlightToolReceipt<T> {
 export const checkrideSeeds = [17, 42, 81] as const satisfies readonly CheckrideSeed[]
 export const evidenceSources = ['weather', 'cockpit', 'traffic', 'passenger'] as const satisfies readonly EvidenceSource[]
 export const routePlans = ['continue_klak', 'return_kpwk'] as const satisfies readonly RoutePlan[]
-export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'plan_updated', 'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
+export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'atc_clearance_received', 'atc_clearance_accepted', 'plan_updated', 'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
 export interface FlightToolArguments {
   start_flight: Record<string, never>
@@ -42,6 +42,8 @@ export interface FlightToolArguments {
   get_decision_context: Record<string, never>
   inspect_flight_evidence: { readonly source?: EvidenceSource }
   set_route: { readonly plan: 'continue_klak' | 'return_kpwk'; readonly reason: string }
+  request_diversion: { readonly plan: DiversionPlan; readonly reason: string }
+  accept_clearance: { readonly clearance_id: string; readonly readback: string }
   begin_takeoff: { readonly reason: string }
   set_autopilot_targets: AutopilotTargetsInput
   rebuild_active_leg: { readonly strategy: ActiveLegRebuildStrategy; readonly reason: string }
@@ -58,6 +60,8 @@ export interface FlightToolResults {
   get_decision_context: FlightToolReceipt<{ readonly available: boolean; readonly context: EmergencyDecisionContext | null }>
   inspect_flight_evidence: FlightToolReceipt<{ readonly evidence: FlightEvidence | readonly FlightEvidence[]; readonly inspectedSources: readonly EvidenceSource[] }>
   set_route: FlightToolActionResult
+  request_diversion: FlightToolActionResult
+  accept_clearance: FlightToolActionResult
   begin_takeoff: FlightToolActionResult
   set_autopilot_targets: FlightToolActionResult
   rebuild_active_leg: FlightToolActionResult
@@ -96,7 +100,7 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_flight', title: 'Start flight', readOnly: false,
-    description: 'Start the page-selected flight and take copilot control. The environment privately selects a reproducible scenario; no future condition is disclosed before its flight event. This tool takes no arguments. Follow guidance.recommendedNextTool in every result. The lifecycle is start_flight, get_mission_brief, set_route, begin_takeoff, then wait_for_flight_event.',
+    description: 'Start the page-selected flight and take copilot control. The environment privately selects a reproducible scenario; no future condition is disclosed before its flight event. This tool takes no arguments. Follow guidance.recommendedNextTool in every result. The lifecycle is start_flight, get_mission_brief, set_route, begin_takeoff, wait_for_flight_event, then request and accept any ATC diversion clearance.',
     inputSchema: emptySchema,
   },
   {
@@ -117,9 +121,19 @@ export const flightToolDefinitions = [
     inputSchema: { type: 'object', properties: { source: { type: 'string', enum: evidenceSources } }, additionalProperties: false },
   },
   {
-    name: 'set_route', title: 'File or revise route', readOnly: false,
-    description: 'Before takeoff, file the plan in get_mission_brief.brief.assignedRoute. Filing does not move the aircraft. Do not revise it until emergency_detected. After that event, read get_decision_context and select a route from context.routeOptions. The flight director emits checkpoint_reached at each fly-through gate.',
+    name: 'set_route', title: 'Load preflight route', readOnly: false,
+    description: 'Before takeoff, load the dispatcher-filed plan in get_mission_brief.brief.assignedRoute into the FMS. Filing does not move the aircraft. Emergency diversions require request_diversion followed by an ATC clearance and accept_clearance. The flight director emits checkpoint_reached at each fly-through gate.',
     inputSchema: { type: 'object', properties: { plan: { type: 'string', enum: routePlans }, reason: { type: 'string', minLength: 1 } }, required: ['plan', 'reason'], additionalProperties: false },
+  },
+  {
+    name: 'request_diversion', title: 'Request ATC diversion', readOnly: false,
+    description: 'After emergency_detected and get_decision_context, request one route from context.routeOptions. This sends the request to simulated ATC but does not change the active route. Wait for atc_clearance_received before acting.',
+    inputSchema: { type: 'object', properties: { plan: { type: 'string', enum: routePlans }, reason: { type: 'string', minLength: 1 } }, required: ['plan', 'reason'], additionalProperties: false },
+  },
+  {
+    name: 'accept_clearance', title: 'Read back ATC clearance', readOnly: false,
+    description: 'Accept the current ATC clearance by copying its clearance.id and reading back its destination, runway, altitude, and initial heading. Acceptance loads the cleared route into the FMS and resumes route guidance.',
+    inputSchema: { type: 'object', properties: { clearance_id: { type: 'string', minLength: 1 }, readback: { type: 'string', minLength: 1 } }, required: ['clearance_id', 'readback'], additionalProperties: false },
   },
   {
     name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
