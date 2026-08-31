@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Minus, Plus } from 'lucide-react'
-import { KPWK_RUNWAY_16, LAKESIDE_RUNWAY_04, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
+import { KSTL_RUNWAY_30L, LAKESIDE_RUNWAY_04, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
 import { checkpointCaptureRadiusNm } from '../sim/checkpoints'
 import type { FlightState, MissionRunway } from '../sim/types'
 
@@ -20,10 +20,10 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
   const routePoints = state.route.waypoints
   const destinationRunway = state.route.destination === 'KLAK'
     ? state.route.runway === '04' ? LAKESIDE_RUNWAY_04 : LAKESIDE_RUNWAY_22
-    : state.route.destination === 'KPWK' ? KPWK_RUNWAY_16 : NORTH_FIELD_RUNWAY_18
+    : state.route.destination === 'KSTL' ? KSTL_RUNWAY_30L : NORTH_FIELD_RUNWAY_18
   const visibleRunways = state.route.destination === 'KLAK'
     ? [NORTH_FIELD_RUNWAY_18, LAKESIDE_RUNWAY_22]
-    : [NORTH_FIELD_RUNWAY_18, KPWK_RUNWAY_16]
+    : [NORTH_FIELD_RUNWAY_18, KSTL_RUNWAY_30L]
   const boundsPoints: readonly MapPoint[] = [state, ...visibleRunways.flatMap(runwayPoints), ...routePoints]
   const referenceLatitude = boundsPoints.reduce((sum, point) => sum + point.lat, 0) / boundsPoints.length
   const longitudeScale = Math.cos(referenceLatitude * Math.PI / 180)

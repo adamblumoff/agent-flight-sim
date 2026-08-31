@@ -41,11 +41,11 @@ export interface FlightWorldProps {
 
 const loadingStatus: FlightWorldStatus = {
   kind: 'loading',
-  message: 'Preparing the KPWK training field.',
+  message: 'Preparing the KSTL training field.',
 }
 const readyStatus: FlightWorldStatus = {
   kind: 'ready',
-  message: 'KPWK training field is ready.',
+  message: 'KSTL training field is ready.',
 }
 
 const DEG_TO_RAD = Math.PI / 180

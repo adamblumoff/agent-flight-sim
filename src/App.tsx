@@ -15,6 +15,7 @@ import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
+import { RadioTranscript } from './components/radio-transcript'
 import { flightEnvelopeFor } from './sim/aircraftEnvelope'
 import { flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
@@ -39,7 +40,7 @@ const cameraOptions: ReadonlyArray<{
 const routePlanLabels: Record<RoutePlan, string> = {
   unassigned: 'Route pending',
   continue_klak: 'Lakeside Municipal',
-  return_kpwk: 'Return to KPWK',
+  return_kstl: 'Return to KSTL',
 }
 
 const formatLabel = (value: string) =>
@@ -116,8 +117,8 @@ function deriveRecommendation(state: FlightState): string {
     if (state.atc.status === 'cleared') return `Read back and accept clearance ${state.atc.clearance?.id ?? ''} before changing course.`
     return 'Review the emergency evidence, choose a diversion, and request clearance from ATC.'
   }
-  if (state.controlOwner === 'human' && state.route.plan === 'return_kpwk') {
-    return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KPWK runway 16.'
+  if (state.controlOwner === 'human' && state.route.plan === 'return_kstl') {
+    return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KSTL runway 30L.'
   }
   if (state.approval.status === 'pending') {
     return state.approval.requestedAction ?? 'Hold the current flight path until you decide.'
@@ -210,11 +211,11 @@ function deriveAction(state: FlightState): string {
     return 'Assessing the emergency before requesting a diversion clearance.'
   }
   if (state.mission.routeStatus === 'stalled') return 'Route progress stalled. Waiting for a leg rebuild.'
-  if (state.controlOwner === 'human' && state.route.plan === 'return_kpwk') {
+  if (state.controlOwner === 'human' && state.route.plan === 'return_kstl') {
     const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
     return waypoint
       ? `You are flying. Follow the active route to ${waypoint.name}.`
-      : 'You are flying the emergency return to KPWK runway 16.'
+      : 'You are flying the emergency return to KSTL runway 30L.'
   }
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
     return 'Reading the emergency context and comparing the available routes.'
@@ -310,9 +311,16 @@ export default function App() {
     flightSimulator.getSnapshot,
   )
   const { status: webMcpStatus, activities, clearActivities: clearWebMcpActivities } = useWebMcp(state.mode)
+  const radio = useSyncExternalStore(
+    flightAudio.subscribeRadio,
+    flightAudio.getRadioSnapshot,
+    flightAudio.getRadioSnapshot,
+  )
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
-  const [audioVolume, setAudioVolume] = useState(50)
-  const lastAudibleVolumeRef = useRef(50)
+  const [environmentVolume, setEnvironmentVolume] = useState(50)
+  const [radioVolume, setRadioVolume] = useState(68)
+  const [audioMuted, setAudioMuted] = useState(false)
+  const [captionsVisible, setCaptionsVisible] = useState(true)
   const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
   const [selectedMode, setSelectedMode] = useState<FlightMode>(() => new URLSearchParams(window.location.search).get('mode') === 'judge' ? 'judge' : 'full')
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
@@ -364,16 +372,22 @@ export default function App() {
     clearWebMcpActivities()
   }, [clearWebMcpActivities])
 
-  const changeAudioVolume = useCallback((volume: number) => {
+  const changeEnvironmentVolume = useCallback((volume: number) => {
     const nextVolume = Math.max(0, Math.min(100, Math.round(volume)))
-    if (nextVolume > 0) lastAudibleVolumeRef.current = nextVolume
-    setAudioVolume(nextVolume)
-    flightAudio.setVolume(nextVolume / 100)
+    setEnvironmentVolume(nextVolume)
+    flightAudio.setEnvironmentVolume(nextVolume / 100)
   }, [])
 
-  const toggleAudio = useCallback(() => {
-    changeAudioVolume(audioVolume === 0 ? lastAudibleVolumeRef.current : 0)
-  }, [audioVolume, changeAudioVolume])
+  const changeRadioVolume = useCallback((volume: number) => {
+    const nextVolume = Math.max(0, Math.min(100, Math.round(volume)))
+    setRadioVolume(nextVolume)
+    flightAudio.setRadioVolume(nextVolume / 100)
+  }, [])
+
+  const changeAudioMuted = useCallback((muted: boolean) => {
+    setAudioMuted(muted)
+    flightAudio.setMuted(muted)
+  }, [])
 
   const filePreflightRoute = useCallback(() => {
     flightSimulator.setRoute('continue_klak', 'Pilot filed the normal route to Lakeside Municipal runway 22 before departure.', 'human')
@@ -573,6 +587,19 @@ export default function App() {
 
       <FlightMinimap state={state} />
       <FlightCompass ref={compassRef} />
+      <RadioTranscript
+        className="flight-radio"
+        cues={radio.cues}
+        activeCueId={radio.activeCueId}
+        captionsVisible={captionsVisible}
+        audioMuted={audioMuted}
+        environmentVolume={environmentVolume}
+        radioVolume={radioVolume}
+        onCaptionsVisibleChange={setCaptionsVisible}
+        onAudioMutedChange={changeAudioMuted}
+        onEnvironmentVolumeChange={changeEnvironmentVolume}
+        onRadioVolumeChange={changeRadioVolume}
+      />
 
       <nav className="camera-switcher" aria-label="Camera view">
         {cameraOptions.map(({ mode, label, icon: Icon }) => (
@@ -592,26 +619,13 @@ export default function App() {
         <button
           type="button"
           className="camera-button"
-          aria-label={audioVolume === 0 ? 'Turn flight audio on' : 'Mute flight audio'}
-          aria-pressed={audioVolume === 0}
-          title={audioVolume === 0 ? 'Flight audio off' : `Flight audio ${audioVolume}%`}
-          onClick={toggleAudio}
+          aria-label={audioMuted ? 'Turn flight audio on' : 'Mute flight audio'}
+          aria-pressed={audioMuted}
+          title={audioMuted ? 'Flight audio off' : 'Mute flight audio'}
+          onClick={() => changeAudioMuted(!audioMuted)}
         >
-          {audioVolume === 0 ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+          {audioMuted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
         </button>
-        <label className="audio-volume">
-          <span className="sr-only">Flight audio volume</span>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={audioVolume}
-            aria-label={`Flight audio volume ${audioVolume}%`}
-            onChange={(event) => changeAudioVolume(event.currentTarget.valueAsNumber)}
-          />
-          <small aria-hidden="true">{audioVolume}%</small>
-        </label>
       </nav>
 
       <section className="instrument-console" aria-label="Flight instruments and controls">
@@ -683,6 +697,7 @@ export default function App() {
         webMcpCalls={activities.filter((activity) => activity.status !== 'running').map((activity) => ({
           tool: activity.tool,
           arguments: activity.arguments,
+          radio: activity.radioCues.map(({ id, speaker, text, priority }) => ({ id, speaker, text, priority })),
         }))}
         webMcpActivities={activities}
         trajectory={state.debrief.status === 'in_progress' ? null : createFlightTrajectory(activities, state)}

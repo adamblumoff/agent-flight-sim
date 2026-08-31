@@ -373,7 +373,7 @@ function createRain() {
 
 export function createAirportWorld(scene: Scene, anisotropy = 1) {
   const root = new Group()
-  root.name = 'KPWK training airport'
+  root.name = 'KSTL training airport'
   const terrain = new Mesh(new PlaneGeometry(TERRAIN_SIZE_METERS, TERRAIN_SIZE_METERS), createTerrainMaterial(anisotropy))
   terrain.rotation.x = -Math.PI / 2
   terrain.position.set(0, -0.08, 0)

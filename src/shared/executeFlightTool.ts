@@ -132,12 +132,12 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     return receipt(input.source ? `${input.source} report read` : 'All evidence read', 'neutral', { evidence, inspectedSources: flightSimulator.getState().checkride.inspectedSources })
   },
   set_route: async (input) => {
-    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kpwk')
+    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kstl')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
     return action(flightSimulator.setRoute(input.plan as RoutePlan, input.reason.trim(), 'agent'))
   },
   request_diversion: async (input) => {
-    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kpwk')
+    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kstl')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
     return action(flightSimulator.requestDiversion(input.plan as Exclude<RoutePlan, 'unassigned'>, input.reason.trim(), 'agent'))
   },

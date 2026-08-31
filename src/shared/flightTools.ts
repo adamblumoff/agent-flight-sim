@@ -4,6 +4,7 @@ import type {
   FlightMode, FlightState, EmergencyDecisionContext, MissionBrief, MissionPhase, RoutePlan,
 } from '../sim/types.ts'
 import { A380_ENVELOPE, CONCORDE_ENVELOPE } from '../sim/aircraftEnvelope.ts'
+import { KSTL_RUNWAY_30L } from '../sim/airfields.ts'
 
 type JsonSchema = Readonly<Record<string, unknown>>
 export type ToolReceiptTone = 'neutral' | 'success' | 'warning' | 'critical' | 'automation'
@@ -32,7 +33,7 @@ export interface FlightToolReceipt<T> {
 
 export const checkrideSeeds = [17, 42, 81] as const satisfies readonly CheckrideSeed[]
 export const evidenceSources = ['weather', 'cockpit', 'traffic', 'passenger'] as const satisfies readonly EvidenceSource[]
-export const routePlans = ['continue_klak', 'return_kpwk'] as const satisfies readonly RoutePlan[]
+export const routePlans = ['continue_klak', 'return_kstl'] as const satisfies readonly RoutePlan[]
 export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'atc_clearance_received', 'atc_clearance_accepted', 'plan_updated', 'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
 export interface FlightToolArguments {
@@ -41,7 +42,7 @@ export interface FlightToolArguments {
   get_flight_state: Record<string, never>
   get_decision_context: Record<string, never>
   inspect_flight_evidence: { readonly source?: EvidenceSource }
-  set_route: { readonly plan: 'continue_klak' | 'return_kpwk'; readonly reason: string }
+  set_route: { readonly plan: 'continue_klak' | 'return_kstl'; readonly reason: string }
   request_diversion: { readonly plan: DiversionPlan; readonly reason: string }
   accept_clearance: { readonly clearance_id: string; readonly readback: string }
   begin_takeoff: { readonly reason: string }
@@ -143,7 +144,7 @@ export const flightToolDefinitions = [
   {
     name: 'set_autopilot_targets', title: 'Set autopilot targets', readOnly: false,
     description: `Set persistent intent-level heading, altitude, speed, or vertical mode. Full mode accepts ${A380_ENVELOPE.minCommandSpeedKt}-${A380_ENVELOPE.maxCommandSpeedKt} kt; Concorde Judge mode accepts ${CONCORDE_ENVELOPE.minCommandSpeedKt}-${CONCORDE_ENVELOPE.maxCommandSpeedKt} kt. Out-of-envelope speeds are clamped. Supplying heading selects heading hold. Set lateralMode to route to resume route guidance. Commands remain active until changed.`,
-    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: 645, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: CONCORDE_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, lateralMode: { type: 'string', enum: ['route', 'heading'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
+    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: KSTL_RUNWAY_30L.elevationFt, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: CONCORDE_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, lateralMode: { type: 'string', enum: ['route', 'heading'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
   },
   {
     name: 'rebuild_active_leg', title: 'Rebuild active leg', readOnly: false,

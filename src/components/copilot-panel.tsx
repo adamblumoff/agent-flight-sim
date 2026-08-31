@@ -10,6 +10,7 @@ import {
 import { Button } from './ui/button'
 import type { WebMcpActivity } from '../webmcp/useWebMcp'
 import type { FlightTrajectory } from '../webmcp/trajectory'
+import type { RadioCue } from '../audio/radioCues'
 
 export interface CopilotObservation {
   readonly label: string
@@ -55,6 +56,7 @@ export interface CopilotPanelProps {
   readonly webMcpCalls: readonly {
     readonly tool: string
     readonly arguments: Readonly<Record<string, unknown>>
+    readonly radio: readonly Pick<RadioCue, 'id' | 'speaker' | 'text' | 'priority'>[]
   }[]
   readonly webMcpActivities: readonly WebMcpActivity[]
   readonly trajectory: FlightTrajectory | null
@@ -142,7 +144,7 @@ function MissionDebrief({
         <section className="debrief-export" aria-labelledby="webmcp-export-title">
           <div>
             <h3 id="webmcp-export-title">WebMCP call log</h3>
-            <p>{webMcpCalls.length} calls from this run · JSON only</p>
+            <p>{webMcpCalls.length} calls with deterministic radio cues · JSON only</p>
           </div>
           <Button
             variant="outline"

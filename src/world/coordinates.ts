@@ -1,17 +1,17 @@
 import type { FlightState } from '../sim/types'
 import type { Vector3 } from 'three'
-import { KPWK_RUNWAY_16, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
+import { KSTL_RUNWAY_30L, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
 
 export const FEET_TO_METERS = 0.3048
 export const NM_TO_METERS = 1_852
 
 export const WORLD_RUNWAY = Object.freeze({
-  thresholdLat: KPWK_RUNWAY_16.thresholdLat,
-  thresholdLon: KPWK_RUNWAY_16.thresholdLon,
-  headingDeg: KPWK_RUNWAY_16.headingDeg,
-  lengthFt: KPWK_RUNWAY_16.lengthFt,
-  widthFt: KPWK_RUNWAY_16.widthFt,
-  elevationFt: KPWK_RUNWAY_16.elevationFt,
+  thresholdLat: KSTL_RUNWAY_30L.thresholdLat,
+  thresholdLon: KSTL_RUNWAY_30L.thresholdLon,
+  headingDeg: KSTL_RUNWAY_30L.headingDeg,
+  lengthFt: KSTL_RUNWAY_30L.lengthFt,
+  widthFt: KSTL_RUNWAY_30L.widthFt,
+  elevationFt: KSTL_RUNWAY_30L.elevationFt,
   surfaceY: 0.12,
 })
 
@@ -43,7 +43,7 @@ const remoteRunwayToWorld = (
     x: threshold.x,
     y: threshold.y,
     z: threshold.z,
-    headingOffsetDeg: source.headingDeg - KPWK_RUNWAY_16.headingDeg,
+    headingOffsetDeg: source.headingDeg - KSTL_RUNWAY_30L.headingDeg,
     nearNumber,
     farNumber,
   })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { executeFlightToolFromUnknown } from '../shared/executeFlightTool'
 import { flightSimulator } from '../sim/flightSimulator'
 import type { FlightMode, FlightState } from '../sim/types'
+import { buildRadioCue, type RadioCue } from '../audio/radioCues'
 import {
   flightToolDefinitionsFor,
   type FlightToolDefinition,
@@ -26,6 +27,8 @@ export interface WebMcpActivity {
   readonly nextObservation: FlightState | null
   readonly result: { readonly ok: boolean; readonly summary: string } | null
   readonly arguments: Readonly<Record<string, unknown>>
+  readonly radioCues: readonly RadioCue[]
+  readonly traceStartId: number
 }
 
 type BeginActivity = (activity: Pick<WebMcpActivity, 'tool' | 'title' | 'arguments'>) => number
@@ -82,6 +85,8 @@ export function useWebMcp(mode: FlightMode) {
         observation,
         nextObservation: null,
         result: null,
+        radioCues: Object.freeze([]),
+        traceStartId: activity.tool === 'start_flight' ? 0 : (flightSimulator.getTrace().at(-1)?.id ?? 0),
       }
       setActivities((current) => activity.tool === 'start_flight' ? [event] : [...current, event])
       return id
@@ -89,17 +94,25 @@ export function useWebMcp(mode: FlightMode) {
     const completeActivity: CompleteActivity = (id, result, failed = false) => {
       const nextObservation = flightSimulator.getState()
       const completedAt = Date.now()
-      setActivities((current) => current.map((activity) => activity.id === id ? {
-        ...activity,
-        status: failed ? 'failed' : 'completed',
-        summary: result.summary,
-        completedAt,
-        latencyMs: completedAt - activity.startedAt,
-        scoreAfter: nextObservation.checkride.score.total,
-        rewardDelta: nextObservation.checkride.score.total - activity.scoreBefore,
-        nextObservation,
-        result,
-      } : activity))
+      setActivities((current) => current.map((activity) => {
+        if (activity.id !== id) return activity
+        const radioCues = flightSimulator.getTrace()
+          .filter((event) => event.id > activity.traceStartId)
+          .map((event) => buildRadioCue(event, nextObservation))
+          .filter((cue): cue is RadioCue => cue !== null)
+        return {
+          ...activity,
+          status: failed ? 'failed' : 'completed',
+          summary: result.summary,
+          completedAt,
+          latencyMs: completedAt - activity.startedAt,
+          scoreAfter: nextObservation.checkride.score.total,
+          rewardDelta: nextObservation.checkride.score.total - activity.scoreBefore,
+          nextObservation,
+          result,
+          radioCues: Object.freeze(radioCues),
+        }
+      }))
     }
 
     async function registerTools() {

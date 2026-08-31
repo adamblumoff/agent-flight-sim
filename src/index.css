@@ -498,54 +498,6 @@ summary:focus-visible {
   height: 15px;
 }
 
-.audio-volume {
-  display: flex;
-  height: 76px;
-  align-items: center;
-  flex-direction: column;
-  gap: 4px;
-  color: rgb(244 239 222 / 48%);
-  font: 500 7px/1 "Kode Mono Variable", monospace;
-}
-
-.audio-volume input {
-  appearance: none;
-  width: 16px;
-  height: 58px;
-  margin: 0;
-  accent-color: var(--cream);
-  background: transparent;
-  cursor: pointer;
-  direction: rtl;
-  writing-mode: vertical-lr;
-}
-
-.audio-volume input::-webkit-slider-runnable-track {
-  width: 4px;
-  border-radius: 999px;
-  background: rgb(244 239 222 / 20%);
-}
-
-.audio-volume input::-webkit-slider-thumb {
-  width: 12px;
-  height: 12px;
-  margin-left: -4px;
-  appearance: none;
-  border: 1px solid rgb(244 239 222 / 36%);
-  border-radius: 50%;
-  background: var(--cream);
-  box-shadow: 0 1px 5px rgb(0 0 0 / 45%);
-}
-
-.audio-volume input:focus-visible {
-  outline: 1px solid var(--cream);
-  outline-offset: 3px;
-}
-
-.audio-volume:focus-within {
-  color: var(--cream);
-}
-
 .camera-divider {
   width: 22px;
   height: 1px;
@@ -584,6 +536,13 @@ summary:focus-visible {
   color: rgb(244 239 222 / 72%);
   cursor: pointer;
   backdrop-filter: blur(8px);
+}
+
+.flight-radio {
+  position: absolute;
+  z-index: 9;
+  right: 400px;
+  bottom: 128px;
 }
 
 .minimap-collapse-toggle:hover,
@@ -1907,22 +1866,7 @@ summary:focus-visible {
     display: none;
   }
 
-  .audio-volume {
-    grid-column: 2 / 4;
-    width: 76px;
-    height: 34px;
-    flex-direction: row;
-    gap: 5px;
-  }
-
-  .audio-volume input {
-    width: 58px;
-    height: 16px;
-    direction: ltr;
-    writing-mode: horizontal-tb;
-  }
-
-  .audio-volume small {
+  .flight-radio {
     display: none;
   }
 

@@ -77,21 +77,21 @@ const emergency = await flightSimulator.waitForFlightEvent({ afterRevision: chec
 assert.equal(emergency.event, 'emergency_detected')
 assert.ok((emergency.state.checkride.decisionSecondsRemaining ?? 0) > 40)
 assert.equal(emergency.state.route.plan, 'continue_klak')
-assert.equal(flightSimulator.setRoute('return_kpwk', 'Attempted without the combined context.', 'agent').accepted, false)
+assert.equal(flightSimulator.setRoute('return_kstl', 'Attempted without the combined context.', 'agent').accepted, false)
 
 const decisionContext = flightSimulator.getDecisionContext()
 assert.equal(decisionContext.evidence.length, 4)
 assert.equal(decisionContext.routeOptions.length, 2)
-assert.equal(decisionContext.routeOptions.find((option) => option.recommended)?.plan, 'return_kpwk')
-assert.ok((decisionContext.routeOptions.find((option) => option.plan === 'return_kpwk')?.estimatedMinutes ?? 0) > 4)
+assert.equal(decisionContext.routeOptions.find((option) => option.recommended)?.plan, 'return_kstl')
+assert.ok((decisionContext.routeOptions.find((option) => option.plan === 'return_kstl')?.estimatedMinutes ?? 0) > 3)
 const lakesideOption = decisionContext.routeOptions.find((option) => option.plan === 'continue_klak')
 assert.equal(lakesideOption?.runway, '04')
 assert.ok((lakesideOption?.estimatedMinutes ?? 0) > 3)
 assert.ok((lakesideOption?.estimatedMinutes ?? Number.POSITIVE_INFINITY) * 60 + flightSimulator.getState().elapsedSeconds < flightSimulator.getState().checkride.deadlineSeconds)
 assert.equal(flightSimulator.getState().checkride.inspectedSources.length, 4)
 assert.equal(flightSimulator.rebuildActiveLeg('direct_intercept', 'Do not rewrite a healthy route.', 'agent').accepted, false)
-assert.equal(flightSimulator.setRoute('return_kpwk', 'Attempt to bypass ATC after reading the context.', 'agent').accepted, false)
-const diversionRequest = flightSimulator.requestDiversion('return_kpwk', 'Weather remains usable, but engine indications require the nearby priority runway.', 'agent')
+assert.equal(flightSimulator.setRoute('return_kstl', 'Attempt to bypass ATC after reading the context.', 'agent').accepted, false)
+const diversionRequest = flightSimulator.requestDiversion('return_kstl', 'Weather remains usable, but engine indications require the nearby priority runway.', 'agent')
 assert.equal(diversionRequest.accepted, true)
 assert.equal(diversionRequest.state.atc.status, 'requested')
 assert.equal(diversionRequest.state.route.destination, 'KLAK')
@@ -102,18 +102,20 @@ assert.equal(atcEvent.state.atc.status, 'cleared')
 assert.equal(atcEvent.state.route.destination, 'KLAK')
 const clearance = atcEvent.state.atc.clearance
 assert.ok(clearance)
-assert.equal(flightSimulator.acceptAtcClearance(clearance.id, 'KPWK runway 16', 'agent').accepted, false)
+assert.equal(flightSimulator.acceptAtcClearance(clearance.id, 'KSTL runway 30L', 'agent').accepted, false)
 const reroute = flightSimulator.acceptAtcClearance(clearance.id, clearanceReadback(clearance), 'agent')
 assert.equal(reroute.accepted, true)
 assert.equal(reroute.state.atc.status, 'accepted')
-assert.equal(reroute.state.route.destination, 'KPWK')
+assert.equal(reroute.state.route.destination, 'KSTL')
 assert.equal(reroute.state.checkride.decisionSecondsRemaining, null)
 assert.equal(reroute.state.route.completedWaypointIds.length, 0)
-assert.equal(reroute.state.mission.nextFix, 'KPWK_TURN_1')
+assert.equal(reroute.state.mission.nextFix, 'KSTL_TURN_1')
 const missedRouteState = flightSimulator.getState()
 const missedRouteFix = missedRouteState.route.waypoints[missedRouteState.route.activeWaypointIndex]
-flightSimulator.setAutopilotTargets({ headingDeg: (navigationBearingDeg(missedRouteState, missedRouteFix) + 180) % 360, lateralMode: 'heading' }, 'agent', 'Deliberately miss the route to exercise recovery')
-flightSimulator.advanceForTesting(45)
+flightSimulator.setAutopilotTargets({ headingDeg: (navigationBearingDeg(missedRouteState, missedRouteFix) + 90) % 360, lateralMode: 'heading' }, 'agent', 'Deliberately miss the route to exercise recovery')
+// Allow the standard 60-second convergence watchdog to fire while the
+// deliberately divergent heading is still on the KSTL intercept leg.
+flightSimulator.advanceForTesting(70)
 const stalledRoute = await flightSimulator.waitForFlightEvent({ afterRevision: emergency.revision, events: ['route_progress_stalled'], timeoutMs: 1_000 })
 assert.equal(stalledRoute.event, 'route_progress_stalled', JSON.stringify({ mission: flightSimulator.getState().mission, route: flightSimulator.getState().route, heading: flightSimulator.getState().headingDeg, autopilot: flightSimulator.getState().autopilot }))
 assert.equal(flightSimulator.getState().mission.routeStatus, 'stalled')
@@ -137,8 +139,8 @@ const humanEmergency = await flightSimulator.waitForFlightEvent({ afterRevision:
 assert.equal(humanEmergency.event, 'emergency_detected')
 const humanRoute = flightSimulator.getState()
 assert.equal(humanRoute.controlOwner, 'human')
-assert.equal(humanRoute.route.plan, 'return_kpwk')
-assert.equal(humanRoute.route.destination, 'KPWK')
+assert.equal(humanRoute.route.plan, 'return_kstl')
+assert.equal(humanRoute.route.destination, 'KSTL')
 assert.equal(humanRoute.checkride.status, 'resolved')
 assert.equal(humanRoute.checkride.decisionSecondsRemaining, null)
 assert.equal(humanRoute.autopilot.enabled, false)
@@ -154,7 +156,7 @@ assert.equal(flightSimulator.getState().checkride.status, 'decision_required')
 flightSimulator.transferControl('human', 'human', 'Pilot took control before the emergency event was consumed')
 const overrideRoute = flightSimulator.getState()
 assert.equal(overrideRoute.controlOwner, 'human')
-assert.equal(overrideRoute.route.plan, 'return_kpwk')
+assert.equal(overrideRoute.route.plan, 'return_kstl')
 assert.equal(overrideRoute.checkride.status, 'resolved')
 assert.equal(overrideRoute.checkride.decisionSecondsRemaining, null)
 assert.equal(overrideRoute.autopilot.enabled, false)
@@ -221,7 +223,7 @@ flightSimulator.transferControl('agent', 'agent', 'Full mission smoke test')
 flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
 flightSimulator.beginTakeoff('agent', 'Begin full mission departure')
 for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
-  manageEmergencyClearance('return_kpwk', 'Immediate KPWK return after reassessing the changed conditions.')
+  manageEmergencyClearance('return_kstl', 'Immediate KSTL return after reassessing the changed conditions.')
   const current = flightSimulator.getState()
   if (!current.procedure.compliant) {
     flightSimulator.configureAircraft({
@@ -238,6 +240,8 @@ if (completedMission.mission.outcome !== 'landed') {
     outcome: completedMission.mission.outcome,
     landing: completedMission.debrief.landing,
     impact: completedMission.impact,
+    mission: completedMission.mission,
+    position: { lat: completedMission.lat, lon: completedMission.lon, headingDeg: completedMission.headingDeg, altitudeFt: completedMission.altitudeFt },
     route: completedMission.route,
     motion: completedMission.motion,
     procedure: completedMission.procedure,
@@ -245,8 +249,8 @@ if (completedMission.mission.outcome !== 'landed') {
 }
 assert.equal(completedMission.mission.outcome, 'landed')
 assert.equal(completedMission.debrief.landing?.safe, true)
-assert.ok(completedMission.route.completedWaypointIds.includes('KPWK_TOUCHDOWN'))
-assert.ok(completedMission.route.completedWaypointIds.filter((id) => id.startsWith('KPWK_TURN_')).length <= 3)
+assert.ok(completedMission.route.completedWaypointIds.includes('KSTL_TOUCHDOWN'))
+assert.ok(completedMission.route.completedWaypointIds.filter((id) => id.startsWith('KSTL_TURN_')).length <= 3)
 assert.equal(completedMission.passengerSafety.status, 'comfortable')
 assert.ok(completedMission.elapsedSeconds > 300)
 assert.ok(completedMission.elapsedSeconds < completedMission.checkride.deadlineSeconds)
@@ -258,8 +262,8 @@ for (const seed of [42, 81] as const) {
   flightSimulator.transferControl('agent', 'agent', `Seed ${seed} route regression`)
   flightSimulator.setRoute('continue_klak', 'Normal preflight route filed before takeoff.', 'agent')
   flightSimulator.beginTakeoff('agent', `Begin seed ${seed} departure`)
-  for (let elapsed = 0; elapsed < 540 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
-    manageEmergencyClearance('return_kpwk', 'The combined context favors the nearby priority runway.')
+  for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+    manageEmergencyClearance('return_kstl', 'The combined context favors the nearby priority runway.')
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
     flightSimulator.advanceForTesting(0.1)
@@ -306,8 +310,8 @@ for (const seed of [17, 42, 81] as const) {
   flightSimulator.beginTakeoff('agent', 'Begin compressed judge episode')
   let rotationSpeedKt: number | null = null
   let airborneSpeedKt: number | null = null
-  for (let elapsed = 0; elapsed < 600 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
-    manageEmergencyClearance('return_kpwk', 'Use the nearby priority runway in judge mode.')
+  for (let elapsed = 0; elapsed < 720 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
+    manageEmergencyClearance('return_kstl', 'Use the nearby priority runway in judge mode.')
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) flightSimulator.configureAircraft({ gearDown: current.procedure.gearDown, flapsDeg: current.procedure.flapsDeg, reason: current.procedure.instruction }, 'agent')
     flightSimulator.advanceForTesting(0.1)
@@ -317,7 +321,7 @@ for (const seed of [17, 42, 81] as const) {
     assert.equal(advanced.flapsDeg, 0)
   }
   const judgeState = flightSimulator.getState()
-  judgeResults.push({ seed, outcome: judgeState.mission.outcome, elapsedSeconds: judgeState.elapsedSeconds, score: judgeState.checkride.score.total, rotationSpeedKt, airborneSpeedKt, nextFix: judgeState.mission.nextFix, distanceToNextFixNm: judgeState.mission.distanceToNextFixNm, route: judgeState.route.completedWaypointIds, position: { lat: judgeState.lat, lon: judgeState.lon, altitudeFt: judgeState.altitudeFt, headingDeg: judgeState.headingDeg, airspeedKt: judgeState.airspeedKt } })
+  judgeResults.push({ seed, outcome: judgeState.mission.outcome, elapsedSeconds: judgeState.elapsedSeconds, score: judgeState.checkride.score.total, rotationSpeedKt, airborneSpeedKt, nextFix: judgeState.mission.nextFix, distanceToNextFixNm: judgeState.mission.distanceToNextFixNm, route: judgeState.route.completedWaypointIds, landing: judgeState.debrief.landing, impact: judgeState.impact, position: { lat: judgeState.lat, lon: judgeState.lon, altitudeFt: judgeState.altitudeFt, headingDeg: judgeState.headingDeg, airspeedKt: judgeState.airspeedKt } })
   assert.equal(judgeState.checkride.deadlineSeconds, 720)
   assert.equal(judgeState.checkride.wallClockDeadlineSeconds, 240)
   assert.equal(judgeState.checkride.simulationRate, 3)
@@ -363,18 +367,21 @@ assert.ok(Math.abs(heldState.bankDeg) >= 10 && Math.abs(heldState.bankDeg) <= 13
 assert.ok(Math.abs(((heldState.headingDeg - headingBeforeDecisionHold + 540) % 360) - 180) > 20, 'Decision hold should turn instead of extending the departure heading')
 assert.ok((heldState.checkride.decisionSecondsRemaining ?? 0) >= 19, `Judge decision timer should use wall time: ${heldState.checkride.decisionSecondsRemaining}`)
 flightSimulator.getDecisionContext()
-flightSimulator.requestDiversion('return_kpwk', 'Return to the priority runway after deliberate model thinking time.', 'agent')
+flightSimulator.requestDiversion('return_kstl', 'Return to the priority runway after deliberate model thinking time.', 'agent')
 flightSimulator.advanceForTesting(6.1)
 const delayedClearance = flightSimulator.getState().atc.clearance
 assert.ok(delayedClearance)
 flightSimulator.acceptAtcClearance(delayedClearance.id, clearanceReadback(delayedClearance), 'agent')
 for (let elapsed = 0; elapsed < 720 && flightSimulator.getState().mission.outcome === 'in_progress'; elapsed += 0.1) {
   const state = flightSimulator.getState()
+  if (state.mission.routeStatus === 'stalled') {
+    flightSimulator.rebuildActiveLeg('direct_intercept', 'Recover the delayed judge route after the convergence watchdog fired.', 'agent')
+  }
   if (!state.procedure.compliant) flightSimulator.configureAircraft({ gearDown: state.procedure.gearDown, flapsDeg: state.procedure.flapsDeg, reason: state.procedure.instruction }, 'agent')
   flightSimulator.advanceForTesting(0.1)
 }
 const delayedJudgeState = flightSimulator.getState()
-assert.equal(delayedJudgeState.mission.outcome, 'landed', `Delayed Judge flight should land: ${JSON.stringify({ elapsedSeconds: delayedJudgeState.elapsedSeconds, route: delayedJudgeState.route.completedWaypointIds, mission: delayedJudgeState.mission })}`)
+assert.equal(delayedJudgeState.mission.outcome, 'landed', `Delayed Judge flight should land: ${JSON.stringify({ elapsedSeconds: delayedJudgeState.elapsedSeconds, route: delayedJudgeState.route.completedWaypointIds, mission: delayedJudgeState.mission, landing: delayedJudgeState.debrief.landing, impact: delayedJudgeState.impact, position: { lat: delayedJudgeState.lat, lon: delayedJudgeState.lon, altitudeFt: delayedJudgeState.altitudeFt, headingDeg: delayedJudgeState.headingDeg, airspeedKt: delayedJudgeState.airspeedKt } })}`)
 assert.ok(delayedJudgeState.elapsedSeconds / delayedJudgeState.checkride.simulationRate < 240, `Delayed Judge flight should finish inside four minutes: ${delayedJudgeState.elapsedSeconds / delayedJudgeState.checkride.simulationRate}`)
 
 flightSimulator.reset(17)
@@ -425,7 +432,7 @@ const hasPrivateSeed = (value: unknown): boolean => {
 const assertSafeAgentResult = (value: unknown) => {
   const serialized = JSON.stringify(value)
   assert.equal(hasPrivateSeed(value), false, 'Live WebMCP results must not expose the private scenario seed')
-  assert.doesNotMatch(serialized, /Oil pressure is dropping|intermittently unresponsive|heavy rain puts runway 16/i)
+  assert.doesNotMatch(serialized, /Oil pressure is dropping|intermittently unresponsive|heavy rain puts runway 30L/i)
   assert.match(serialized, /recommendedNextTool/)
 }
 assertSafeAgentResult(rawStart)
@@ -456,7 +463,7 @@ assert.equal(rawEmergency.guidance.recommendedNextTool, 'get_decision_context')
 const rawEvidence = await executeFlightTool('inspect_flight_evidence', {})
 assert.equal(rawEvidence.details.inspectedSources.length, 4)
 assert.equal(rawEvidence.guidance.recommendedNextTool, 'get_decision_context')
-const prematureRoute = await executeFlightTool('set_route', { plan: 'return_kpwk', reason: 'Attempt a route before combined decision context.' })
+const prematureRoute = await executeFlightTool('set_route', { plan: 'return_kstl', reason: 'Attempt a route before combined decision context.' })
 assert.equal(prematureRoute.accepted, false)
 assert.equal(prematureRoute.guidance.recommendedNextTool, 'get_decision_context')
 const rawDecision = await executeFlightTool('get_decision_context', {})
@@ -464,7 +471,7 @@ assert.equal(hasPrivateSeed(rawDecision), false)
 assert.equal(rawDecision.details.available, true)
 assert.equal(rawDecision.details.context?.evidence.length, 4)
 assert.equal(rawDecision.guidance.recommendedNextTool, 'request_diversion')
-const rawDiversion = await executeFlightTool('request_diversion', { plan: 'return_kpwk', reason: 'Request the nearby priority runway after reviewing all evidence.' })
+const rawDiversion = await executeFlightTool('request_diversion', { plan: 'return_kstl', reason: 'Request the nearby priority runway after reviewing all evidence.' })
 assert.equal(rawDiversion.accepted, true)
 assert.equal(rawDiversion.state.atc.status, 'requested')
 assert.equal(rawDiversion.guidance.recommendedNextTool, 'wait_for_flight_event')
@@ -489,7 +496,7 @@ console.log(JSON.stringify({
   timerExpiredScore: timerExpired.state.checkride.score.total,
   reroute: reroute.state.mission.nextFix,
   passengerSafety,
-  emergencyTurnFixes: completedMission.route.completedWaypointIds.filter((id) => id.startsWith('KPWK_TURN_')).length,
+  emergencyTurnFixes: completedMission.route.completedWaypointIds.filter((id) => id.startsWith('KSTL_TURN_')).length,
   missionElapsedSeconds: completedMission.elapsedSeconds,
   missionRemainingSeconds: completedMission.checkride.deadlineSeconds - completedMission.elapsedSeconds,
   landing: completedMission.debrief.landing,

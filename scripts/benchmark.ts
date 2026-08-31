@@ -12,9 +12,9 @@ for (const seed of seeds) {
   const maximumSteps = flightSimulator.getState().checkride.deadlineSeconds * 10
   for (let step = 0; step < maximumSteps && flightSimulator.getState().mission.outcome === 'in_progress'; step += 1) {
     const state = flightSimulator.getState()
-    if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kpwk') {
+    if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kstl') {
       flightSimulator.getDecisionContext()
-      flightSimulator.setRoute('return_kpwk', 'Return to the nearby priority runway.', 'agent')
+      flightSimulator.setRoute('return_kstl', 'Return to the nearby priority runway.', 'agent')
     }
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) {

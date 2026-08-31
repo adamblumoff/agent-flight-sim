@@ -1,0 +1,213 @@
+.radio-transcript {
+  width: min(360px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid rgb(244 239 222 / 16%);
+  border-radius: 14px;
+  background: rgb(23 24 21 / 91%);
+  box-shadow: 0 20px 55px rgb(0 0 0 / 28%);
+  color: var(--cream, #f4efde);
+  backdrop-filter: blur(18px) saturate(110%);
+}
+
+.radio-transcript-header {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 8px 7px 13px;
+  border-bottom: 1px solid rgb(244 239 222 / 11%);
+}
+
+.radio-transcript-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: rgb(244 239 222 / 64%);
+  font-size: 8px;
+  font-weight: 680;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.radio-transcript-title svg {
+  width: 13px;
+  height: 13px;
+  color: var(--green, #8bc49b);
+}
+
+.radio-transcript-title i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(244 239 222 / 25%);
+}
+
+.radio-transcript-title i[data-live="true"] {
+  background: var(--green, #8bc49b);
+  box-shadow: 0 0 0 3px rgb(139 196 155 / 10%);
+}
+
+.radio-transcript-controls {
+  display: flex;
+  gap: 3px;
+}
+
+.radio-transcript-controls button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgb(244 239 222 / 57%);
+  cursor: pointer;
+}
+
+.radio-transcript-controls button:hover {
+  background: rgb(244 239 222 / 8%);
+  color: var(--cream, #f4efde);
+}
+
+.radio-transcript-controls button[aria-pressed="true"] {
+  color: var(--green, #8bc49b);
+}
+
+.radio-transcript-controls button:first-child[aria-pressed="true"] {
+  color: var(--amber, #e2b76f);
+}
+
+.radio-transcript-controls button:focus-visible {
+  outline: 2px solid var(--cream, #f4efde);
+  outline-offset: 2px;
+}
+
+.radio-transcript-controls svg {
+  width: 14px;
+  height: 14px;
+}
+
+.radio-mixer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 8px 13px;
+  border-bottom: 1px solid rgb(244 239 222 / 8%);
+}
+
+.radio-mixer label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 7px;
+  color: rgb(244 239 222 / 46%);
+  font: 600 7px/1 "Kode Mono Variable", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.radio-mixer input {
+  width: 100%;
+  min-width: 0;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--green, #8bc49b);
+}
+
+.radio-mixer input:focus-visible {
+  outline: 1px solid var(--cream, #f4efde);
+  outline-offset: 2px;
+}
+
+.radio-transcript-content {
+  padding: 13px;
+}
+
+.radio-current-cue {
+  min-height: 53px;
+  padding-left: 11px;
+  border-left: 2px solid var(--green, #8bc49b);
+}
+
+.radio-current-cue[data-priority="high"] {
+  border-left-color: var(--amber, #e2b76f);
+}
+
+.radio-current-cue[data-priority="interrupt"] {
+  border-left-color: var(--red, #e78068);
+}
+
+.radio-current-cue > span,
+.radio-transcript-history span {
+  display: block;
+  color: var(--green, #8bc49b);
+  font: 650 8px/1.2 "Kode Mono Variable", monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.radio-current-cue p {
+  margin: 6px 0 0;
+  color: var(--cream, #f4efde);
+  font-size: 13px;
+  font-weight: 570;
+  line-height: 1.45;
+}
+
+.radio-current-cue .radio-standby {
+  margin: 0;
+  color: rgb(244 239 222 / 45%);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.radio-transcript-history {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 11px 0 0;
+  border-top: 1px solid rgb(244 239 222 / 10%);
+  list-style: none;
+}
+
+.radio-transcript-history li {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  gap: 9px;
+  align-items: baseline;
+}
+
+.radio-transcript-history span {
+  overflow: hidden;
+  color: rgb(244 239 222 / 42%);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.radio-transcript-history p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: rgb(244 239 222 / 64%);
+  font-size: 10px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.radio-captions-hidden {
+  margin: 0;
+  padding: 10px 13px;
+  color: rgb(244 239 222 / 42%);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .radio-transcript {
+    background: rgb(23 24 21 / 98%);
+    backdrop-filter: none;
+  }
+}

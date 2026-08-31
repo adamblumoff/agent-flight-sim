@@ -14,33 +14,38 @@ export function offsetPosition(origin: { lat: number; lon: number }, bearing: nu
   return Object.freeze({ lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI })
 }
 
-export const KPWK_AIRPORT: Airport = Object.freeze({
-  code: 'KPWK',
-  name: 'Chicago Executive Airport',
-  lat: 42.11255,
-  lon: -87.89998,
-  elevationFt: 645,
+// KSTL runway 30L uses its published threshold, true course, and 11,020 ft length.
+// The simulator's runway surface tracks the 30L threshold elevation rather than the
+// airport-reference elevation, so the landing physics meets the real pavement.
+export const KSTL_AIRPORT: Airport = Object.freeze({
+  code: 'KSTL',
+  name: 'St. Louis Lambert International Airport',
+  lat: 38.748698,
+  lon: -90.370026,
+  elevationFt: 617.3,
 })
 
-const KPWK_RUNWAY_LENGTH_FT = 9_000
-const KPWK_RUNWAY_THRESHOLD = Object.freeze({ lat: 42.123329, lon: -87.907126 })
-const KPWK_RUNWAY_FAR_END = offsetPosition(KPWK_RUNWAY_THRESHOLD, 159, KPWK_RUNWAY_LENGTH_FT / 6_076.12)
+const KSTL_RUNWAY_LENGTH_FT = 11_020
+const KSTL_RUNWAY_THRESHOLD = Object.freeze({ lat: 38.737782, lon: -90.346464 })
+const KSTL_RUNWAY_FAR_END = offsetPosition(KSTL_RUNWAY_THRESHOLD, 302, KSTL_RUNWAY_LENGTH_FT / 6_076.12)
 
-export const KPWK_RUNWAY_16: MissionRunway = Object.freeze({
-  id: 'KPWK-16',
-  airport: 'KPWK',
-  thresholdLat: KPWK_RUNWAY_THRESHOLD.lat,
-  thresholdLon: KPWK_RUNWAY_THRESHOLD.lon,
-  farEndLat: KPWK_RUNWAY_FAR_END.lat,
-  farEndLon: KPWK_RUNWAY_FAR_END.lon,
-  headingDeg: 159,
-  lengthFt: KPWK_RUNWAY_LENGTH_FT,
-  widthFt: A380_ENVELOPE.standardRunwayWidthFt,
-  elevationFt: KPWK_AIRPORT.elevationFt,
+export const KSTL_RUNWAY_30L: MissionRunway = Object.freeze({
+  id: 'KSTL-30L',
+  airport: 'KSTL',
+  thresholdLat: KSTL_RUNWAY_THRESHOLD.lat,
+  thresholdLon: KSTL_RUNWAY_THRESHOLD.lon,
+  farEndLat: KSTL_RUNWAY_FAR_END.lat,
+  farEndLon: KSTL_RUNWAY_FAR_END.lon,
+  headingDeg: 302,
+  lengthFt: KSTL_RUNWAY_LENGTH_FT,
+  // FAA published width for KSTL 12R/30L. The simulation's A380 envelope
+  // remains within the usable paved surface rather than silently widening it.
+  widthFt: 150,
+  elevationFt: 585.3,
 })
 
 const NORTH_FIELD_RUNWAY_LENGTH_FT = 10_000
-const northFieldReference = offsetPosition({ lat: KPWK_RUNWAY_16.thresholdLat, lon: KPWK_RUNWAY_16.thresholdLon }, 339, 2.2)
+const northFieldReference = offsetPosition({ lat: KSTL_RUNWAY_30L.thresholdLat, lon: KSTL_RUNWAY_30L.thresholdLon }, 122, 2.2)
 const northFieldThreshold = offsetPosition(northFieldReference, 249, 0.72)
 const northFieldFarEnd = offsetPosition(northFieldThreshold, 180, NORTH_FIELD_RUNWAY_LENGTH_FT / 6_076.12)
 
@@ -49,7 +54,7 @@ export const NORTH_FIELD_AIRPORT: Airport = Object.freeze({
   name: 'North Field',
   lat: northFieldThreshold.lat,
   lon: northFieldThreshold.lon,
-  elevationFt: 645,
+  elevationFt: KSTL_RUNWAY_30L.elevationFt,
 })
 
 export const NORTH_FIELD_RUNWAY_18: MissionRunway = Object.freeze({
@@ -80,7 +85,7 @@ export const LAKESIDE_AIRPORT: Airport = Object.freeze({
   name: 'Lakeside Municipal',
   lat: lakesideThreshold.lat,
   lon: lakesideThreshold.lon,
-  elevationFt: KPWK_AIRPORT.elevationFt,
+  elevationFt: KSTL_RUNWAY_30L.elevationFt,
 })
 
 export const LAKESIDE_RUNWAY_22: MissionRunway = Object.freeze({
