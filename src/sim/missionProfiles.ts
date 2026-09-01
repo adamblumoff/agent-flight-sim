@@ -14,6 +14,6 @@ export const MISSION_PROFILE = Object.freeze({
   deadlineSeconds: 6 * 60,
   wallClockDeadlineSeconds: 6 * 60,
   simulationRate: 1,
-  emergencyTriggerSeconds: 35,
+  emergencyTriggerSeconds: 60,
   targetCompletionSeconds: 4.75 * 60,
 } satisfies MissionProfile)

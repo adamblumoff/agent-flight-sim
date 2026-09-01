@@ -1,17 +1,21 @@
 import { flightSimulator } from '../sim/flightSimulator.ts'
 import type { FlightControlInput } from '../sim/flightCommands.ts'
-import type { ActiveLegRebuildStrategy, CheckrideSeed, EvidenceSource, FlightState, RoutePlan } from '../sim/types.ts'
+import type { CheckrideSeed, FlightEventType, FlightState, RoutePlan } from '../sim/types.ts'
 import {
-  checkrideSeeds, evidenceSources, flightEventValues, routePlans,
+  checkrideSeeds, flightEventValues, routePlans,
   type AgentFlightState, type FlightToolArguments, type FlightToolGuidance, type FlightToolName, type FlightToolResults,
   type FlightTelemetrySample, type ToolReceiptTone,
 } from './flightTools.ts'
 
 type UnknownInput = Readonly<Record<string, unknown>>
-const evidenceSet = new Set<string>(evidenceSources)
 const routeSet = new Set<string>(routePlans)
 const eventSet = new Set<string>(flightEventValues)
-const rebuildStrategySet = new Set<string>(['direct_intercept', 'wider_pattern', 'skip_noncritical'])
+const controlWindowInterruptEvents = new Set<FlightEventType>([
+  'emergency_detected', 'decision_timer_expired', 'atc_clearance_received',
+  'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching',
+  'passenger_safety_update', 'approach_stable', 'touchdown',
+  'mission_complete', 'mission_failed',
+])
 
 const reasonInput = (input: UnknownInput, fallback = 'Requested by the agent') => typeof input.reason === 'string' && input.reason.trim() ? input.reason.trim() : fallback
 const agentState = (state: FlightState): AgentFlightState => {
@@ -19,7 +23,7 @@ const agentState = (state: FlightState): AgentFlightState => {
   return { ...state, checkride }
 }
 
-const observationActions = ['get_flight_state', 'inspect_flight_evidence', 'wait_for_flight_event'] as const satisfies readonly FlightToolName[]
+const observationActions = ['get_flight_state', 'wait_for_flight_event'] as const satisfies readonly FlightToolName[]
 
 const hazardsFor = (state: FlightState): readonly string[] => {
   const hazards: string[] = []
@@ -40,14 +44,13 @@ const availableActionsFor = (state: FlightState): readonly FlightToolName[] => {
     if (state.handoffRequested) actions.push('transfer_control')
     return Object.freeze(actions)
   }
-  actions.push('fly_control_window', 'set_flight_controls', 'transfer_control', 'request_human_approval')
+  actions.push('fly_control_window', 'transfer_control')
   if (state.mission.phase === 'preflight') actions.push('get_mission_brief', 'set_route')
   if (state.checkride.status === 'decision_required') {
     actions.push('get_decision_context')
     if (state.checkride.decisionContextRead && state.atc.status === 'none') actions.push('request_diversion')
     if (state.atc.status === 'cleared') actions.push('accept_clearance')
   }
-  if (state.mission.routeStatus === 'stalled') actions.push('rebuild_active_leg')
   return Object.freeze(actions)
 }
 
@@ -105,7 +108,7 @@ const boundedWindowNumber = (value: unknown, name: string, fallback: number, min
 
 const flightControlInput = (input: FlightControlInput): FlightControlInput => {
   const controlKeys = ['throttle', 'pitchIntent', 'bankIntent', 'gearDown', 'flapsDeg'] as const
-  if (!controlKeys.some((key) => input[key] !== undefined)) throw new TypeError('set_flight_controls requires at least one control value')
+  if (!controlKeys.some((key) => input[key] !== undefined)) throw new TypeError('A control window requires at least one control value')
   for (const key of ['throttle', 'pitchIntent', 'bankIntent'] as const) {
     const value = input[key]
     if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) throw new TypeError(`${key} must be a finite number`)
@@ -136,6 +139,9 @@ const telemetrySample = (state: FlightState): FlightTelemetrySample => Object.fr
   nextFix: state.mission.nextFix,
   distanceToNextFixNm: state.mission.distanceToNextFixNm,
   bearingToNextFixDeg: state.mission.bearingToNextFixDeg,
+  headingErrorToNextFixDeg: state.mission.headingErrorToNextFixDeg,
+  altitudeErrorToNextFixFt: state.mission.altitudeErrorToNextFixFt,
+  airspeedErrorToNextFixKt: state.mission.airspeedErrorToNextFixKt,
   closingRateKt: state.mission.closingRateKt,
   routeStatus: state.mission.routeStatus,
   procedureCompliant: state.procedure.compliant,
@@ -146,7 +152,7 @@ const telemetrySample = (state: FlightState): FlightTelemetrySample => Object.fr
 })
 
 const flyControlWindow = async (input: FlightToolArguments['fly_control_window']): Promise<FlightToolResults['fly_control_window']> => {
-  const durationMs = boundedWindowNumber(input.duration_ms, 'duration_ms', 1_000, 250, 3_000)
+  const durationMs = boundedWindowNumber(input.duration_ms, 'duration_ms', 1_000, 250, 10_000)
   const sampleIntervalMs = boundedWindowNumber(input.sample_interval_ms, 'sample_interval_ms', 250, 100, 500)
   const controls = flightControlInput({
     throttle: input.throttle,
@@ -168,10 +174,12 @@ const flyControlWindow = async (input: FlightToolArguments['fly_control_window']
       actualDurationMs: 0,
       sampleIntervalMs,
       stopReason: 'command_rejected',
+      interruptedBy: null,
       samples: Object.freeze(samples),
     }
   }
 
+  let interruptedBy: FlightEventType | null = null
   const stopReason = await new Promise<FlightToolResults['fly_control_window']['stopReason']>((resolve) => {
     let settled = false
     const finish = (reason: FlightToolResults['fly_control_window']['stopReason']) => {
@@ -188,7 +196,13 @@ const flyControlWindow = async (input: FlightToolArguments['fly_control_window']
       if (!previous || state.elapsedSeconds !== previous.elapsedSeconds || state.mission.eventRevision !== previous.eventRevision) samples.push(telemetrySample(state))
       if (state.controlOwner !== 'agent') finish('control_transferred')
       else if (state.mission.outcome !== 'in_progress') finish('terminal_state')
-      else if (state.mission.eventRevision !== startRevision) finish('flight_event')
+      else if (state.mission.eventRevision !== startRevision) {
+        const interruptingEvent = flightSimulator.getEventsSince(startRevision).find((event) => controlWindowInterruptEvents.has(event.type))
+        if (interruptingEvent) {
+          interruptedBy = interruptingEvent.type
+          finish('flight_event')
+        }
+      }
     }
     const unsubscribe = flightSimulator.subscribe(capture)
     const interval = setInterval(capture, sampleIntervalMs)
@@ -203,7 +217,7 @@ const flyControlWindow = async (input: FlightToolArguments['fly_control_window']
   return {
     accepted,
     ok: accepted,
-    summary: `${command.summary} Observed ${samples.length} telemetry samples; stick neutralized after ${Date.now() - startedAt} ms (${stopReason.replaceAll('_', ' ')}).`,
+    summary: `${command.summary} Observed ${samples.length} telemetry samples; stick neutralized after ${Date.now() - startedAt} ms (${interruptedBy ?? stopReason.replaceAll('_', ' ')}).`,
     eventRevision: finalState.mission.eventRevision,
     state: agentState(finalState),
     tone: finalState.mission.outcome === 'in_progress' ? 'automation' : 'warning',
@@ -212,6 +226,7 @@ const flyControlWindow = async (input: FlightToolArguments['fly_control_window']
     actualDurationMs: Date.now() - startedAt,
     sampleIntervalMs,
     stopReason,
+    interruptedBy,
     samples: Object.freeze(samples),
   }
 }
@@ -234,13 +249,6 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
   get_decision_context: async () => flightSimulator.getState().checkride.status === 'decision_required'
     ? receipt('New flight condition assessed.', 'neutral', { available: true, context: flightSimulator.getDecisionContext() })
     : receipt('Decision context is sealed until emergency_detected. Continue the assigned flight.', 'warning', { available: false, context: null }),
-  inspect_flight_evidence: async (input) => {
-    if (input.source !== undefined && !evidenceSet.has(input.source)) throw new TypeError('source must be weather, cockpit, traffic, or passenger')
-    const evidence = input.source === undefined
-      ? evidenceSources.map((source) => flightSimulator.inspectEvidence(source))
-      : flightSimulator.inspectEvidence(input.source as EvidenceSource)
-    return receipt(input.source ? `${input.source} report read` : 'All evidence read', 'neutral', { evidence, inspectedSources: flightSimulator.getState().checkride.inspectedSources })
-  },
   set_route: async (input) => {
     if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_kmdw or return_kstl')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
@@ -256,17 +264,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     if (typeof input.readback !== 'string' || !input.readback.trim()) throw new TypeError('readback is required')
     return action(flightSimulator.acceptAtcClearance(input.clearance_id.trim(), input.readback.trim(), 'agent'))
   },
-  set_flight_controls: async (input) => action(flightSimulator.setFlightControls(flightControlInput(input), 'agent')),
   fly_control_window: flyControlWindow,
-  rebuild_active_leg: async (input) => {
-    if (!rebuildStrategySet.has(input.strategy)) throw new TypeError('strategy must be direct_intercept, wider_pattern, or skip_noncritical')
-    if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
-    return action(flightSimulator.rebuildActiveLeg(input.strategy as ActiveLegRebuildStrategy, input.reason.trim(), 'agent'))
-  },
-  request_human_approval: async (input) => {
-    if (![input.question, input.requested_action, input.reason].every((value) => typeof value === 'string' && value.trim())) throw new TypeError('question, requested_action, and reason are required')
-    return action(flightSimulator.requestHumanApproval(input.question.trim(), input.requested_action.trim(), input.reason.trim(), 'agent'))
-  },
   wait_for_flight_event: async (input) => {
     if (input.after_revision !== undefined && (typeof input.after_revision !== 'number' || !Number.isFinite(input.after_revision))) throw new TypeError('after_revision must be a finite number')
     if (input.events !== undefined && (!Array.isArray(input.events) || input.events.length === 0 || input.events.some((event) => !eventSet.has(event)))) throw new TypeError('events contains an unsupported flight event')

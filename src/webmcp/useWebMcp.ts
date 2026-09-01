@@ -7,9 +7,15 @@ import {
   flightToolDefinitions,
   type FlightToolDefinition,
   type FlightToolName,
+  type FlightToolResults,
 } from '../shared/flightTools'
 
 export type WebMcpStatus = 'registering' | 'ready' | 'unsupported' | 'error'
+export type WebMcpRecordedResult = FlightToolResults[FlightToolName] | {
+  readonly ok: false
+  readonly summary: string
+  readonly error: { readonly name: string; readonly message: string }
+}
 
 export interface WebMcpActivity {
   readonly id: number
@@ -25,14 +31,14 @@ export interface WebMcpActivity {
   readonly rewardDelta: number | null
   readonly observation: FlightState
   readonly nextObservation: FlightState | null
-  readonly result: { readonly ok: boolean; readonly summary: string } | null
+  readonly result: WebMcpRecordedResult | null
   readonly arguments: Readonly<Record<string, unknown>>
   readonly radioCues: readonly RadioCue[]
   readonly traceStartId: number
 }
 
 type BeginActivity = (activity: Pick<WebMcpActivity, 'tool' | 'title' | 'arguments'>) => number
-type CompleteActivity = (id: number, result: { readonly ok: boolean; readonly summary: string }, failed?: boolean) => void
+type CompleteActivity = (id: number, result: WebMcpRecordedResult, failed?: boolean) => void
 
 function createFlightTools(definitions: readonly FlightToolDefinition[], beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
   return definitions.map((definition) => ({
@@ -45,10 +51,15 @@ function createFlightTools(definitions: readonly FlightToolDefinition[], beginAc
       const activityId = beginActivity({ tool: definition.name, title: definition.title, arguments: input })
       try {
         const result = await executeFlightToolFromUnknown(definition.name, input)
-        completeActivity(activityId, { ok: result.ok, summary: result.summary }, !result.ok)
+        completeActivity(activityId, result, !result.ok)
         return result
       } catch (error) {
-        completeActivity(activityId, { ok: false, summary: error instanceof Error ? error.message : 'Tool call failed' }, true)
+        const message = error instanceof Error ? error.message : 'Tool call failed'
+        completeActivity(activityId, {
+          ok: false,
+          summary: message,
+          error: { name: error instanceof Error ? error.name : 'Error', message },
+        }, true)
         throw error
       }
     },

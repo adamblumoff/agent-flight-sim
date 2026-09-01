@@ -17,12 +17,11 @@ import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
 import { DREAMLINER_787_9_ENVELOPE } from './sim/aircraftEnvelope'
 import { DEFAULT_ENVIRONMENT_VOLUME, DEFAULT_RADIO_VOLUME, flightAudio } from './audio/flightAudio'
-import { radioVoiceClipFor } from './audio/radioVoicePack'
 import { flightSimulator } from './sim/flightSimulator'
 import { MISSION_PROFILE } from './sim/missionProfiles'
 import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
-import { createFlightTrajectory } from './webmcp/trajectory'
+import { createFlightRunExport } from './webmcp/runExport'
 import { persistEvaluationEvidence } from './webmcp/evaluationArchive'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 
@@ -112,7 +111,7 @@ function deriveRecommendation(state: FlightState): string {
     : 'The Chicago Midway route is filed. Apply power when you are ready to begin the takeoff roll.'
   if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
   if (!state.procedure.compliant) return state.procedure.instruction
-  if (state.mission.routeStatus === 'stalled') return 'The active leg is no longer converging. Rebuild it from the current position instead of continuing the orbit.'
+  if (state.mission.routeStatus === 'stalled') return 'ATC has resequenced the arrival direct to final. Follow the updated route guidance.'
   if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'requested') return 'Maintain the current hold while ATC prepares the diversion clearance.'
@@ -121,9 +120,6 @@ function deriveRecommendation(state: FlightState): string {
   }
   if (state.controlOwner === 'human' && state.route.plan === 'return_kstl') {
     return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KSTL runway 30L.'
-  }
-  if (state.approval.status === 'pending') {
-    return state.approval.requestedAction ?? 'Hold the current flight path until you decide.'
   }
   if (state.route.reason) return state.route.reason
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
@@ -169,13 +165,6 @@ function derivePlan(state: FlightState): readonly string[] {
     ]
   }
 
-  if (state.mission.routeStatus === 'stalled') {
-    return [
-      'Rebuild the active leg with a direct intercept or wider pattern.',
-      'Resume route guidance after the new checkpoint is loaded.',
-    ]
-  }
-
   if (!state.procedure.compliant) {
     return [
       state.procedure.instruction,
@@ -200,16 +189,13 @@ function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') {
     return `Accelerating on Lambert runway 12R. At ${DREAMLINER_787_9_ENVELOPE.rotateSpeedKt} knots, rotate toward ${DREAMLINER_787_9_ENVELOPE.initialClimbPitchDeg}°.`
   }
-  if (state.approval.status === 'pending') {
-    return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
-  }
   if (state.checkride.status === 'armed') return 'Normal departure. Monitoring the aircraft and surrounding conditions.'
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'requested') return 'Diversion requested. Holding while ATC prepares the clearance.'
     if (state.atc.status === 'cleared') return `ATC clearance ${state.atc.clearance?.id ?? ''} is awaiting readback.`
     return 'Assessing the emergency before requesting a diversion clearance.'
   }
-  if (state.mission.routeStatus === 'stalled') return 'Route progress stalled. Waiting for a leg rebuild.'
+  if (state.mission.routeStatus === 'stalled') return 'ATC resequenced the route. Following the updated final vector.'
   if (state.controlOwner === 'human' && state.route.plan === 'return_kstl') {
     const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
     return waypoint
@@ -233,7 +219,6 @@ function deriveHeadline(state: FlightState): string {
     if (state.atc.status === 'cleared') return 'ATC clearance received'
     return 'Diversion decision required'
   }
-  if (state.approval.status === 'pending') return 'Holding for your decision'
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') return 'Assessing the emergency'
   if (state.agentMode === 'flying') {
     return state.route.destination ? `Flying to ${state.route.destination}` : 'Managing the flight'
@@ -343,14 +328,6 @@ export default function App() {
     } else {
       flightSimulator.requestAgentHandoff('human', 'Pilot asked the copilot to take control')
     }
-  }, [])
-
-  const resolveApproval = useCallback((approved: boolean) => {
-    flightSimulator.resolveHumanApproval(
-      approved,
-      'human',
-      approved ? 'Pilot approved the requested action' : 'Pilot declined the requested action',
-    )
   }, [])
 
   const resetScenario = useCallback(() => {
@@ -495,7 +472,10 @@ export default function App() {
         ? `Runway ${state.route.runway}`
         : routePlanLabels[state.route.plan]
   const missionElapsedSeconds = state.elapsedSeconds / state.checkride.simulationRate
-  const missionSecondsRemaining = state.checkride.wallClockDeadlineSeconds - missionElapsedSeconds
+  const emergencyElapsedSeconds = state.checkride.emergencyStartedAtSeconds === null
+    ? 0
+    : missionElapsedSeconds - state.checkride.emergencyStartedAtSeconds / state.checkride.simulationRate
+  const missionSecondsRemaining = state.checkride.wallClockDeadlineSeconds - emergencyElapsedSeconds
   const missionOvertime = missionSecondsRemaining < 0
   const lastDeduction = state.checkride.score.deductions.at(-1)
   const windDirection = state.scenario.weather.windDirectionDeg.toString().padStart(3, '0')
@@ -726,22 +706,9 @@ export default function App() {
         action={deriveAction(state)}
         crewActions={crewActions}
         crewActionStatus={crewActionStatus}
-        approvalPending={state.approval.status === 'pending'}
-        approvalPrompt={state.approval.question ?? 'Approve the copilot’s requested action?'}
         debrief={deriveDebrief(state)}
-        webMcpCalls={activities.filter((activity) => activity.status !== 'running').map((activity) => ({
-          tool: activity.tool,
-          arguments: activity.arguments,
-          radio: activity.radioCues.map((cue) => ({
-            id: cue.id,
-            speaker: cue.speaker,
-            text: cue.text,
-            priority: cue.priority,
-            audioClip: radioVoiceClipFor(cue)?.key ?? null,
-          })),
-        }))}
         webMcpActivities={activities}
-        trajectory={state.debrief.status === 'in_progress' ? null : createFlightTrajectory(activities, state)}
+        runExport={state.debrief.status === 'in_progress' ? null : createFlightRunExport(activities, state, flightSimulator.getMissionBrief(), flightSimulator.getTrace())}
         diagnostics={{
           world: worldStatus.message,
           webMcp: webMcpLabels[webMcpStatus],
@@ -751,8 +718,6 @@ export default function App() {
           profileId: state.checkride.profileId,
           recentTools: activities.slice(-4).reverse().map((activity) => `${activity.title} · ${activity.status}`),
         }}
-        onApprove={() => resolveApproval(true)}
-        onDeny={() => resolveApproval(false)}
         onReset={resetScenario}
       />
     </main>
