@@ -28,7 +28,7 @@ flowchart LR
   Agent --> Trace[WebMCP trajectory]
 ```
 
-Keyboard, cockpit controls, and WebMCP all dispatch the same persistent flight command: throttle, pitch intent, bank intent, gear, and aircraft configuration. The simulator applies the same actuator limits, aircraft physics, checkpoints, collision rules, and score deductions regardless of who sent it. Caller identity exists for handoff and audit history, not for physics.
+Keyboard, cockpit controls, and WebMCP all dispatch the same flight commands: throttle, pitch intent, bank intent, gear, and aircraft configuration. The simulator applies the same actuator limits, aircraft physics, checkpoints, collision rules, and score deductions regardless of who sent them. Caller identity exists for handoff and audit history, not for physics. Agents can use finite control windows that sample the continuously running simulation and neutralize the stick afterward; this changes command timing, not the aircraft model.
 
 WebMCP reports every value that can change a cockpit decision: position, attitude, speed, vertical motion, wind, configuration, route geometry, active checkpoint, aircraft limits, passenger condition, hazards, score, event revision, and terminal state. It does not reveal the sealed event before the simulator triggers it. It also does not prescribe the next tool call or silently turn a dangerous input into a safe maneuver.
 
@@ -47,12 +47,15 @@ The WebMCP adapter is optional. Browsers without `document.modelContext` retain 
 | `request_diversion` | Ask ATC for one of the routes in the current decision context. |
 | `accept_clearance` | Read back and accept the issued diversion clearance. |
 | `set_flight_controls` | Set persistent throttle, pitch, bank, gear, and configuration inputs. |
+| `fly_control_window` | Apply a finite stick movement and receive sampled telemetry before the axes neutralize. |
 | `rebuild_active_leg` | Request a direct intercept, wider pattern, or safe skip when route progress stalls. |
 | `request_human_approval` | Ask the human about a consequential decision while the aircraft keeps flying. |
 | `wait_for_flight_event` | Wait without polling for checkpoints, hazards, configuration changes, landing, or failure. |
 | `transfer_control` | Accept a requested handoff or return control to the human pilot. |
 
 The live copilot panel shows the tool, reason, result, latency, summary, and reward change. Guidance reports the current objective, procedures, hazards, mechanical limits, available actions, and event revision. It does not include filled answers or a preferred tool sequence.
+
+WebMCP calls are request/response rather than a transport-level telemetry stream. `fly_control_window` makes that boundary useful for real-time control: the simulator continues at 60 Hz, captures observations during a 250–3000 ms maneuver, returns early for important events, and includes the sampled trajectory in its response. An agent can chain short windows into an observe–act loop without leaving pitch or bank latched while it reasons.
 
 ## Trajectories, reward, and termination
 

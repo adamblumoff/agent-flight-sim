@@ -44,6 +44,12 @@ export interface FlightToolArguments {
   request_diversion: { readonly plan: DiversionPlan; readonly reason: string }
   accept_clearance: { readonly clearance_id: string; readonly readback: string }
   set_flight_controls: FlightControlInput
+  fly_control_window: FlightControlInput & {
+    readonly pitchIntent: number
+    readonly bankIntent: number
+    readonly duration_ms?: number
+    readonly sample_interval_ms?: number
+  }
   rebuild_active_leg: { readonly strategy: ActiveLegRebuildStrategy; readonly reason: string }
   request_human_approval: { readonly question: string; readonly requested_action: string; readonly reason: string }
   wait_for_flight_event: { readonly after_revision?: number; readonly events?: readonly FlightEventType[]; readonly timeout_ms?: number }
@@ -60,6 +66,7 @@ export interface FlightToolResults {
   request_diversion: FlightToolActionResult
   accept_clearance: FlightToolActionResult
   set_flight_controls: FlightToolActionResult
+  fly_control_window: FlightToolControlWindowResult
   rebuild_active_leg: FlightToolActionResult
   request_human_approval: FlightToolActionResult
   wait_for_flight_event: FlightToolWaitResult
@@ -85,6 +92,40 @@ export interface FlightToolWaitResult {
   readonly summary: string
   readonly tone: ToolReceiptTone
   readonly guidance: FlightToolGuidance
+}
+
+export interface FlightTelemetrySample {
+  readonly elapsedSeconds: number
+  readonly airspeedKt: number
+  readonly altitudeFt: number
+  readonly verticalSpeedFpm: number
+  readonly headingDeg: number
+  readonly pitchDeg: number
+  readonly bankDeg: number
+  readonly throttle: number
+  readonly pitchIntent: number
+  readonly bankIntent: number
+  readonly groundSpeedKt: number
+  readonly angleOfAttackDeg: number
+  readonly stalled: boolean
+  readonly nextFix: string | null
+  readonly distanceToNextFixNm: number | null
+  readonly bearingToNextFixDeg: number | null
+  readonly closingRateKt: number | null
+  readonly routeStatus: AgentFlightState['mission']['routeStatus']
+  readonly procedureCompliant: boolean
+  readonly loadFactorG: number
+  readonly jerkGPerSecond: number
+  readonly eventRevision: number
+  readonly outcome: AgentFlightState['mission']['outcome']
+}
+
+export interface FlightToolControlWindowResult extends FlightToolActionResult {
+  readonly requestedDurationMs: number
+  readonly actualDurationMs: number
+  readonly sampleIntervalMs: number
+  readonly stopReason: 'window_complete' | 'flight_event' | 'terminal_state' | 'control_transferred' | 'command_rejected'
+  readonly samples: readonly FlightTelemetrySample[]
 }
 
 export type FlightToolName = keyof FlightToolArguments
@@ -132,7 +173,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'set_flight_controls', title: 'Set flight controls', readOnly: false,
-    description: 'Apply persistent direct flight controls. Throttle ranges from 0 to 1. Pitch and bank intent range from -1 to 1; positive pitch is nose-up and positive bank is right. Omitted controls keep their current values. The command remains active until changed, and it uses the same aerodynamics, actuator response, collision rules, and consequences as keyboard input. Applying thrust after the preflight route is filed starts the takeoff roll.',
+    description: 'Apply persistent direct flight controls. Throttle ranges from 0 to 1. Pitch and bank intent range from -1 to 1; positive pitch is nose-up and positive bank is right. Omitted controls keep their current values. Pitch or bank remains active until changed, so prefer fly_control_window for finite stick movements when reasoning latency is uncertain. This uses the same aerodynamics, actuator response, collision rules, and consequences as keyboard input. Applying thrust after the preflight route is filed starts the takeoff roll.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -150,6 +191,25 @@ export const flightToolDefinitions = [
         { required: ['gearDown'] },
         { required: ['flapsDeg'] },
       ],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'fly_control_window', title: 'Fly a control window', readOnly: false,
+    description: 'Apply one finite pitch-and-bank stick movement while the 60 Hz simulation keeps flying, then return sampled telemetry from throughout the movement. Both axes are required; use zero to hold an axis neutral. The window ends early for a new flight event, terminal state, or control transfer, and pitch/bank input is automatically neutralized before the response returns. Use repeated short windows to observe the aircraft response and make the next decision without leaving a delayed command latched. Throttle, gear, and flaps remain at their commanded settings.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        throttle: { type: 'number', minimum: 0, maximum: 1 },
+        pitchIntent: { type: 'number', minimum: -1, maximum: 1 },
+        bankIntent: { type: 'number', minimum: -1, maximum: 1 },
+        gearDown: { type: 'boolean' },
+        flapsDeg: { type: 'number', enum: [0, 10, 20, 30] },
+        duration_ms: { type: 'number', minimum: 250, maximum: 3000, default: 1000 },
+        sample_interval_ms: { type: 'number', minimum: 100, maximum: 500, default: 250 },
+        reason: { type: 'string', minLength: 1 },
+      },
+      required: ['pitchIntent', 'bankIntent'],
       additionalProperties: false,
     },
   },

@@ -43,6 +43,7 @@ assert.equal(checkpointCaptureRadiusNm(gate), 0.16)
 
 const toolNames = flightToolDefinitions.map(({ name }) => name)
 assert.ok(toolNames.includes('set_flight_controls'))
+assert.ok(toolNames.includes('fly_control_window'))
 assert.ok(!toolNames.includes('begin_takeoff' as never))
 assert.ok(!toolNames.includes('set_autopilot_targets' as never))
 
@@ -81,5 +82,17 @@ assert.equal(route.ok, true)
 const controls = await executeFlightTool('set_flight_controls', { throttle: 1, pitchIntent: 0, bankIntent: 0, reason: 'Start the takeoff roll.' })
 assert.equal(controls.ok, true)
 assert.equal(controls.state.mission.phase, 'takeoff')
+
+const controlWindow = await executeFlightTool('fly_control_window', {
+  pitchIntent: 0.25,
+  bankIntent: -0.2,
+  duration_ms: 250,
+  sample_interval_ms: 100,
+  reason: 'Verify finite agent controls and telemetry sampling.',
+})
+assert.equal(controlWindow.ok, true)
+assert.ok(controlWindow.samples.length >= 1)
+assert.equal(controlWindow.state.controlInputs.pitchAxis, 0)
+assert.equal(controlWindow.state.controlInputs.bankAxis, 0)
 
 console.log('simulation diagnostics passed')

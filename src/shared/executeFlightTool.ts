@@ -4,7 +4,7 @@ import type { ActiveLegRebuildStrategy, CheckrideSeed, EvidenceSource, FlightSta
 import {
   checkrideSeeds, evidenceSources, flightEventValues, routePlans,
   type AgentFlightState, type FlightToolArguments, type FlightToolGuidance, type FlightToolName, type FlightToolResults,
-  type ToolReceiptTone,
+  type FlightTelemetrySample, type ToolReceiptTone,
 } from './flightTools.ts'
 
 type UnknownInput = Readonly<Record<string, unknown>>
@@ -40,7 +40,7 @@ const availableActionsFor = (state: FlightState): readonly FlightToolName[] => {
     if (state.handoffRequested) actions.push('transfer_control')
     return Object.freeze(actions)
   }
-  actions.push('set_flight_controls', 'transfer_control', 'request_human_approval')
+  actions.push('fly_control_window', 'set_flight_controls', 'transfer_control', 'request_human_approval')
   if (state.mission.phase === 'preflight') actions.push('get_mission_brief', 'set_route')
   if (state.checkride.status === 'decision_required') {
     actions.push('get_decision_context')
@@ -96,6 +96,13 @@ const boundedTimeout = (value: unknown) => {
   return Math.min(15_000, Math.max(1_000, Math.floor(value)))
 }
 
+const boundedWindowNumber = (value: unknown, name: string, fallback: number, minimum: number, maximum: number) => {
+  if (value === undefined) return fallback
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError(`${name} must be a finite number`)
+  if (value < minimum || value > maximum) throw new RangeError(`${name} must be between ${minimum} and ${maximum}`)
+  return Math.floor(value)
+}
+
 const flightControlInput = (input: FlightControlInput): FlightControlInput => {
   const controlKeys = ['throttle', 'pitchIntent', 'bankIntent', 'gearDown', 'flapsDeg'] as const
   if (!controlKeys.some((key) => input[key] !== undefined)) throw new TypeError('set_flight_controls requires at least one control value')
@@ -110,6 +117,103 @@ const flightControlInput = (input: FlightControlInput): FlightControlInput => {
   if (input.flapsDeg !== undefined && !([0, 10, 20, 30] as const).includes(input.flapsDeg)) throw new RangeError('flapsDeg must be 0, 10, 20, or 30')
   if (input.reason !== undefined && (typeof input.reason !== 'string' || !input.reason.trim())) throw new TypeError('reason must be a non-empty string')
   return input
+}
+
+const telemetrySample = (state: FlightState): FlightTelemetrySample => Object.freeze({
+  elapsedSeconds: state.elapsedSeconds,
+  airspeedKt: state.airspeedKt,
+  altitudeFt: state.altitudeFt,
+  verticalSpeedFpm: state.verticalSpeedFpm,
+  headingDeg: state.headingDeg,
+  pitchDeg: state.pitchDeg,
+  bankDeg: state.bankDeg,
+  throttle: state.throttle,
+  pitchIntent: state.controlInputs.pitchAxis,
+  bankIntent: state.controlInputs.bankAxis,
+  groundSpeedKt: state.motion.groundSpeedKt,
+  angleOfAttackDeg: state.motion.angleOfAttackDeg,
+  stalled: state.motion.stalled,
+  nextFix: state.mission.nextFix,
+  distanceToNextFixNm: state.mission.distanceToNextFixNm,
+  bearingToNextFixDeg: state.mission.bearingToNextFixDeg,
+  closingRateKt: state.mission.closingRateKt,
+  routeStatus: state.mission.routeStatus,
+  procedureCompliant: state.procedure.compliant,
+  loadFactorG: state.passengerSafety.loadFactorG,
+  jerkGPerSecond: state.passengerSafety.jerkGPerSecond,
+  eventRevision: state.mission.eventRevision,
+  outcome: state.mission.outcome,
+})
+
+const flyControlWindow = async (input: FlightToolArguments['fly_control_window']): Promise<FlightToolResults['fly_control_window']> => {
+  const durationMs = boundedWindowNumber(input.duration_ms, 'duration_ms', 1_000, 250, 3_000)
+  const sampleIntervalMs = boundedWindowNumber(input.sample_interval_ms, 'sample_interval_ms', 250, 100, 500)
+  const controls = flightControlInput({
+    throttle: input.throttle,
+    pitchIntent: input.pitchIntent,
+    bankIntent: input.bankIntent,
+    gearDown: input.gearDown,
+    flapsDeg: input.flapsDeg,
+    reason: input.reason,
+  })
+  const command = flightSimulator.setFlightControls(controls, 'agent')
+  const startedAt = Date.now()
+  const startRevision = command.state.mission.eventRevision
+  const samples: FlightTelemetrySample[] = [telemetrySample(command.state)]
+
+  if (!command.accepted) {
+    return {
+      ...action(command),
+      requestedDurationMs: durationMs,
+      actualDurationMs: 0,
+      sampleIntervalMs,
+      stopReason: 'command_rejected',
+      samples: Object.freeze(samples),
+    }
+  }
+
+  const stopReason = await new Promise<FlightToolResults['fly_control_window']['stopReason']>((resolve) => {
+    let settled = false
+    const finish = (reason: FlightToolResults['fly_control_window']['stopReason']) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      clearInterval(interval)
+      unsubscribe()
+      resolve(reason)
+    }
+    const capture = () => {
+      const state = flightSimulator.getState()
+      const previous = samples.at(-1)
+      if (!previous || state.elapsedSeconds !== previous.elapsedSeconds || state.mission.eventRevision !== previous.eventRevision) samples.push(telemetrySample(state))
+      if (state.controlOwner !== 'agent') finish('control_transferred')
+      else if (state.mission.outcome !== 'in_progress') finish('terminal_state')
+      else if (state.mission.eventRevision !== startRevision) finish('flight_event')
+    }
+    const unsubscribe = flightSimulator.subscribe(capture)
+    const interval = setInterval(capture, sampleIntervalMs)
+    const timeout = setTimeout(() => finish('window_complete'), durationMs)
+  })
+
+  flightSimulator.setFlightControls({ pitchIntent: 0, bankIntent: 0, reason: 'Finite control window complete; stick neutralized' }, 'agent')
+  const finalState = flightSimulator.getState()
+  const finalSample = telemetrySample(finalState)
+  if (samples.at(-1)?.elapsedSeconds !== finalSample.elapsedSeconds || samples.at(-1)?.pitchIntent !== 0 || samples.at(-1)?.bankIntent !== 0) samples.push(finalSample)
+  const accepted = finalState.controlOwner === 'agent'
+  return {
+    accepted,
+    ok: accepted,
+    summary: `${command.summary} Observed ${samples.length} telemetry samples; stick neutralized after ${Date.now() - startedAt} ms (${stopReason.replaceAll('_', ' ')}).`,
+    eventRevision: finalState.mission.eventRevision,
+    state: agentState(finalState),
+    tone: finalState.mission.outcome === 'in_progress' ? 'automation' : 'warning',
+    guidance: guidanceFor(finalState),
+    requestedDurationMs: durationMs,
+    actualDurationMs: Date.now() - startedAt,
+    sampleIntervalMs,
+    stopReason,
+    samples: Object.freeze(samples),
+  }
 }
 
 const executors: { readonly [Name in FlightToolName]: (input: FlightToolArguments[Name]) => Promise<FlightToolResults[Name]> } = {
@@ -153,6 +257,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     return action(flightSimulator.acceptAtcClearance(input.clearance_id.trim(), input.readback.trim(), 'agent'))
   },
   set_flight_controls: async (input) => action(flightSimulator.setFlightControls(flightControlInput(input), 'agent')),
+  fly_control_window: flyControlWindow,
   rebuild_active_leg: async (input) => {
     if (!rebuildStrategySet.has(input.strategy)) throw new TypeError('strategy must be direct_intercept, wider_pattern, or skip_noncritical')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
