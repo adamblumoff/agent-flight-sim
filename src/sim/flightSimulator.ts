@@ -7,7 +7,7 @@ import type {
   TraceEvent,
 } from './types'
 import { checkpointCaptureRadiusNm } from './checkpoints.ts'
-import { CONCORDE_ENVELOPE, flightEnvelopeFor, staticThrustAccelerationKtPerSecond } from './aircraftEnvelope.ts'
+import { CONCORDE_ENVELOPE, flightEnvelopeFor, staticThrustAccelerationKtPerSecond, type AircraftEnvelope } from './aircraftEnvelope.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor, windCorrectedHeadingDeg } from './aerodynamics.ts'
 import { BUILD_ID } from '../buildInfo.ts'
 import { missionProfileFor } from './missionProfiles.ts'
@@ -37,10 +37,10 @@ const A380_TAKEOFF_ACCELERATION_KT_PER_SECOND = 5.8
 const A380_AIRBORNE_ACCELERATION_KT_PER_SECOND = 8.5
 const TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND = 0.2
 const TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND = 0.65
-const PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND = 5
-const PILOT_BANK_TRIM_RATE_DEG_PER_SECOND = 10
-const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 7
-const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 14
+const PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND = 5.5
+const PILOT_BANK_TRIM_RATE_DEG_PER_SECOND = 11.5
+const PILOT_PITCH_RESPONSE_DEG_PER_SECOND = 8
+const PILOT_BANK_RESPONSE_DEG_PER_SECOND = 16
 const PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND = 420
 const EMERGENCY_DECISION_SECONDS = 60
 const ATC_RESPONSE_WALL_SECONDS = 2
@@ -102,6 +102,17 @@ const coordinatedTurnRadiusNm = (airspeedKt: number, bankDeg: number) => {
   return speedMetersPerSecond ** 2 / (9.81 * Math.tan(radians(bankDeg))) / 1_852
 }
 
+const controlAuthorityForAirspeed = (airspeedKt: number, envelope: AircraftEnvelope) => {
+  const speedFraction = clamp(
+    (airspeedKt - envelope.minCommandSpeedKt) / Math.max(1, envelope.enrouteSpeedKt - envelope.minCommandSpeedKt),
+    0,
+    1,
+  )
+  return 1.18 - speedFraction * 0.2
+}
+
+const blendHeading = (fromDeg: number, toDeg: number, amount: number) => normalizeHeading(fromDeg + headingError(toDeg, fromDeg) * amount)
+
 const localLegFrame = (
   position: { lat: number; lon: number },
   origin: { lat: number; lon: number },
@@ -130,6 +141,27 @@ const routeGuidanceBearingDeg = (
   const lookaheadNm = clamp(distanceNm(position, target) * 0.45, 0.35, 1.2)
   const lookaheadAlongNm = clamp(frame.alongNm + lookaheadNm, 0, frame.legLengthNm)
   return navigationBearingDeg(position, offsetPosition(origin, frame.courseDeg, lookaheadAlongNm))
+}
+
+const anticipatedRouteBearingDeg = (
+  position: { lat: number; lon: number },
+  origin: { lat: number; lon: number },
+  target: RouteWaypoint,
+  following: RouteWaypoint | undefined,
+  airspeedKt: number,
+  routeBankDeg: number,
+) => {
+  const baseBearingDeg = routeGuidanceBearingDeg(position, origin, target)
+  if (!following || target.kind !== 'enroute') return baseBearingDeg
+  const inboundCourseDeg = navigationBearingDeg(origin, target)
+  const outboundCourseDeg = navigationBearingDeg(target, following)
+  const turnAngleDeg = Math.abs(headingError(outboundCourseDeg, inboundCourseDeg))
+  if (turnAngleDeg < 12) return baseBearingDeg
+  const turnRadiusNm = coordinatedTurnRadiusNm(Math.max(airspeedKt, 90), Math.max(10, routeBankDeg))
+  const leadNm = clamp(turnRadiusNm * Math.tan(radians(Math.min(100, turnAngleDeg)) / 2), 0.15, 0.65)
+  const distanceToTargetNm = distanceNm(position, target)
+  const blend = clamp((leadNm + target.captureRadiusNm - distanceToTargetNm) / Math.max(leadNm, 0.01), 0, 0.25)
+  return blendHeading(baseBearingDeg, outboundCourseDeg, blend)
 }
 
 export const landingRollAccelerationKtPerSecond = (throttle: number, maximumPower: number) => (
@@ -1113,6 +1145,7 @@ class FlightSimulator {
         const target = this.state.autopilot
         const decisionHoldActive = this.state.checkride.status === 'decision_required' && target.lateralMode === 'heading'
         const activeWaypoint = this.state.route.waypoints[this.state.route.activeWaypointIndex]
+        const followingWaypoint = this.state.route.waypoints[this.state.route.activeWaypointIndex + 1]
         const touchdownRunway = activeWaypoint?.kind === 'final' || activeWaypoint?.kind === 'touchdown' ? this.runway(this.state.route) : null
         const touchdownFrame = touchdownRunway
           ? runwayFrame(this.state, touchdownRunway.threshold, touchdownRunway.heading)
@@ -1133,7 +1166,14 @@ class FlightSimulator {
           : activeWaypoint?.captureHeadingDeg !== undefined
             ? activeWaypoint.captureHeadingDeg
           : activeWaypoint && target.lateralMode === 'route'
-            ? routeGuidanceBearingDeg(this.state, this.state.route.activeLegOrigin, activeWaypoint)
+            ? anticipatedRouteBearingDeg(
+                this.state,
+                this.state.route.activeLegOrigin,
+                activeWaypoint,
+                followingWaypoint,
+                airspeed,
+                envelope.routeBankDeg,
+              )
             : target.headingDeg
         const guidanceTrackDeg = !this.departureGuidanceReleased
           ? KSTL_RUNWAY_12R.headingDeg
@@ -1152,13 +1192,16 @@ class FlightSimulator {
         const targetBank = decisionHoldActive
           ? this.decisionHoldTurnDirection * DECISION_HOLD_BANK_DEG
           : activeWaypoint?.id.startsWith('KSTL_TURN_') || activeWaypoint?.id.startsWith('KSTL_COMPACT_TURN_') || activeWaypoint?.id.startsWith('REJOIN_')
-            ? clamp(targetHeadingError * 0.4, -envelope.routeBankDeg, envelope.routeBankDeg)
+            ? clamp(targetHeadingError * 0.48, -envelope.routeBankDeg, envelope.routeBankDeg)
           : activeWaypoint?.kind === 'touchdown'
             ? clamp(targetHeadingError * 0.85, heightAboveRunwayFt < 150 ? -12 : -24, heightAboveRunwayFt < 150 ? 12 : 24)
             : activeWaypoint?.kind === 'final'
               ? clamp(targetHeadingError * 0.75, -24, 24)
-            : clamp(targetHeadingError * 0.45, -envelope.routeBankDeg, envelope.routeBankDeg)
-        bank = approach(bank, targetBank, (activeWaypoint?.kind === 'final' || activeWaypoint?.kind === 'touchdown' ? 12 : 6) * dt)
+            : clamp(targetHeadingError * 0.48, -envelope.routeBankDeg, envelope.routeBankDeg)
+        const rollResponse = activeWaypoint?.kind === 'final' || activeWaypoint?.kind === 'touchdown'
+          ? 12
+          : 8 * controlAuthorityForAirspeed(airspeed, envelope)
+        bank = approach(bank, targetBank, rollResponse * dt)
         throttle = approach(throttle, clamp(0.52 + (target.airspeedKt - airspeed) * 0.025, 0.25, 1), 0.35 * dt)
         const altitudeError = target.altitudeFt - this.state.altitudeFt
         let desiredFpm = target.verticalMode === 'approach'
@@ -1197,23 +1240,24 @@ class FlightSimulator {
       }
     } else {
       const onTakeoffRoll = this.state.aircraftPhase === 'takeoff_roll'
-      this.smoothedPilotControls.pitchAxis = damp(this.smoothedPilotControls.pitchAxis, this.pilotControls.pitchAxis, 5.5, dt)
-      this.smoothedPilotControls.bankAxis = damp(this.smoothedPilotControls.bankAxis, this.pilotControls.bankAxis, 4.5, dt)
+      const controlAuthority = controlAuthorityForAirspeed(airspeed, envelope)
+      this.smoothedPilotControls.pitchAxis = damp(this.smoothedPilotControls.pitchAxis, this.pilotControls.pitchAxis, 6, dt)
+      this.smoothedPilotControls.bankAxis = damp(this.smoothedPilotControls.bankAxis, this.pilotControls.bankAxis, 5.5, dt)
       this.manualAttitudeTarget.pitchDeg = clamp(
-        this.manualAttitudeTarget.pitchDeg + this.smoothedPilotControls.pitchAxis * PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND * dt,
+        this.manualAttitudeTarget.pitchDeg + this.smoothedPilotControls.pitchAxis * PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND * controlAuthority * dt,
         onTakeoffRoll ? 0 : -55,
         onTakeoffRoll ? envelope.liftoffPitchDeg : 55,
       )
       this.manualAttitudeTarget.bankDeg = onTakeoffRoll
         ? 0
-        : clamp(this.manualAttitudeTarget.bankDeg + this.smoothedPilotControls.bankAxis * PILOT_BANK_TRIM_RATE_DEG_PER_SECOND * dt, -60, 60)
+        : clamp(this.manualAttitudeTarget.bankDeg + this.smoothedPilotControls.bankAxis * PILOT_BANK_TRIM_RATE_DEG_PER_SECOND * controlAuthority * dt, -60, 60)
       const targetPitch = onTakeoffRoll && airspeed < envelope.rotateSpeedKt ? 0 : this.manualAttitudeTarget.pitchDeg
       pitch = approach(
         pitch,
         targetPitch,
-        (onTakeoffRoll ? envelope.rotationRateDegPerSecond : PILOT_PITCH_RESPONSE_DEG_PER_SECOND) * dt,
+        (onTakeoffRoll ? envelope.rotationRateDegPerSecond : PILOT_PITCH_RESPONSE_DEG_PER_SECOND * controlAuthority) * dt,
       )
-      bank = approach(bank, this.manualAttitudeTarget.bankDeg, PILOT_BANK_RESPONSE_DEG_PER_SECOND * dt)
+      bank = approach(bank, this.manualAttitudeTarget.bankDeg, PILOT_BANK_RESPONSE_DEG_PER_SECOND * controlAuthority * dt)
       const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
       const landingAngleOfAttackDeg = this.state.mode === 'judge' && (activeKind === 'final' || activeKind === 'touchdown') ? 10.5 : 0
       const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch - landingAngleOfAttackDeg)), -4_500, 4_500)
@@ -1670,6 +1714,7 @@ class FlightSimulator {
     const index = reached ? Math.min(route.activeWaypointIndex + 1, route.waypoints.length - 1) : route.activeWaypointIndex
     const activeLegOrigin = reached ? Object.freeze({ lat: active.lat, lon: active.lon }) : route.activeLegOrigin
     const next = route.waypoints[index]
+    const following = route.waypoints[index + 1]
     const final = next.kind === 'final' || next.kind === 'touchdown'
     const runway = this.runway(route)
     const distanceBeforeThresholdNm = Math.max(0, -runwayFrame(position, runway.threshold, runway.heading).alongNm)
@@ -1684,12 +1729,12 @@ class FlightSimulator {
     const autopilot = this.state.controlOwner === 'agent' && this.state.checkride.status === 'decision_required' && this.state.autopilot.lateralMode === 'heading'
       ? Object.freeze({ ...this.state.autopilot, headingDeg: normalizeHeading(_headingDeg + this.decisionHoldTurnDirection * DECISION_HOLD_HEADING_LEAD_DEG) })
       : this.state.controlOwner === 'agent' && this.state.autopilot.lateralMode === 'route'
-        ? Object.freeze({ enabled: true, headingDeg: routeGuidanceBearingDeg(position, activeLegOrigin, next), altitudeFt: targetAltitude, airspeedKt: next.airspeedKt, verticalMode: final ? 'approach' as const : targetAltitude < altitudeFt ? 'descend' as const : 'level' as const, lateralMode: 'route' as const })
+        ? Object.freeze({ enabled: true, headingDeg: anticipatedRouteBearingDeg(position, activeLegOrigin, next, following, this.state.airspeedKt, flightEnvelopeFor(this.state.mode).routeBankDeg), altitudeFt: targetAltitude, airspeedKt: next.airspeedKt, verticalMode: final ? 'approach' as const : targetAltitude < altitudeFt ? 'descend' as const : 'level' as const, lateralMode: 'route' as const })
         : this.state.autopilot
     const updatedRoute = reached
       ? Object.freeze({ ...route, activeWaypointIndex: index, completedWaypointIds, activeLegOrigin })
       : route
-    const routeBearingDeg = routeGuidanceBearingDeg(position, activeLegOrigin, next)
+    const routeBearingDeg = anticipatedRouteBearingDeg(position, activeLegOrigin, next, following, this.state.airspeedKt, flightEnvelopeFor(this.state.mode).routeBankDeg)
     const routeHeadingErrorDeg = Math.abs(headingError(routeBearingDeg, _headingDeg))
     if (this.routeProgress.waypointId !== next.id || reached) {
       this.routeProgress = { waypointId: next.id, bestDistanceNm: distanceNm(position, next), bestHeadingErrorDeg: routeHeadingErrorDeg, secondsWithoutProgress: 0, eventSent: false }
