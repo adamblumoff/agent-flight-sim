@@ -4,6 +4,10 @@ export interface AircraftEnvelope {
   readonly dispatchMassKg: number
   readonly engineCount: number
   readonly takeoffThrustPerEngineLbf: number
+  readonly wingAreaM2: number
+  readonly cleanMaximumLiftCoefficient: number
+  readonly takeoffMaximumLiftCoefficient: number
+  readonly landingMaximumLiftCoefficient: number
   readonly standardRunwayWidthFt: number
   readonly decisionSpeedKt: number
   readonly rotateSpeedKt: number
@@ -32,50 +36,51 @@ export interface AircraftEnvelope {
   readonly takeoffFlapsDeg: 0 | 10
   readonly approachFlapsDeg: 0 | 20
   readonly landingFlapsDeg: 0 | 30
-  readonly hasConventionalFlaps: boolean
 }
 
-export const CONCORDE_ENVELOPE: AircraftEnvelope = Object.freeze({
-  name: 'Concorde',
-  maximumTakeoffMassKg: 185_070,
-  // A short KSTL-KMDW sector carries far less fuel than a transatlantic
-  // departure. This keeps the aircraft above operating empty weight while
-  // avoiding the maximum-weight performance used by AF4590.
-  dispatchMassKg: 135_000,
-  engineCount: 4,
-  takeoffThrustPerEngineLbf: 38_050,
-  standardRunwayWidthFt: 200,
-  decisionSpeedKt: 130,
-  rotateSpeedKt: 170,
-  takeoffSafetySpeedKt: 188,
-  rotationRateDegPerSecond: 3,
-  liftoffPitchDeg: 13,
-  initialClimbPitchDeg: 13,
-  initialClimbVerticalSpeedFpm: 1_500,
+export const DREAMLINER_787_9_ENVELOPE: AircraftEnvelope = Object.freeze({
+  name: 'Boeing 787-9 Dreamliner',
+  maximumTakeoffMassKg: 259_220,
+  // A short STL-MDW sector is dispatched below the 192,776 kg design landing
+  // mass. That makes the local return plausible without fuel dumping.
+  dispatchMassKg: 190_000,
+  engineCount: 2,
+  takeoffThrustPerEngineLbf: 74_100,
+  wingAreaM2: 377,
+  cleanMaximumLiftCoefficient: 1.45,
+  takeoffMaximumLiftCoefficient: 1.9,
+  landingMaximumLiftCoefficient: 2.35,
+  standardRunwayWidthFt: 150,
+  // Representative dispatch speeds for this modeled weight, KSTL runway 12R,
+  // dry pavement, light headwind, and flaps 10. Real crews calculate V-speeds
+  // from the exact load and conditions before every departure.
+  decisionSpeedKt: 145,
+  rotateSpeedKt: 155,
+  takeoffSafetySpeedKt: 165,
+  rotationRateDegPerSecond: 2.5,
+  liftoffPitchDeg: 12.5,
+  initialClimbPitchDeg: 12.5,
+  initialClimbVerticalSpeedFpm: 2_200,
   departureHeadingReleaseAglFt: 400,
-  initialClimbSpeedKt: 250,
-  flapRetractionSpeedKt: 250,
-  enrouteSpeedKt: 250,
-  emergencyTurnSpeedKt: 170,
-  baseSpeedKt: 190,
-  finalSpeedKt: 165,
-  approachSpeedKt: 155,
-  stableApproachMinKt: 148,
-  stableApproachMaxKt: 165,
-  maxTouchdownSpeedKt: 175,
-  minCommandSpeedKt: 145,
-  maxCommandSpeedKt: 270,
-  maxSimulationSpeedKt: 310,
-  routeBankDeg: 35,
-  // The compressed return starts about 1.5 NM off centerline. A shallow,
-  // continuously closing intercept gives the real turn radius enough room to
-  // roll out on runway heading instead of chasing the centerline past it.
-  approachInterceptGainDegPerNm: 45,
-  maxApproachInterceptAngleDeg: 60,
-  takeoffFlapsDeg: 0,
-  approachFlapsDeg: 0,
-  landingFlapsDeg: 0,
-  hasConventionalFlaps: false,
+  initialClimbSpeedKt: 190,
+  flapRetractionSpeedKt: 210,
+  enrouteSpeedKt: 235,
+  emergencyTurnSpeedKt: 205,
+  baseSpeedKt: 180,
+  finalSpeedKt: 160,
+  approachSpeedKt: 145,
+  stableApproachMinKt: 138,
+  stableApproachMaxKt: 152,
+  maxTouchdownSpeedKt: 160,
+  minCommandSpeedKt: 130,
+  maxCommandSpeedKt: 280,
+  maxSimulationSpeedKt: 320,
+  routeBankDeg: 30,
+  approachInterceptGainDegPerNm: 38,
+  maxApproachInterceptAngleDeg: 45,
+  takeoffFlapsDeg: 10,
+  approachFlapsDeg: 20,
+  landingFlapsDeg: 30,
 })
 
 const POUNDS_FORCE_TO_NEWTONS = 4.448_221_615_3

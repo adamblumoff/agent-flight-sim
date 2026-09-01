@@ -9,7 +9,7 @@ export interface MissionProfile {
 }
 
 export const MISSION_PROFILE = Object.freeze({
-  id: 'concorde-emergency-v1',
+  id: 'dreamliner-787-9-emergency-v1',
   label: '6-minute flight',
   deadlineSeconds: 6 * 60,
   wallClockDeadlineSeconds: 6 * 60,

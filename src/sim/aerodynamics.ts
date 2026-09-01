@@ -1,5 +1,5 @@
 import type { CheckrideSeed, ScenarioConditions } from './types'
-import { CONCORDE_ENVELOPE } from './aircraftEnvelope.ts'
+import { DREAMLINER_787_9_ENVELOPE } from './aircraftEnvelope.ts'
 
 const radians = (degrees: number) => degrees * Math.PI / 180
 const degrees = (value: number) => value * 180 / Math.PI
@@ -139,12 +139,13 @@ export function windCorrectedHeadingDeg(
 }
 
 /** Simplified terminal-area drag expressed as knots-per-second of deceleration. */
-export function airborneDragKtPerSecond(airspeedKt: number, gearDown: boolean, bankDeg: number) {
-  const speedRatio = Math.max(airspeedKt, 35) / 250
+export function airborneDragKtPerSecond(airspeedKt: number, gearDown: boolean, bankDeg: number, flapsDeg = 0) {
+  const speedRatio = Math.max(airspeedKt, 35) / 235
   const dynamicPressure = speedRatio ** 2
   const loadFactor = 1 / Math.max(0.45, Math.cos(radians(Math.min(63, Math.abs(bankDeg)))))
   const parasiteDrag = 3.1 * dynamicPressure
   const configurationDrag = (gearDown ? 1.05 : 0) * Math.max(0.35, dynamicPressure)
+    + flapsDeg / 30 * 1.35 * Math.max(0.4, dynamicPressure)
   const inducedDrag = 0.8 * (160 / Math.max(airspeedKt, 90)) ** 2 * loadFactor
   return 0.25 + parasiteDrag + configurationDrag + inducedDrag
 }
@@ -154,18 +155,30 @@ export function stallResponseFor(
   pitchDeg: number,
   verticalSpeedFpm: number,
   bankDeg: number,
+  flapsDeg = 0,
 ): StallResponse {
   const verticalSpeedKt = verticalSpeedFpm * 60 / 6_076.12
   const flightPathDeg = degrees(Math.atan2(verticalSpeedKt, Math.max(airspeedKt, 1)))
   const angleOfAttackDeg = pitchDeg - flightPathDeg
-  const baseStallSpeedKt = 150 * Math.sqrt(CONCORDE_ENVELOPE.dispatchMassKg / CONCORDE_ENVELOPE.maximumTakeoffMassKg)
+  const maximumLiftCoefficient = flapsDeg >= 30
+    ? DREAMLINER_787_9_ENVELOPE.landingMaximumLiftCoefficient
+    : flapsDeg >= 10
+      ? DREAMLINER_787_9_ENVELOPE.takeoffMaximumLiftCoefficient
+      : DREAMLINER_787_9_ENVELOPE.cleanMaximumLiftCoefficient
+  const weightNewtons = DREAMLINER_787_9_ENVELOPE.dispatchMassKg * 9.80665
+  const seaLevelDensityKgPerM3 = 1.225
+  const baseStallMetersPerSecond = Math.sqrt(
+    2 * weightNewtons
+    / (seaLevelDensityKgPerM3 * DREAMLINER_787_9_ENVELOPE.wingAreaM2 * maximumLiftCoefficient),
+  )
+  const baseStallSpeedKt = baseStallMetersPerSecond * 1.943_844_492_4
   const bankLoadFactor = 1 / Math.max(0.5, Math.cos(radians(Math.min(60, Math.abs(bankDeg)))))
   const stallSpeedKt = baseStallSpeedKt * Math.sqrt(bankLoadFactor)
-  const referenceLiftAngleDeg = 18
-  const liftCoefficientFraction = clamp((angleOfAttackDeg + 1) / referenceLiftAngleDeg, 0, 1.2)
+  const referenceLiftAngleDeg = 12.5
+  const liftCoefficientFraction = clamp((angleOfAttackDeg + 2) / referenceLiftAngleDeg, 0, 1.05)
   const liftToWeightRatio = (airspeedKt / Math.max(stallSpeedKt, 1)) ** 2 * liftCoefficientFraction
   const speedSeverity = clamp((stallSpeedKt - airspeedKt) / 32, 0, 1)
-  const angleSeverity = clamp((angleOfAttackDeg - 18) / 10, 0, 1)
+  const angleSeverity = clamp((angleOfAttackDeg - 15) / 8, 0, 1)
   const severity = Math.max(speedSeverity, angleSeverity)
   return Object.freeze({
     angleOfAttackDeg,

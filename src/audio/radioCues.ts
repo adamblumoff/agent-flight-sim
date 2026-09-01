@@ -150,7 +150,7 @@ export const buildRadioCue = (event: TraceEvent, state: FlightState, runId = sta
       const flapsDeg = detailNumber(event, 'flapsDeg')
       if (gearDown === null || flapsDeg === null) return null
       const gear = gearDown ? 'Gear down' : 'Gear up'
-      const flaps = flapsDeg === 0 ? 'clean delta' : `high-lift setting ${formatAviationNumber(flapsDeg)}`
+      const flaps = flapsDeg === 0 ? 'flaps up' : `flaps ${formatAviationNumber(flapsDeg)}`
       return cue(event, runId, 'configuration', 'copilot', 'Copilot', 'low', `${gear}, ${flaps}.`)
     }
     case 'scenario_triggered':

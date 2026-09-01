@@ -1,6 +1,6 @@
 # Flightdeck
 
-Flightdeck is a browser-native emergency-flight simulator built to test whether an agent can observe a changing world, fly over time, and recover when its original plan stops working. A human and a browser agent operate the same Concorde through one command path. WebMCP gives the agent the same decision-relevant cockpit information shown to the human, except for rendered scene pixels.
+Flightdeck is a browser-native emergency-flight simulator built to test whether an agent can observe a changing world, fly over time, and recover when its original plan stops working. A human and a browser agent operate the same Boeing 787-9 Dreamliner through one command path. WebMCP gives the agent the same decision-relevant cockpit information shown to the human, except for rendered scene pixels.
 
 **Live app:** [agent-flight-sim-production.up.railway.app](https://agent-flight-sim-production.up.railway.app/)
 
@@ -8,11 +8,11 @@ The simulator runs locally in a deterministic 60 Hz fixed-step loop. Three.js re
 
 ## The flight
 
-The root URL starts one short, real-time Concorde flight. The assigned preflight plan departs St. Louis Lambert for Chicago Midway. A sealed in-flight event may force the pilot to reconsider that plan and coordinate a return to Lambert. Every run uses the same aircraft profile, route builder, world clock, checkpoint rule, and scoring model.
+The root URL starts one short, real-time 787-9 flight. The assigned preflight plan departs St. Louis Lambert for Chicago Midway. A sealed in-flight event may force the pilot to reconsider that plan and coordinate a return to Lambert. Every run uses the same aircraft profile, route builder, world clock, checkpoint rule, and scoring model.
 
-The Concorde profile covers departure and terminal flight, not the complete supersonic envelope. At the modeled dispatch mass it calls V1 at 130 kt, begins rotation at VR 170 kt, and targets V2 188 kt by the 35-foot screen height. The clean delta wing has no conventional flap settings. Arrival guidance uses roughly 170 kt in the pattern, 165 kt while establishing final, and 155 kt on a stabilized approach with a nose-high body attitude.
+The model represents a 787-9 at a 190,000 kg short-sector dispatch mass, below its design landing-weight limit. It uses a 62.8 m fuselage, 60.1 m span, twin 74,100 lbf-class engines, 377 m² lifting area, conventional high-lift devices, and a calculated sea-level lift model. For the modeled dry KSTL departure with light headwind, the representative card calls V1 at 145 kt, VR at 155 kt, and V2 at 165 kt with flaps 10°. Arrival guidance sequences flaps 10° on base, gear down/flaps 20° on final, and flaps 30° near a 145 kt approach target.
 
-These values draw from the [FAA's Concorde accident record](https://www.faa.gov/lessons_learned/transport_airplane/accidents/F-BTSC), the [FAA-hosted BEA report](https://www.faa.gov/sites/faa.gov/files/2022-11/Concorde_Accident_Report.pdf), [NASA's operational Concorde report](https://ntrs.nasa.gov/api/citations/20180000699/downloads/20180000699.pdf), and [British Airways' Concorde specifications](https://www.britishairways.com/content/information/about-ba/history-and-heritage/celebrating-concorde). Actual V-speeds varied with weight and conditions. Mach 2 cruise and flight near 60,000 ft sit outside this terminal scenario.
+Dimensions, masses, engine families, and airport-planning performance come from Boeing's [787 technical specifications](https://www.boeing.com/commercial/787), [787 Airplane Characteristics for Airport Planning](https://www.boeing.com/commercial/airports/plan-manuals), and [787-9 three-view drawing](https://www.boeing.com/commercial/airports/3-view). Certified limits are cross-checked against [EASA type-certificate data sheet IM.A.115](https://www.easa.europa.eu/en/document-library/type-certificates/aircraft-cs-25-cs-22-cs-23-cs-vla-cs-lsa/easaima115-boeing-787). Exact V-speeds are load-, runway-, weather-, and configuration-dependent and would be calculated from approved operator data; the simulator's card is a representative value set for its declared dispatch condition, not dispatch data.
 
 ## One control contract
 
@@ -73,7 +73,7 @@ npm install
 npm run dev
 ```
 
-Open the root local URL in a WebMCP-capable browser. Manual controls are `W/S` pitch, `A/D` bank, arrow keys power, `G` gear, `X` level attitude, and `T` request, cancel, or reclaim agent control. Direct human input immediately reclaims the shared controls.
+Open the root local URL in a WebMCP-capable browser. Manual controls are `W/S` pitch, `A/D` bank, arrow keys power, `F` flaps, `G` gear, `X` level attitude, and `T` request, cancel, or reclaim agent control. Direct human input immediately reclaims the shared controls.
 
 ## Development diagnostics
 
@@ -82,10 +82,9 @@ npm run lint
 npm run build
 npm run diagnostic:sim
 npm run diagnostic:radio
-npm run diagnostic:reference-policy
 ```
 
-These commands can catch type, build, and deterministic simulation regressions. They are not product tests because they do not exercise browser discovery, tool selection, reasoning latency, event handling, or recovery through WebMCP.
+These commands can catch type, build, and deterministic component regressions. They are not product tests because they do not exercise browser discovery, tool selection, reasoning latency, event handling, or recovery through WebMCP.
 
 ## Acceptance testing
 

@@ -16,7 +16,7 @@ import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
 import { RadioTranscript } from './components/radio-transcript'
-import { CONCORDE_ENVELOPE } from './sim/aircraftEnvelope'
+import { DREAMLINER_787_9_ENVELOPE } from './sim/aircraftEnvelope'
 import { flightAudio } from './audio/flightAudio'
 import { radioVoiceClipFor } from './audio/radioVoicePack'
 import { flightSimulator } from './sim/flightSimulator'
@@ -28,6 +28,7 @@ import { persistEvaluationEvidence } from './webmcp/evaluationArchive'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
+const flapSettings = [0, 10, 20, 30] as const
 
 const cameraOptions: ReadonlyArray<{
   mode: FlightCameraMode
@@ -198,7 +199,7 @@ function derivePlan(state: FlightState): readonly string[] {
 function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
   if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') {
-    return `Accelerating on Lambert runway 12R. At ${CONCORDE_ENVELOPE.rotateSpeedKt} knots, rotate toward ${CONCORDE_ENVELOPE.initialClimbPitchDeg}°.`
+    return `Accelerating on Lambert runway 12R. At ${DREAMLINER_787_9_ENVELOPE.rotateSpeedKt} knots, rotate toward ${DREAMLINER_787_9_ENVELOPE.initialClimbPitchDeg}°.`
   }
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
@@ -431,7 +432,7 @@ export default function App() {
 
       const current = flightSimulator.getState()
       const key = event.key.toLowerCase()
-      if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'g', 't', 'x'].includes(key)) event.preventDefault()
+      if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'f', 'g', 't', 'x'].includes(key)) event.preventDefault()
 
       if (current.controlOwner === 'human') {
         if (['w', 'a', 's', 'd'].includes(key) && !event.repeat) {
@@ -441,6 +442,10 @@ export default function App() {
         if (key === 'arrowup') flightSimulator.setThrottle(current.throttle + 0.05, 'human', 'Pilot throttle input')
         if (key === 'arrowdown') flightSimulator.setThrottle(current.throttle - 0.05, 'human', 'Pilot throttle input')
         if (key === 'g') flightSimulator.setGear(!current.gearDown, 'human', 'Pilot gear command')
+        if (key === 'f') {
+          const index = flapSettings.indexOf(current.flapsDeg as (typeof flapSettings)[number])
+          flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Pilot flap command')
+        }
         if (key === 'x') flightSimulator.levelPilotAttitude('human', 'Pilot pressed the level-flight shortcut')
       }
 
@@ -554,9 +559,9 @@ export default function App() {
               You are lined up on St. Louis Lambert runway 12R for Chicago Midway runway 31C. File that route before departure.
             </p>
             <ol>
-              <li><kbd>↑</kbd><span>Set full power for takeoff; reheat is included in the Concorde thrust model.</span></li>
-              <li><kbd>W</kbd><span>At {CONCORDE_ENVELOPE.rotateSpeedKt} knots, rotate at about {CONCORDE_ENVELOPE.rotationRateDegPerSecond}°/s toward {CONCORDE_ENVELOPE.initialClimbPitchDeg}°. Rotation is guidance; the aircraft lifts off only when its aerodynamic lift exceeds its weight.</span></li>
-              <li><kbd>G</kbd><span>Retract the gear after positive rate. The delta wing has no flap detents; use <kbd>X</kbd> to level.</span></li>
+              <li><kbd>↑</kbd><span>Advance both GEnx engines to takeoff thrust; flaps 10° are already set.</span></li>
+              <li><kbd>W</kbd><span>At {DREAMLINER_787_9_ENVELOPE.rotateSpeedKt} knots, rotate at about {DREAMLINER_787_9_ENVELOPE.rotationRateDegPerSecond}°/s toward {DREAMLINER_787_9_ENVELOPE.initialClimbPitchDeg}°. Rotation is guidance; the aircraft lifts off only when its aerodynamic lift exceeds its weight.</span></li>
+              <li><kbd>G</kbd><span>Retract gear after positive rate. Use <kbd>F</kbd> to retract flaps on schedule and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
               <span>{MISSION_PROFILE.label}. Filing arms the departure; apply power when ready.</span>
@@ -571,7 +576,7 @@ export default function App() {
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
             <strong>Flightdeck</strong>
-            <span>G-BOAC · Concorde</span>
+            <span>N787FD · Boeing 787-9</span>
           </div>
         </div>
 
@@ -679,6 +684,19 @@ export default function App() {
           >
             <span className="control-label">Gear <kbd className="control-shortcut">(G)</kbd></span>
             <span className="control-value">{state.gearDown ? 'Down' : 'Up'}</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={state.controlOwner === 'agent'}
+            aria-keyshortcuts="F"
+            onClick={() => {
+              const index = flapSettings.indexOf(state.flapsDeg as (typeof flapSettings)[number])
+              flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Cockpit flap control')
+            }}
+          >
+            <span className="control-label">Flaps <kbd className="control-shortcut">(F)</kbd></span>
+            <span className="control-value">{state.flapsDeg}°</span>
           </Button>
           <label className="throttle-control">
             <span>Power</span>

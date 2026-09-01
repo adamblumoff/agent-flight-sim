@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { executeFlightTool } from '../src/shared/executeFlightTool.ts'
 import { flightToolDefinitions } from '../src/shared/flightTools.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor } from '../src/sim/aerodynamics.ts'
-import { CONCORDE_ENVELOPE, staticThrustAccelerationKtPerSecond } from '../src/sim/aircraftEnvelope.ts'
+import { DREAMLINER_787_9_ENVELOPE, staticThrustAccelerationKtPerSecond } from '../src/sim/aircraftEnvelope.ts'
 import { KMDW_RUNWAY_31C, KSTL_DEPARTURE_START, KSTL_RUNWAY_12R, KSTL_RUNWAY_30L } from '../src/sim/airfields.ts'
 import { checkpointCaptureRadiusNm } from '../src/sim/checkpoints.ts'
 import { flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg } from '../src/sim/flightSimulator.ts'
@@ -20,11 +20,12 @@ const headwind = groundMotionFor(170, 180, { ...weather, windDirectionDeg: 180, 
 assert.ok(headwind.groundSpeedKt < 170)
 assert.ok(headwind.headwindKt > 10)
 assert.ok(airborneDragKtPerSecond(230, true, 0) > airborneDragKtPerSecond(230, false, 0))
+assert.ok(airborneDragKtPerSecond(160, false, 0, 30) > airborneDragKtPerSecond(160, false, 0, 0))
 assert.ok(airborneDragKtPerSecond(230, false, 0) > airborneDragKtPerSecond(140, false, 0))
 assert.ok(stallResponseFor(100, 18, 0, 0).severity > 0.5)
-assert.ok(stallResponseFor(CONCORDE_ENVELOPE.rotateSpeedKt, 8, 0, 0).liftToWeightRatio < 1)
-assert.ok(stallResponseFor(CONCORDE_ENVELOPE.rotateSpeedKt, 10, 0, 0).liftToWeightRatio > 1)
-assert.ok(staticThrustAccelerationKtPerSecond(CONCORDE_ENVELOPE) > 8)
+assert.ok(stallResponseFor(DREAMLINER_787_9_ENVELOPE.rotateSpeedKt, 4, 0, 0, 10).liftToWeightRatio < 1)
+assert.ok(stallResponseFor(DREAMLINER_787_9_ENVELOPE.rotateSpeedKt, 10, 0, 0, 10).liftToWeightRatio > 1)
+assert.ok(staticThrustAccelerationKtPerSecond(DREAMLINER_787_9_ENVELOPE) > 6)
 assert.ok(Array.from({ length: 180 }, (_, second) => turbulenceFor(weather, second, 42)).some((sample) => sample.level !== 'none'))
 assert.ok(landingRollAccelerationKtPerSecond(1, 1) > 0)
 assert.ok(landingRollAccelerationKtPerSecond(0, 1) < 0)

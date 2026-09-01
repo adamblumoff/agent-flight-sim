@@ -1,19 +1,5 @@
 # Flightdeck benchmark
 
-## Reference-policy diagnostic
-
-The deterministic reference policy is a simulator diagnostic. It calls simulator code directly, so it does not test browser tool discovery, model reasoning, WebMCP latency, or recovery behavior. It cannot pass the product acceptance gate.
-
-| Policy | Seed | Complete | Score | Real time | Injuries | Route rebuilds | Landing |
-| --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
-| deterministic-reference | 17 | yes | 96 | 270.1 s | 0 | 0 | safe, one bounce |
-| deterministic-reference | 42 | yes | 96 | 268.1 s | 0 | 0 | safe, one bounce |
-| deterministic-reference | 81 | yes | 96 | 272.5 s | 0 | 0 | safe, one bounce |
-
-These numbers are the September 1, 2026 environment baseline, not agent results. Rerunning the policy can find route or physics regressions. Do not report its result as an agent flight.
-
-Reproduce the diagnostic with `npm run diagnostic:reference-policy`.
-
 ## Model matrix protocol
 
 Run WebMCP-capable models as fresh agents against the same root flight. Each agent receives only `Use [@Browser](plugin://browser@openai-bundled) to land the plane safely.` The environment privately selects the scenario and reveals the new condition only through its in-flight WebMCP event.

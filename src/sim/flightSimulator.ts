@@ -8,7 +8,7 @@ import type {
 } from './types'
 import type { FlightControlInput } from './flightCommands.ts'
 import { checkpointCaptureRadiusNm } from './checkpoints.ts'
-import { CONCORDE_ENVELOPE, staticThrustAccelerationKtPerSecond, type AircraftEnvelope } from './aircraftEnvelope.ts'
+import { DREAMLINER_787_9_ENVELOPE, staticThrustAccelerationKtPerSecond, type AircraftEnvelope } from './aircraftEnvelope.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor } from './aerodynamics.ts'
 import { BUILD_ID } from '../buildInfo.ts'
 import { MISSION_PROFILE } from './missionProfiles.ts'
@@ -223,25 +223,25 @@ const passengerSafetyFor = (
   return Object.freeze({ loadFactorG, jerkGPerSecond, distress, injuryProbability, status, summary })
 }
 
-const concordeCollisionHull = Object.freeze([
-  Object.freeze({ x: 0, y: 4.15, z: -34.2 }),
-  Object.freeze({ x: 0, y: 4.15, z: 34.2 }),
-  Object.freeze({ x: -13.7, y: 4.05, z: 10.5 }),
-  Object.freeze({ x: 13.7, y: 4.05, z: 10.5 }),
-  Object.freeze({ x: 0, y: 2.7, z: 0 }),
+const dreamlinerCollisionHull = Object.freeze([
+  Object.freeze({ x: 0, y: 6.1, z: -31.4 }),
+  Object.freeze({ x: 0, y: 6.1, z: 31.4 }),
+  Object.freeze({ x: -30.05, y: 5.6, z: 5.2 }),
+  Object.freeze({ x: 30.05, y: 5.6, z: 5.2 }),
+  Object.freeze({ x: 0, y: 3.2, z: 0 }),
 ])
-const concordeGearContactPoints = Object.freeze([
-  Object.freeze({ x: -4.6, y: 0, z: 7.2 }),
-  Object.freeze({ x: 4.6, y: 0, z: 7.2 }),
-  Object.freeze({ x: 0, y: 0, z: -23.5 }),
+const dreamlinerGearContactPoints = Object.freeze([
+  Object.freeze({ x: -5.7, y: 0, z: 7.6 }),
+  Object.freeze({ x: 5.7, y: 0, z: 7.6 }),
+  Object.freeze({ x: 0, y: 0, z: -22.2 }),
 ])
-const concordeCollisionPoints = Object.freeze([...concordeCollisionHull, ...concordeGearContactPoints])
+const dreamlinerCollisionPoints = Object.freeze([...dreamlinerCollisionHull, ...dreamlinerGearContactPoints])
 
 const groundClearanceFt = (pitchDeg: number, bankDeg: number, gearDown: boolean) => {
   const pitch = radians(pitchDeg)
   const roll = radians(-bankDeg)
-  const hull = concordeCollisionHull
-  const points = concordeCollisionPoints
+  const hull = dreamlinerCollisionHull
+  const points = dreamlinerCollisionPoints
   let lowestMeters = 0
   const pointCount = gearDown ? points.length : hull.length
   for (let index = 0; index < pointCount; index += 1) {
@@ -285,11 +285,11 @@ export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   evidenceSources: Object.freeze(['weather', 'cockpit', 'traffic', 'passenger'] as const),
   successConditions: Object.freeze([
     'Take off from St. Louis Lambert runway 12R.',
-    `At ${CONCORDE_ENVELOPE.rotateSpeedKt} knots, rotate at approximately ${CONCORDE_ENVELOPE.rotationRateDegPerSecond} degrees per second toward ${CONCORDE_ENVELOPE.initialClimbPitchDeg} degrees while holding runway heading. Liftoff occurs when aerodynamic lift exceeds weight.`,
-    'Retract gear after a positive climb rate. The Concorde delta wing has no conventional flaps.',
+    `At ${DREAMLINER_787_9_ENVELOPE.rotateSpeedKt} knots, rotate at approximately ${DREAMLINER_787_9_ENVELOPE.rotationRateDegPerSecond} degrees per second toward ${DREAMLINER_787_9_ENVELOPE.initialClimbPitchDeg} degrees while holding runway heading. Liftoff occurs when aerodynamic lift exceeds weight.`,
+    'Retract the gear after a positive climb rate, hold flaps 10 through acceleration altitude, then clean up on schedule.',
     'Read the combined emergency decision context before selecting a route.',
-    `Fly the return near ${CONCORDE_ENVELOPE.emergencyTurnSpeedKt} knots, stabilize near ${CONCORDE_ENVELOPE.approachSpeedKt} knots, and keep the delta wing clean.`,
-    `Reach final with the gear down and touch down below ${CONCORDE_ENVELOPE.maxTouchdownSpeedKt} knots and 600 feet per minute.`,
+    `Fly the return near ${DREAMLINER_787_9_ENVELOPE.emergencyTurnSpeedKt} knots, configure progressively, and stabilize near ${DREAMLINER_787_9_ENVELOPE.approachSpeedKt} knots.`,
+    `Reach final with the gear down and touch down below ${DREAMLINER_787_9_ENVELOPE.maxTouchdownSpeedKt} knots and 600 feet per minute.`,
   ]),
 })
 
@@ -300,8 +300,8 @@ const NORMAL_DEPARTURE_MISSION: MissionBrief = Object.freeze({
   availablePlans: Object.freeze(['continue_kmdw'] as const),
   successConditions: Object.freeze([
     'File the Chicago Midway runway 31C route before takeoff.',
-    `At ${CONCORDE_ENVELOPE.rotateSpeedKt} knots, rotate at approximately ${CONCORDE_ENVELOPE.rotationRateDegPerSecond} degrees per second toward ${CONCORDE_ENVELOPE.initialClimbPitchDeg} degrees on St. Louis Lambert runway 12R.`,
-    'Retract gear after a positive climb rate. The Concorde delta wing stays clean.',
+    `At ${DREAMLINER_787_9_ENVELOPE.rotateSpeedKt} knots, rotate at approximately ${DREAMLINER_787_9_ENVELOPE.rotationRateDegPerSecond} degrees per second toward ${DREAMLINER_787_9_ENVELOPE.initialClimbPitchDeg} degrees on St. Louis Lambert runway 12R.`,
+    'Retract the gear after positive rate, then retract flaps on schedule above acceleration altitude.',
     'Monitor for an enroute update before changing the route.',
   ]),
 })
@@ -388,7 +388,7 @@ const waypoint = (
 ): RouteWaypoint => Object.freeze({ id, name, kind, ...position, altitudeFt, airspeedKt, captureRadiusNm, ...(captureHeadingDeg === undefined ? {} : { captureHeadingDeg }) })
 
 const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDeg?: number }): RouteState => {
-  const envelope = CONCORDE_ENVELOPE
+  const envelope = DREAMLINER_787_9_ENVELOPE
   if (plan === 'continue_kmdw') {
     const reciprocalHeading = normalizeHeading(KMDW_RUNWAY_31C.headingDeg + 180)
     const entry = offsetPosition(KMDW_THRESHOLD, reciprocalHeading, 3)
@@ -406,17 +406,17 @@ const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDe
     const reciprocalHeading = normalizeHeading(KSTL_RUNWAY_30L.headingDeg + 180)
     const finalPosition = offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 1.3)
     const turnFixes = Object.freeze([
-      waypoint('KSTL_TURN_1', 'KSTL outbound gate', 'enroute', offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 3.1), 1_350, 190, 0.55),
+      waypoint('KSTL_TURN_1', 'KSTL outbound gate', 'enroute', offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 3.1), 1_350, envelope.emergencyTurnSpeedKt, 0.55),
       waypoint(
         'KSTL_TURN_2',
         'KSTL base gate',
         'base',
         offsetPosition(offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 4), normalizeHeading(KSTL_RUNWAY_30L.headingDeg - 90), 1.35),
         1_150,
-        170,
+        envelope.baseSpeedKt,
         0.55,
       ),
-      waypoint('KSTL_TURN_3', 'KSTL final intercept', 'base', offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 3.6), 950, 165, 0.5, KSTL_RUNWAY_30L.headingDeg),
+      waypoint('KSTL_TURN_3', 'KSTL final intercept', 'base', offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 3.6), 950, envelope.finalSpeedKt, 0.5, KSTL_RUNWAY_30L.headingDeg),
     ])
     return Object.freeze({ plan, destination: 'KSTL', runway: '30L', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
       ...turnFixes,
@@ -433,54 +433,40 @@ const configurationProcedureFor = (state: Pick<FlightState, 'aircraftPhase' | 'a
   if (state.aircraftPhase === 'landing_roll' || state.aircraftPhase === 'stopped' || state.aircraftPhase === 'crash_slide') {
     return Object.freeze({ stage: 'complete', gearDown: state.gearDown, flapsDeg: state.flapsDeg as 0 | 10 | 20 | 30, compliant: true, instruction: 'Configuration sequence complete.' })
   }
-  const envelope = CONCORDE_ENVELOPE
+  const envelope = DREAMLINER_787_9_ENVELOPE
   let stage: ConfigurationProcedure['stage'] = 'takeoff'
   let gearDown = true
   let flapsDeg: ConfigurationProcedure['flapsDeg'] = envelope.takeoffFlapsDeg
-  let instruction = envelope.hasConventionalFlaps
-    ? 'Takeoff: gear down, flaps 10° (CONF 1+F); at 170 kt rotate at 3°/s toward 12.5° initial pitch.'
-    : `Takeoff: gear down, clean delta wing. V1 ${envelope.decisionSpeedKt} kt, VR ${envelope.rotateSpeedKt} kt, V2 ${envelope.takeoffSafetySpeedKt} kt.`
+  let instruction = `Takeoff: gear down, flaps 10°; V1 ${envelope.decisionSpeedKt} kt, VR ${envelope.rotateSpeedKt} kt, V2 ${envelope.takeoffSafetySpeedKt} kt; rotate at ${envelope.rotationRateDegPerSecond}°/s toward ${envelope.initialClimbPitchDeg}°.`
   if (state.aircraftPhase === 'airborne') {
     const aglFt = state.altitudeFt - KSTL_RUNWAY_12R.elevationFt
     const activeKind = state.route.waypoints[state.route.activeWaypointIndex]?.kind
     if (activeKind === 'departure' && aglFt < 180) {
       stage = 'positive_rate'
       gearDown = false
-      instruction = envelope.hasConventionalFlaps
-        ? 'Positive rate: retract the landing gear; hold flaps 10° (CONF 1+F).'
-        : `Positive rate: retract the landing gear and accelerate clean through ${envelope.takeoffSafetySpeedKt} kt.`
+      instruction = 'Positive rate: retract the landing gear; hold flaps 10°.'
     } else if ((!activeKind || activeKind === 'departure' || activeKind === 'enroute') && (aglFt < 1_000 || state.airspeedKt < envelope.flapRetractionSpeedKt)) {
       stage = 'positive_rate'
       gearDown = false
-      instruction = envelope.hasConventionalFlaps
-        ? 'Climb: hold flaps 10° until 1,000 ft AGL and 210 kt while maintaining takeoff power.'
-        : `Climb: keep the clean delta wing and accelerate toward ${envelope.initialClimbSpeedKt} kt.`
+      instruction = `Climb: hold flaps 10° until 1,000 ft AGL and ${envelope.flapRetractionSpeedKt} kt while maintaining takeoff power.`
     } else if (!activeKind || activeKind === 'departure' || activeKind === 'enroute') {
       stage = 'climb_cleanup'
       gearDown = false
       flapsDeg = 0
-      instruction = envelope.hasConventionalFlaps
-        ? 'Above 1,000 ft AGL and 210 kt: retract flaps to 0° and accelerate toward 230 kt.'
-        : `Clean climb: gear up, no flaps, target ${envelope.enrouteSpeedKt} kt.`
+      instruction = `Above 1,000 ft AGL and ${envelope.flapRetractionSpeedKt} kt: retract flaps to 0° and accelerate toward ${envelope.enrouteSpeedKt} kt.`
     } else if (activeKind === 'base') {
       stage = 'base'
       gearDown = false
-      flapsDeg = envelope.hasConventionalFlaps ? 10 : 0
-      instruction = envelope.hasConventionalFlaps
-        ? 'Base leg near 185 kt: select flaps 10°; keep the gear up.'
-        : `Base leg: keep the clean delta wing and gear up near ${envelope.baseSpeedKt} kt.`
+      flapsDeg = 10
+      instruction = `Base leg near ${envelope.baseSpeedKt} kt: select flaps 10°; keep the gear up.`
     } else if (activeKind === 'final') {
       stage = 'final'
       flapsDeg = envelope.approachFlapsDeg
-      instruction = envelope.hasConventionalFlaps
-        ? 'Final near 155 kt: gear down, flaps 20° (CONF 3).'
-        : `Final: gear down, clean delta wing, target ${envelope.finalSpeedKt} kt before slowing to ${envelope.approachSpeedKt} kt.`
+      instruction = `Final near ${envelope.finalSpeedKt} kt: gear down, flaps 20°.`
     } else {
       stage = 'landing'
       flapsDeg = envelope.landingFlapsDeg
-      instruction = envelope.hasConventionalFlaps
-        ? 'Landing: select flaps 30° (FULL), verify gear down, target 140 kt.'
-        : `Landing: gear down, no flaps, stabilize near ${envelope.approachSpeedKt} kt.`
+      instruction = `Landing: select flaps 30°, verify gear down, target ${envelope.approachSpeedKt} kt.`
     }
   }
   return Object.freeze({ stage, gearDown, flapsDeg, compliant: state.gearDown === gearDown && state.flapsDeg === flapsDeg, instruction })
@@ -489,7 +475,7 @@ const configurationProcedureFor = (state: Pick<FlightState, 'aircraftPhase' | 'a
 const initialState = (seed: CheckrideSeed): FlightState => {
   const start = KSTL_DEPARTURE_START
   const scenario = NORMAL_DEPARTURE_SCENARIO
-  const envelope = CONCORDE_ENVELOPE
+  const envelope = DREAMLINER_787_9_ENVELOPE
   const profile = MISSION_PROFILE
   // Keep the known preflight state independent from the sealed event matrix.
   // Otherwise fuel endurance becomes an indirect scenario identifier.
@@ -648,7 +634,7 @@ class FlightSimulator {
       evidence,
       decisionSecondsRemaining: this.state.checkride.decisionSecondsRemaining,
       fuelMinutesRemaining: this.state.fuelMinutesRemaining,
-      comfortLimits: Object.freeze({ maximumBankDeg: CONCORDE_ENVELOPE.routeBankDeg, warningLoadFactorG: COMFORT_LOAD_WARNING_G, warningJerkGPerSecond: COMFORT_JERK_WARNING_G_PER_SECOND }),
+      comfortLimits: Object.freeze({ maximumBankDeg: DREAMLINER_787_9_ENVELOPE.routeBankDeg, warningLoadFactorG: COMFORT_LOAD_WARNING_G, warningJerkGPerSecond: COMFORT_JERK_WARNING_G_PER_SECOND }),
       routeOptions: Object.freeze([
         Object.freeze({ plan: 'return_kstl' as const, destination: 'KSTL' as const, runway: '30L' as const, distanceNm: kstlDistanceNm, estimatedMinutes: routeEstimatedMinutes(returnRoute, this.state, this.state.scenario.traffic.delayMinutes), risk: returnRisk, summary: 'Nearby long runway with emergency priority. Weather and traffic still require a stabilized arrival.', recommended: true }),
         Object.freeze({ plan: 'continue_kmdw' as const, destination: 'KMDW' as const, runway: '31C' as const, distanceNm: midwayDistanceNm, estimatedMinutes: routeEstimatedMinutes(continueRoute, this.state), risk: continueRisk, summary: 'Filed destination is more than 200 NM away. Engine and passenger conditions may deteriorate before arrival.', recommended: false }),
@@ -683,7 +669,7 @@ class FlightSimulator {
       const firstDistanceNm = strategy === 'wider_pattern'
         ? 1.4
         : clamp(targetDistanceNm * 0.45, 0.85, 1.35)
-      const envelope = CONCORDE_ENVELOPE
+      const envelope = DREAMLINER_787_9_ENVELOPE
       const intercept = waypoint(
         `REJOIN_${this.traceId}`,
         strategy === 'wider_pattern' ? 'Wider pattern rejoin' : 'Direct route rejoin',
@@ -1009,7 +995,7 @@ class FlightSimulator {
     }
     const scenario = this.state.scenario
     const dynamicsSeed = this.emergencyTriggered ? this.state.checkride.seed : SEALED_DEPARTURE_DYNAMICS_SEED
-    const envelope = CONCORDE_ENVELOPE
+    const envelope = DREAMLINER_787_9_ENVELOPE
     if (!this.departureGuidanceReleased && this.state.altitudeFt - KSTL_RUNWAY_12R.elevationFt >= envelope.departureHeadingReleaseAglFt) this.departureGuidanceReleased = true
     let { headingDeg: heading, bankDeg: bank, pitchDeg: pitch, throttle, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed } = this.state
 
@@ -1048,7 +1034,7 @@ class FlightSimulator {
       )
       bank = approach(bank, this.manualAttitudeTarget.bankDeg, PILOT_BANK_RESPONSE_DEG_PER_SECOND * controlAuthority * dt)
       const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
-      const landingAngleOfAttackDeg = activeKind === 'final' || activeKind === 'touchdown' ? 10.5 : 0
+      const landingAngleOfAttackDeg = activeKind === 'final' || activeKind === 'touchdown' ? 8 : 0
       const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch - landingAngleOfAttackDeg)), -4_500, 4_500)
       verticalSpeed = approach(verticalSpeed, targetVerticalSpeed, PILOT_VERTICAL_RESPONSE_FPM_PER_SECOND * dt)
     }
@@ -1060,22 +1046,22 @@ class FlightSimulator {
     }
 
     const power = throttle * scenario.engine.maximumPower
-    const publishedConcordeAcceleration = staticThrustAccelerationKtPerSecond(envelope)
+    const publishedStaticThrustAcceleration = staticThrustAccelerationKtPerSecond(envelope)
     const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
-    const landingAngleOfAttackDeg = activeKind === 'final' || activeKind === 'touchdown' ? 10.5 : 0
+    const landingAngleOfAttackDeg = activeKind === 'final' || activeKind === 'touchdown' ? 8 : 0
     const gravityAlongFlightPath = -Math.sin(radians(pitch - landingAngleOfAttackDeg)) * 5.5
-    const airborneDrag = airborneDragKtPerSecond(airspeed, this.state.gearDown, bank)
+    const airborneDrag = airborneDragKtPerSecond(airspeed, this.state.gearDown, bank, this.state.flapsDeg)
     const acceleration = this.fuelExhausted
       ? -airborneDrag + gravityAlongFlightPath
       : this.state.aircraftPhase === 'takeoff_roll'
-      ? power * publishedConcordeAcceleration
+      ? power * publishedStaticThrustAcceleration
         - (airspeed > 0.05 || power > 0 ? TAKEOFF_ROLLING_RESISTANCE_KT_PER_SECOND : 0)
         - TAKEOFF_AERO_DRAG_AT_ROTATE_KT_PER_SECOND * (airspeed / envelope.rotateSpeedKt) ** 2
-      : power * publishedConcordeAcceleration - airborneDrag + gravityAlongFlightPath
+      : power * publishedStaticThrustAcceleration - airborneDrag + gravityAlongFlightPath
     airspeed = clamp(airspeed + acceleration * dt, 0, envelope.maxSimulationSpeedKt)
     const turnRate = airspeed > 20 ? 1_091 * Math.tan(radians(clamp(bank, -60, 60))) / airspeed : 0
     heading = normalizeHeading(heading + turnRate * dt)
-    const stall = stallResponseFor(airspeed, pitch, verticalSpeed, bank)
+    const stall = stallResponseFor(airspeed, pitch, verticalSpeed, bank, this.state.flapsDeg)
     if (this.state.aircraftPhase === 'airborne' && stall.severity > 0) {
       verticalSpeed = approach(verticalSpeed, Math.min(verticalSpeed, -stall.sinkRateFpm), (520 + stall.severity * 480) * dt)
       pitch = approach(pitch, Math.min(pitch, 4 - stall.severity * 13), (5 + stall.severity * 5) * dt)
@@ -1144,7 +1130,7 @@ class FlightSimulator {
       const safeContact = !this.fuelExhausted
         && onRunway
         && this.state.gearDown
-        && (envelope.hasConventionalFlaps ? this.state.flapsDeg >= envelope.approachFlapsDeg : this.state.flapsDeg === 0)
+        && this.state.flapsDeg >= envelope.approachFlapsDeg
         && airspeed <= envelope.maxTouchdownSpeedKt
         && impactFpm <= MAX_SAFE_TOUCHDOWN_FPM
         && Math.abs(bank) <= MAX_TOUCHDOWN_BANK_DEG
@@ -1233,7 +1219,9 @@ class FlightSimulator {
       headwindKt: this.state.aircraftPhase === 'airborne' ? wind.headwindKt : 0,
       crosswindKt: this.state.aircraftPhase === 'airborne' ? wind.crosswindKt : 0,
       angleOfAttackDeg: stall.angleOfAttackDeg,
-      stalled: stall.severity >= 0.18,
+      // A low-speed aircraft on its wheels is not in an aerodynamic stall.
+      // Keep stall annunciation and the associated guidance airborne-only.
+      stalled: aircraftPhase === 'airborne' && stall.severity >= 0.18,
       turbulenceLevel: this.state.aircraftPhase === 'airborne' ? turbulence.level : 'none',
     })
     const passengerSafety = passengerSafetyFor(
@@ -1482,7 +1470,7 @@ class FlightSimulator {
     const updatedRoute = reached
       ? Object.freeze({ ...route, activeWaypointIndex: index, completedWaypointIds, activeLegOrigin })
       : route
-    const routeBearingDeg = anticipatedRouteBearingDeg(position, activeLegOrigin, next, following, this.state.airspeedKt, CONCORDE_ENVELOPE.routeBankDeg)
+    const routeBearingDeg = anticipatedRouteBearingDeg(position, activeLegOrigin, next, following, this.state.airspeedKt, DREAMLINER_787_9_ENVELOPE.routeBankDeg)
     const routeHeadingErrorDeg = Math.abs(headingError(routeBearingDeg, _headingDeg))
     if (this.routeProgress.waypointId !== next.id || reached) {
       this.routeProgress = { waypointId: next.id, bestDistanceNm: distanceNm(position, next), bestHeadingErrorDeg: routeHeadingErrorDeg, secondsWithoutProgress: 0, eventSent: false }
@@ -1538,7 +1526,7 @@ class FlightSimulator {
   }
 
   private navigation(state: FlightState, phase: MissionPhase, outcome: MissionOutcome, runway: ReturnType<FlightSimulator['runway']>) {
-    const envelope = CONCORDE_ENVELOPE
+    const envelope = DREAMLINER_787_9_ENVELOPE
     const active = state.route.waypoints[state.route.activeWaypointIndex]
     const bearingToNextFixDeg = active ? navigationBearingDeg(state, active) : null
     const closingRateKt = active && bearingToNextFixDeg !== null
@@ -1546,7 +1534,7 @@ class FlightSimulator {
       : null
     const frame = runwayFrame(state, runway.threshold, runway.heading)
     const glidepathErrorFt = state.altitudeFt - this.glidepathAltitude(state, runway.threshold, runway.elevation)
-    const stableApproach = phase === 'approach' && Math.abs(frame.crossNm) < 0.08 && Math.abs(glidepathErrorFt) < 180 && state.airspeedKt >= envelope.stableApproachMinKt && state.airspeedKt <= envelope.stableApproachMaxKt && state.gearDown && (envelope.hasConventionalFlaps ? state.flapsDeg >= envelope.approachFlapsDeg : state.flapsDeg === 0)
+    const stableApproach = phase === 'approach' && Math.abs(frame.crossNm) < 0.08 && Math.abs(glidepathErrorFt) < 180 && state.airspeedKt >= envelope.stableApproachMinKt && state.airspeedKt <= envelope.stableApproachMaxKt && state.gearDown && state.flapsDeg >= envelope.approachFlapsDeg
     return Object.freeze({
       phase: outcome === 'in_progress' ? phase : outcome === 'landed' ? 'complete' : 'failed',
       outcome, nextFix: active?.id ?? null,

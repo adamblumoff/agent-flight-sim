@@ -21,7 +21,7 @@ import {
 
 export interface AircraftBreakawayPart {
   readonly name: 'left-wing' | 'right-wing' | 'left-tail' | 'right-tail' | 'fin'
-    | 'left-outer-engine' | 'left-inner-engine' | 'right-inner-engine' | 'right-outer-engine'
+    | 'left-engine' | 'right-engine'
   readonly root: Group
 }
 
@@ -43,14 +43,14 @@ export interface AircraftViewProfile {
   readonly speedCameraDropMeters: number
 }
 
-const concordeView = Object.freeze({
-  chaseOffset: Object.freeze([0, 19, 78] as const),
-  chaseLookAhead: Object.freeze([0, -6, -150] as const),
-  cockpitOffset: Object.freeze([0, 5.6, -30] as const),
-  cockpitLookAhead: Object.freeze([0, 5, -240] as const),
-  crashOrigin: Object.freeze([0, 4.2, -29] as const),
-  speedFovBoostDeg: 7,
-  speedCameraDropMeters: 6,
+const dreamlinerView = Object.freeze({
+  chaseOffset: Object.freeze([0, 24, 90] as const),
+  chaseLookAhead: Object.freeze([0, -5, -155] as const),
+  cockpitOffset: Object.freeze([0, 7.5, -25.5] as const),
+  cockpitLookAhead: Object.freeze([0, 6.8, -235] as const),
+  crashOrigin: Object.freeze([0, 4.1, -8] as const),
+  speedFovBoostDeg: 6,
+  speedCameraDropMeters: 5,
 }) satisfies AircraftViewProfile
 
 const bodyMaterial = new MeshPhysicalMaterial({
@@ -188,14 +188,14 @@ function bogie(name: string, x: number, z: number, axleCount: number, topY: numb
   return assembly
 }
 
-function concordeWindows() {
-  const zPositions = Array.from({ length: 38 }, (_, index) => -21 + index * 1.08)
+function dreamlinerWindows() {
+  const zPositions = Array.from({ length: 53 }, (_, index) => -21.5 + index * 0.86)
   const windows = new InstancedMesh(new PlaneGeometry(0.28, 0.19), windowMaterial, zPositions.length * 2)
   const transform = new Object3D()
   let index = 0
   for (const side of [-1, 1]) {
     for (const z of zPositions) {
-      transform.position.set(side * 1.66, 4.72, z)
+      transform.position.set(side * 2.88, 7.25, z)
       transform.rotation.set(0, side * Math.PI / 2, 0)
       transform.updateMatrix()
       windows.setMatrixAt(index, transform.matrix)
@@ -206,23 +206,23 @@ function concordeWindows() {
   return windows
 }
 
-function concordeWing(side: -1 | 1, flaps: Group[]) {
+function dreamlinerWing(side: -1 | 1, flaps: Group[]) {
   const assembly = new Group()
-  assembly.name = side < 0 ? 'Left delta wing' : 'Right delta wing'
-  assembly.position.y = 4.05
+  assembly.name = side < 0 ? 'Left swept wing' : 'Right swept wing'
+  assembly.position.y = 5.5
   assembly.add(mesh(slabGeometry([
-    [side * 0.8, -16],
-    [side * 13.7, 10.5],
-    [side * 12.6, 15.7],
-    [side * 1.1, 18.2],
-  ], 0.34), bodyMaterial))
+    [side * 1.1, -9.2],
+    [side * 30.05, 4.7],
+    [side * 28.6, 7.5],
+    [side * 1.2, 11.1],
+  ], 0.42), bodyMaterial))
 
-  const elevon = new Group()
-  elevon.name = side < 0 ? 'Left elevon' : 'Right elevon'
-  elevon.position.set(side * 6.8, -0.06, 15.4)
-  elevon.rotation.y = side * -0.12
-  elevon.add(mesh(new BoxGeometry(9.8, 0.2, 1.65), bodyMaterial))
-  flaps.push(elevon)
+  const flap = new Group()
+  flap.name = side < 0 ? 'Left trailing-edge flap' : 'Right trailing-edge flap'
+  flap.position.set(side * 8.6, -0.12, 8.7)
+  flap.rotation.y = side * -0.08
+  flap.add(mesh(new BoxGeometry(11.8, 0.28, 2.1), bodyMaterial))
+  flaps.push(flap)
 
   const navigationLight = new Mesh(
     new SphereGeometry(0.18, 10, 7),
@@ -232,119 +232,132 @@ function concordeWing(side: -1 | 1, flaps: Group[]) {
       emissiveIntensity: 2.4,
     }),
   )
-  navigationLight.position.set(side * 13.25, 0.18, 11.3)
-  assembly.add(elevon, navigationLight)
-  return { assembly, elevon }
+  navigationLight.position.set(side * 29.45, 0.08, 5.7)
+  assembly.add(flap, navigationLight)
+  return assembly
 }
 
-function concordeFin() {
+function dreamlinerTailplane(side: -1 | 1) {
   const assembly = new Group()
-  assembly.name = 'Concorde fin'
-  assembly.position.set(0, 4.5, 21)
+  assembly.name = side < 0 ? 'Left horizontal stabilizer' : 'Right horizontal stabilizer'
+  assembly.position.y = 7.1
+  assembly.add(mesh(slabGeometry([
+    [side * 0.8, 19.3],
+    [side * 10.4, 25.2],
+    [side * 9.1, 28.1],
+    [side * 0.8, 26.7],
+  ], 0.3), bodyMaterial))
+  return assembly
+}
+
+function dreamlinerFin() {
+  const assembly = new Group()
+  assembly.name = 'Dreamliner vertical stabilizer'
+  assembly.position.set(0, 6.2, 21.5)
   assembly.add(
     mesh(verticalSlabGeometry([
-      [0, -2],
-      [7.1, 2.1],
-      [7.25, 4.1],
-      [0.65, 10.4],
-    ], 0.38), bodyMaterial),
+      [0, -1.5],
+      [10.8, 3.6],
+      [10.5, 6.2],
+      [0.4, 8.4],
+    ], 0.48), bodyMaterial),
     mesh(verticalSlabGeometry([
-      [3.2, 1.4],
-      [6.75, 3.3],
-      [6.7, 4.15],
-      [2.8, 7.6],
-    ], 0.41), liveryMaterial),
+      [2.2, 0.8],
+      [10.2, 4.1],
+      [10, 5.9],
+      [2, 7.5],
+    ], 0.51), liveryMaterial),
   )
   return assembly
 }
 
-function concordeEngine(name: AircraftBreakawayPart['name'], x: number, z: number) {
+function dreamlinerEngine(name: AircraftBreakawayPart['name'], x: number) {
   const assembly = new Group()
   assembly.name = name
-  assembly.position.set(x, 2.72, z)
-  const nacelle = mesh(new BoxGeometry(1.72, 1.12, 7.3), accentMaterial)
-  const intake = new Mesh(new PlaneGeometry(1.42, 0.82), windowMaterial)
-  intake.position.z = -3.66
-  const exhaust = new Mesh(new PlaneGeometry(1.25, 0.72), fanMaterial)
-  exhaust.position.z = 3.66
-  exhaust.rotation.y = Math.PI
-  const pylon = mesh(new BoxGeometry(1.05, 1.25, 4.8), bodyMaterial)
-  pylon.position.y = 0.82
-  assembly.add(nacelle, intake, exhaust, pylon)
+  // The GEnx-1B fan is 111.1 in (2.82 m) across. The nacelle is wider than
+  // the fan but remains far smaller than the 787's 5.8 m-wide fuselage.
+  assembly.position.set(x, 2.45, -0.5)
+  const nacelle = mesh(new CylinderGeometry(1.48, 1.78, 5.75, 36, 1, true), bodyMaterial)
+  nacelle.rotation.x = Math.PI / 2
+  const intakeLip = mesh(new TorusGeometry(1.53, 0.15, 10, 36), metalMaterial)
+  intakeLip.position.z = -2.88
+  const fan = mesh(new CylinderGeometry(1.41, 1.41, 0.16, 28), fanMaterial)
+  fan.rotation.x = Math.PI / 2
+  fan.position.z = -2.8
+  const exhaust = mesh(new CylinderGeometry(0.82, 1.08, 0.26, 24), accentMaterial)
+  exhaust.rotation.x = Math.PI / 2
+  exhaust.position.z = 2.9
+  const pylon = mesh(new BoxGeometry(0.82, 2.25, 3.75), accentMaterial)
+  pylon.position.set(0, 1.8, 0.3)
+  assembly.add(nacelle, intakeLip, fan, exhaust, pylon)
   return assembly
 }
 
-function createConcordeAircraft(): AircraftRig {
+function createDreamlinerAircraft(): AircraftRig {
   const aircraft = new Group()
-  aircraft.name = 'G-BOAC'
+  aircraft.name = 'N787FD'
   const flaps: Group[] = []
-  const leftWing = concordeWing(-1, flaps)
-  const rightWing = concordeWing(1, flaps)
-  const finAssembly = concordeFin()
+  const leftWing = dreamlinerWing(-1, flaps)
+  const rightWing = dreamlinerWing(1, flaps)
+  const leftTail = dreamlinerTailplane(-1)
+  const rightTail = dreamlinerTailplane(1)
+  const finAssembly = dreamlinerFin()
   const engines = [
-    concordeEngine('left-outer-engine', -7.25, 5.5),
-    concordeEngine('left-inner-engine', -4.95, 4.25),
-    concordeEngine('right-inner-engine', 4.95, 4.25),
-    concordeEngine('right-outer-engine', 7.25, 5.5),
+    dreamlinerEngine('left-engine', -9.6),
+    dreamlinerEngine('right-engine', 9.6),
   ]
   const landingGearAssemblies = [
-    bogie('Nose gear', 0, -23.5, 1, 3.45, 0.43),
-    bogie('Left main gear', -4.6, 7.2, 2, 3.9, 0.5),
-    bogie('Right main gear', 4.6, 7.2, 2, 3.9, 0.5),
+    bogie('Nose gear', 0, -22.2, 1, 4.65, 0.46),
+    bogie('Left main gear', -5.7, 7.6, 2, 5.2, 0.62),
+    bogie('Right main gear', 5.7, 7.6, 2, 5.2, 0.62),
   ]
 
   const fuselage = mesh(taperedTubeGeometry([
-    [-35, 0.06],
-    [-33.8, 0.5],
-    [-31.3, 1.18],
-    [-27.5, 1.62],
-    [18.5, 1.7],
-    [25.5, 1.42],
-    [31.5, 0.62],
-    [34.2, 0.06],
+    [-31.4, 0.08],
+    [-30.6, 1.05],
+    [-27.8, 2.45],
+    [-23.5, 2.9],
+    [20.5, 2.9],
+    [26.8, 2.25],
+    [30.7, 0.7],
+    [31.4, 0.08],
   ], 48), bodyMaterial)
-  fuselage.position.y = 4.15
+  fuselage.position.y = 6.1
 
   const details = new Group()
-  details.name = 'Concorde fuselage details'
-  details.add(concordeWindows())
+  details.name = 'Dreamliner fuselage details'
+  details.add(dreamlinerWindows())
   for (const side of [-1, 1] as const) {
-    details.add(sidePanel(50, 0.12, 1.68, 4.05, -1.2, side, liveryMaterial))
-    const cockpitWindow = sidePanel(2.5, 0.65, 1.18, 4.78, -29.6, side, windowMaterial)
-    cockpitWindow.rotation.z = side * -0.08
+    details.add(sidePanel(51, 0.18, 2.89, 5.72, -0.5, side, liveryMaterial))
+    for (const z of [-20.5, -11.5, 8.5, 17.5]) details.add(sidePanel(1.15, 2.25, 2.91, 6.05, z, side, doorMaterial))
+    const cockpitWindow = sidePanel(3.2, 0.92, 2.42, 7.35, -25.8, side, windowMaterial)
+    cockpitWindow.rotation.z = side * -0.11
     details.add(cockpitWindow)
   }
-  const visor = mesh(slabGeometry([
-    [-0.95, -31.5],
-    [0.95, -31.5],
-    [0.62, -29.1],
-    [-0.62, -29.1],
-  ], 0.05), windowMaterial)
-  visor.position.y = 5.3
-  details.add(visor)
+  const windscreen = mesh(slabGeometry([[-1.65, -28.7], [1.65, -28.7], [1.25, -26.4], [-1.25, -26.4]], 0.06), windowMaterial)
+  windscreen.position.y = 7.75
+  details.add(windscreen)
 
-  aircraft.add(fuselage, details, leftWing.assembly, rightWing.assembly, finAssembly, ...engines, ...landingGearAssemblies)
+  aircraft.add(fuselage, details, leftWing, rightWing, leftTail, rightTail, finAssembly, ...engines, ...landingGearAssemblies)
   return {
     root: aircraft,
     landingGear: landingGearAssemblies,
     flaps,
-    view: concordeView,
+    view: dreamlinerView,
     breakawayParts: [
-      { name: 'left-wing', root: leftWing.assembly },
-      { name: 'right-wing', root: rightWing.assembly },
-      { name: 'left-tail', root: leftWing.elevon },
-      { name: 'right-tail', root: rightWing.elevon },
+      { name: 'left-wing', root: leftWing },
+      { name: 'right-wing', root: rightWing },
+      { name: 'left-tail', root: leftTail },
+      { name: 'right-tail', root: rightTail },
       { name: 'fin', root: finAssembly },
-      { name: 'left-outer-engine', root: engines[0] },
-      { name: 'left-inner-engine', root: engines[1] },
-      { name: 'right-inner-engine', root: engines[2] },
-      { name: 'right-outer-engine', root: engines[3] },
+      { name: 'left-engine', root: engines[0] },
+      { name: 'right-engine', root: engines[1] },
     ],
   }
 }
 
 export function createAircraft(): AircraftRig {
-  return createConcordeAircraft()
+  return createDreamlinerAircraft()
 }
 
 function seededRandom(seed: number) {
