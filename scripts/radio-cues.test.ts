@@ -80,8 +80,8 @@ assert.equal(clearance?.text, 'Flightdeck one seven, radar vectors St. Louis Lam
 const readback = buildRadioCue(trace(3, 'atc_clearance_readback', 'KSTL runway 30L, maintain 1500 feet, initial heading 040.', {}), state)
 assert.equal(readback?.text, 'KSTL runway 30L, maintain 1500 feet, initial heading 040.')
 
-const configuration = buildRadioCue(trace(4, 'aircraft_configured', 'Landing configuration', { gearDown: true, flapsDeg: 30 }), state)
-assert.equal(configuration?.text, 'Gear down, flaps thirty.')
+const configuration = buildRadioCue(trace(4, 'aircraft_configured', 'Landing configuration', { gearDown: true, flapsDeg: 0 }), state)
+assert.equal(configuration?.text, 'Gear down, clean delta.')
 
 const checkpoint = buildRadioCue(trace(5, 'checkpoint_reached', 'Lambert base', {
   waypointName: 'Lambert base',

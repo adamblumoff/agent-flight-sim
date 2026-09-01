@@ -43,7 +43,7 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
   const aircraft = mapPoint(state)
   const activeWaypoint = routePoints[state.route.activeWaypointIndex]
   const activeFix = activeWaypoint ? mapPoint(activeWaypoint) : null
-  const activeCaptureRadius = activeWaypoint ? checkpointCaptureRadiusNm(activeWaypoint, state.controlOwner) : null
+  const activeCaptureRadius = activeWaypoint ? checkpointCaptureRadiusNm(activeWaypoint) : null
   const activeCaptureRadiusPixels = activeWaypoint && activeFix && activeCaptureRadius
     ? Math.abs(mapPoint({ lat: activeWaypoint.lat, lon: activeWaypoint.lon + activeCaptureRadius / (60 * longitudeScale) }).x - activeFix.x)
     : 0

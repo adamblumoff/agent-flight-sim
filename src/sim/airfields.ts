@@ -37,8 +37,8 @@ export const KSTL_RUNWAY_30L: MissionRunway = Object.freeze({
   farEndLon: KSTL_RUNWAY_FAR_END.lon,
   headingDeg: 304,
   lengthFt: KSTL_RUNWAY_LENGTH_FT,
-  // FAA published width for KSTL 12R/30L. The simulation's A380 envelope
-  // remains within the usable paved surface rather than silently widening it.
+  // FAA published width for KSTL 12R/30L. Keep the rendered surface tied to
+  // the real runway instead of widening it around a particular aircraft model.
   widthFt: 150,
   elevationFt: 585.3,
 })

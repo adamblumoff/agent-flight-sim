@@ -44,6 +44,13 @@ export interface CopilotDiagnostics {
   readonly recentTools: readonly string[]
 }
 
+export interface CopilotCrewAction {
+  readonly id: string
+  readonly label: string
+  readonly description: string
+  readonly onSelect: () => void
+}
+
 export interface CopilotPanelProps {
   readonly phase: string
   readonly headline: string
@@ -51,6 +58,8 @@ export interface CopilotPanelProps {
   readonly recommendation: string
   readonly plan: readonly string[]
   readonly action: string
+  readonly crewActions: readonly CopilotCrewAction[]
+  readonly crewActionStatus: string | null
   readonly approvalPending: boolean
   readonly approvalPrompt: string
   readonly debrief: CopilotDebrief | null
@@ -186,6 +195,8 @@ export function CopilotPanel({
   recommendation,
   plan,
   action,
+  crewActions,
+  crewActionStatus,
   approvalPending,
   approvalPrompt,
   debrief,
@@ -245,6 +256,23 @@ export function CopilotPanel({
             <span>Now</span>
             <strong>{action}</strong>
           </section>
+
+          {crewActions.length > 0 || crewActionStatus ? (
+            <section className="crew-decision" aria-labelledby="crew-decision-title" aria-live="polite">
+              <h2 id="crew-decision-title">Flight crew decision</h2>
+              {crewActionStatus ? <p>{crewActionStatus}</p> : null}
+              {crewActions.length > 0 ? (
+                <div className="crew-decision-actions">
+                  {crewActions.map((crewAction) => (
+                    <Button key={crewAction.id} variant="outline" onClick={crewAction.onSelect}>
+                      <span>{crewAction.label}</span>
+                      <small>{crewAction.description}</small>
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           {webMcpActivities.length > 0 ? (
             <section className="agent-trace" aria-labelledby="agent-trace-title" aria-live="polite">

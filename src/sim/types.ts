@@ -1,7 +1,6 @@
 export type ControlOwner = 'human' | 'agent'
 export type TraceActor = ControlOwner | 'system'
 export type CheckrideSeed = 17 | 42 | 81
-export type FlightMode = 'full' | 'judge'
 export type AgentMode = 'idle' | 'requested' | 'thinking' | 'flying' | 'awaiting_approval' | 'complete'
 export type EvidenceSource = 'weather' | 'cockpit' | 'traffic' | 'passenger'
 export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
@@ -9,13 +8,10 @@ export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
 export interface FlightEvidence { readonly source: EvidenceSource; readonly headline: string; readonly detail: string; readonly reliability: EvidenceReliability }
 export type RoutePlan = 'unassigned' | 'continue_kmdw' | 'return_kstl'
 export type DiversionPlan = Exclude<RoutePlan, 'unassigned'>
-export type VerticalMode = 'climb' | 'level' | 'descend' | 'approach'
-export type LateralMode = 'route' | 'heading'
 export type MissionPhase = 'preflight' | 'takeoff' | 'planning' | 'enroute' | 'approach' | 'flare' | 'rollout' | 'complete' | 'failed'
 export type MissionOutcome = 'in_progress' | 'landed' | 'unsafe_touchdown' | 'fuel_exhausted' | 'crashed' | 'timed_out'
 export type AircraftPhase = 'takeoff_roll' | 'airborne' | 'landing_roll' | 'stopped' | 'crash_slide'
 
-export interface AutopilotState { readonly enabled: boolean; readonly headingDeg: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalMode: VerticalMode; readonly lateralMode: LateralMode }
 export interface MotionState {
   readonly longitudinalAccelerationKtPerSecond: number
   readonly verticalAccelerationFpmPerSecond: number
@@ -115,11 +111,10 @@ export interface CheckrideState {
 }
 
 export interface FlightState {
-  readonly mode: FlightMode
   readonly lat: number; readonly lon: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalSpeedFpm: number; readonly headingDeg: number; readonly pitchDeg: number; readonly bankDeg: number; readonly throttle: number; readonly flapsDeg: number; readonly gearDown: boolean
+  readonly controlInputs: PilotControls
   readonly elapsedSeconds: number; readonly fuelMinutesRemaining: number
   readonly controlOwner: ControlOwner; readonly handoffRequested: boolean; readonly agentMode: AgentMode
-  readonly autopilot: AutopilotState
   readonly motion: MotionState
   readonly impact: ImpactState | null
   readonly aircraftPhase: AircraftPhase
@@ -150,7 +145,6 @@ export interface DecisionRouteOption { readonly plan: Exclude<RoutePlan, 'unassi
 export interface EmergencyDecisionContext { readonly evidence: readonly FlightEvidence[]; readonly decisionSecondsRemaining: number | null; readonly fuelMinutesRemaining: number; readonly comfortLimits: { readonly maximumBankDeg: number; readonly warningLoadFactorG: number; readonly warningJerkGPerSecond: number }; readonly routeOptions: readonly DecisionRouteOption[] }
 export type ActiveLegRebuildStrategy = 'direct_intercept' | 'wider_pattern' | 'skip_noncritical'
 
-export interface AutopilotTargetsInput { readonly headingDeg?: number; readonly altitudeFt?: number; readonly airspeedKt?: number; readonly verticalMode?: VerticalMode; readonly lateralMode?: LateralMode; readonly reason?: string }
 export interface AircraftConfigurationInput { readonly gearDown?: boolean; readonly flapsDeg?: 0 | 10 | 20 | 30; readonly reason?: string }
 export interface FlightEventWaitInput { readonly afterRevision: number; readonly events: readonly FlightEventType[]; readonly timeoutMs: number }
 export interface FlightEventWaitResult { readonly revision: number; readonly event: FlightEventType | 'timeout'; readonly message: string; readonly state: FlightState }

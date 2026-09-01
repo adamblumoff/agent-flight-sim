@@ -16,19 +16,18 @@ import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
 import { RadioTranscript } from './components/radio-transcript'
-import { flightEnvelopeFor } from './sim/aircraftEnvelope'
+import { CONCORDE_ENVELOPE } from './sim/aircraftEnvelope'
 import { flightAudio } from './audio/flightAudio'
 import { radioVoiceClipFor } from './audio/radioVoicePack'
 import { flightSimulator } from './sim/flightSimulator'
-import { missionProfileFor } from './sim/missionProfiles'
-import type { FlightMode, FlightState, RoutePlan } from './sim/types'
+import { MISSION_PROFILE } from './sim/missionProfiles'
+import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
 import { createFlightTrajectory } from './webmcp/trajectory'
 import { persistEvaluationEvidence } from './webmcp/evaluationArchive'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
-const flapSettings = [0, 10, 20, 30] as const
 
 const cameraOptions: ReadonlyArray<{
   mode: FlightCameraMode
@@ -139,9 +138,7 @@ function deriveRecommendation(state: FlightState): string {
 function derivePlan(state: FlightState): readonly string[] {
   if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
     return [
-      state.mode === 'judge'
-        ? 'File the compact Chicago Midway route; the physical return normally takes about four and a half minutes inside a six-minute hard window.'
-        : 'File the Chicago Midway runway 31C route before departure.',
+      'File the Chicago Midway runway 31C route before departure.',
       'Take off from St. Louis Lambert runway 12R, clean up the aircraft, and monitor for changes.',
     ]
   }
@@ -201,8 +198,7 @@ function derivePlan(state: FlightState): readonly string[] {
 function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
   if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') {
-    const envelope = flightEnvelopeFor(state.mode)
-    return `Accelerating on Lambert runway 12R. At ${envelope.rotateSpeedKt} knots, rotate toward ${envelope.initialClimbPitchDeg}°.`
+    return `Accelerating on Lambert runway 12R. At ${CONCORDE_ENVELOPE.rotateSpeedKt} knots, rotate toward ${CONCORDE_ENVELOPE.initialClimbPitchDeg}°.`
   }
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
@@ -224,12 +220,7 @@ function deriveAction(state: FlightState): string {
     return 'Reading the emergency context and comparing the available routes.'
   }
   if (!state.procedure.compliant) return state.procedure.instruction
-  if (state.controlOwner === 'agent' && state.autopilot.enabled) {
-    const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
-    const target = waypoint?.name ?? state.route.destination ?? 'assigned route'
-    return `Tracking ${target} at ${Math.round(state.autopilot.headingDeg).toString().padStart(3, '0')}°, ${Math.round(state.autopilot.altitudeFt).toLocaleString()} ft, ${Math.round(state.autopilot.airspeedKt)} kt.`
-  }
-  if (state.controlOwner === 'agent') return 'Holding the current flight path while the next action is selected.'
+  if (state.controlOwner === 'agent') return 'The agent has the flight controls and is selecting its next input.'
   return 'Monitoring the aircraft and emergency conditions while you fly.'
 }
 
@@ -313,7 +304,7 @@ export default function App() {
     flightSimulator.getSnapshot,
     flightSimulator.getSnapshot,
   )
-  const { status: webMcpStatus, activities, clearActivities: clearWebMcpActivities } = useWebMcp(state.mode)
+  const { status: webMcpStatus, activities, clearActivities: clearWebMcpActivities } = useWebMcp()
   const radio = useSyncExternalStore(
     flightAudio.subscribeRadio,
     flightAudio.getRadioSnapshot,
@@ -325,18 +316,16 @@ export default function App() {
   const [audioMuted, setAudioMuted] = useState(false)
   const [captionsVisible, setCaptionsVisible] = useState(true)
   const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
-  const [selectedMode, setSelectedMode] = useState<FlightMode>(() => new URLSearchParams(window.location.search).get('mode') === 'judge' ? 'judge' : 'full')
   const [worldStatus, setWorldStatus] = useState<FlightWorldStatus>({
     kind: 'loading',
     message: 'Loading the flight world.',
   })
-  const selectedEnvelope = flightEnvelopeFor(selectedMode)
-  const selectedProfile = missionProfileFor(selectedMode)
-
-  // The simulator loop is persistent; mode changes reset its episode without
-  // tearing down audio or the 60 Hz clock.
   useEffect(() => {
-    if (selectedMode !== flightSimulator.getState().mode) flightSimulator.reset(undefined, selectedMode)
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('mode')) {
+      url.searchParams.delete('mode')
+      window.history.replaceState(null, '', url)
+    }
     flightSimulator.start()
     flightAudio.start()
     return () => {
@@ -365,15 +354,9 @@ export default function App() {
   }, [])
 
   const resetScenario = useCallback(() => {
-    flightSimulator.reset(undefined, selectedMode)
+    flightSimulator.reset()
     clearWebMcpActivities()
     setShowTakeoffBrief(true)
-  }, [clearWebMcpActivities, selectedMode])
-
-  const selectMissionMode = useCallback((mode: FlightMode) => {
-    setSelectedMode(mode)
-    flightSimulator.reset(undefined, mode)
-    clearWebMcpActivities()
   }, [clearWebMcpActivities])
 
   const changeEnvironmentVolume = useCallback((volume: number) => {
@@ -396,6 +379,26 @@ export default function App() {
   const filePreflightRoute = useCallback(() => {
     flightSimulator.setRoute('continue_kmdw', 'Pilot filed the normal route to Chicago Midway runway 31C before departure.', 'human')
     setShowTakeoffBrief(false)
+  }, [])
+
+  const requestHumanDiversion = useCallback((plan: 'return_kstl' | 'continue_kmdw') => {
+    const context = flightSimulator.getDecisionContext('human')
+    const option = context.routeOptions.find((routeOption) => routeOption.plan === plan)
+    flightSimulator.requestDiversion(
+      plan,
+      option?.summary ?? `Pilot requested ${plan.replaceAll('_', ' ')} after reviewing the emergency context.`,
+      'human',
+    )
+  }, [])
+
+  const acceptHumanClearance = useCallback(() => {
+    const clearance = flightSimulator.getState().atc.clearance
+    if (!clearance) return
+    flightSimulator.acceptAtcClearance(
+      clearance.id,
+      `${clearance.destination} runway ${clearance.runway}, heading ${Math.round(clearance.headingDeg)}, altitude ${clearance.altitudeFt}`,
+      'human',
+    )
   }, [])
 
   useEffect(() => {
@@ -428,7 +431,7 @@ export default function App() {
 
       const current = flightSimulator.getState()
       const key = event.key.toLowerCase()
-      if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'f', 'g', 't', 'x'].includes(key)) event.preventDefault()
+      if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'g', 't', 'x'].includes(key)) event.preventDefault()
 
       if (current.controlOwner === 'human') {
         if (['w', 'a', 's', 'd'].includes(key) && !event.repeat) {
@@ -439,10 +442,6 @@ export default function App() {
         if (key === 'arrowdown') flightSimulator.setThrottle(current.throttle - 0.05, 'human', 'Pilot throttle input')
         if (key === 'g') flightSimulator.setGear(!current.gearDown, 'human', 'Pilot gear command')
         if (key === 'x') flightSimulator.levelPilotAttitude('human', 'Pilot pressed the level-flight shortcut')
-        if (key === 'f' && flightEnvelopeFor(current.mode).hasConventionalFlaps) {
-          const index = flapSettings.indexOf(current.flapsDeg as (typeof flapSettings)[number])
-          flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Pilot flap command')
-        }
       }
 
       if (key === 't' && (current.controlOwner === 'agent' || webMcpStatus === 'ready')) toggleHandoff()
@@ -500,11 +499,43 @@ export default function App() {
     ? `${Math.round(state.motion.headwindKt)} kt headwind`
     : `${Math.round(Math.abs(state.motion.headwindKt))} kt tailwind`
   const windTitle = `Wind from ${windDirection}° at ${state.scenario.weather.windSpeedKt} kt · ${longitudinalWind} · ${Math.round(Math.abs(state.motion.crosswindKt))} kt crosswind${state.motion.turbulenceLevel === 'none' ? '' : ` · ${state.motion.turbulenceLevel} turbulence`}`
+  const crewActions = state.controlOwner !== 'human' || state.checkride.status !== 'decision_required'
+    ? []
+    : state.atc.status === 'none'
+      ? [
+          {
+            id: 'return-kstl',
+            label: 'Return to Lambert',
+            description: 'Request priority handling to KSTL runway 30L.',
+            onSelect: () => requestHumanDiversion('return_kstl'),
+          },
+          {
+            id: 'continue-kmdw',
+            label: 'Continue to Midway',
+            description: 'Request clearance to continue to KMDW runway 31C.',
+            onSelect: () => requestHumanDiversion('continue_kmdw'),
+          },
+        ]
+      : state.atc.status === 'cleared'
+        ? [{
+            id: 'accept-clearance',
+            label: 'Read back clearance',
+            description: state.atc.clearance?.instruction ?? 'Accept the current ATC routing.',
+            onSelect: acceptHumanClearance,
+          }]
+        : []
+  const crewActionStatus = state.controlOwner !== 'human' || state.checkride.status !== 'decision_required'
+    ? null
+    : state.atc.status === 'requested'
+      ? 'Diversion requested. Maintain control while ATC prepares the clearance.'
+      : state.atc.status === 'accepted'
+        ? 'Clearance accepted. The active route and next checkpoint are updated.'
+        : null
 
   return (
     <main className="app-shell">
       <Suspense fallback={<div className="flight-world world-loading" />}>
-        <FlightWorld key={state.mode} mode={state.mode} cameraMode={cameraMode} compassRef={compassRef} onStatusChange={setWorldStatus} />
+        <FlightWorld cameraMode={cameraMode} compassRef={compassRef} onStatusChange={setWorldStatus} />
       </Suspense>
       <div className="scene-shade" />
 
@@ -522,21 +553,13 @@ export default function App() {
             <p id="takeoff-briefing-copy">
               You are lined up on St. Louis Lambert runway 12R for Chicago Midway runway 31C. File that route before departure.
             </p>
-            <div className="mission-mode-picker" role="group" aria-label="Mission length">
-              <button type="button" aria-pressed={selectedMode === 'judge'} onClick={() => selectMissionMode('judge')}>
-                <strong>Judge mode</strong><span>{missionProfileFor('judge').label}</span>
-              </button>
-              <button type="button" aria-pressed={selectedMode === 'full'} onClick={() => selectMissionMode('full')}>
-                <strong>Full mission</strong><span>{missionProfileFor('full').label}</span>
-              </button>
-            </div>
             <ol>
-              <li><kbd>↑</kbd><span>{selectedMode === 'judge' ? 'Set full power for takeoff; reheat is included in the Concorde thrust model.' : 'Hold to set full power, or drag Power to 100%.'}</span></li>
-              <li><kbd>W</kbd><span>At {selectedEnvelope.rotateSpeedKt} knots, rotate at about {selectedEnvelope.rotationRateDegPerSecond}°/s toward {selectedEnvelope.initialClimbPitchDeg}°. Rotation is guidance; the aircraft lifts off only when its aerodynamic lift exceeds its weight.</span></li>
-              <li><kbd>G</kbd><span>{selectedEnvelope.hasConventionalFlaps ? <>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</> : <>Retract the gear after positive rate. The delta wing has no flap detents; use <kbd>X</kbd> to level.</>}</span></li>
+              <li><kbd>↑</kbd><span>Set full power for takeoff; reheat is included in the Concorde thrust model.</span></li>
+              <li><kbd>W</kbd><span>At {CONCORDE_ENVELOPE.rotateSpeedKt} knots, rotate at about {CONCORDE_ENVELOPE.rotationRateDegPerSecond}°/s toward {CONCORDE_ENVELOPE.initialClimbPitchDeg}°. Rotation is guidance; the aircraft lifts off only when its aerodynamic lift exceeds its weight.</span></li>
+              <li><kbd>G</kbd><span>Retract the gear after positive rate. The delta wing has no flap detents; use <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
-              <span>{selectedProfile.label}. Filing arms the departure; apply power when ready.</span>
+              <span>{MISSION_PROFILE.label}. Filing arms the departure; apply power when ready.</span>
               <Button autoFocus onClick={filePreflightRoute}>Fly route</Button>
             </div>
           </div>
@@ -548,7 +571,7 @@ export default function App() {
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
             <strong>Flightdeck</strong>
-            <span>{state.mode === 'judge' ? 'G-BOAC · Concorde evaluation' : 'N380FS · Wide-body departure'}</span>
+            <span>G-BOAC · Concorde</span>
           </div>
         </div>
 
@@ -657,19 +680,6 @@ export default function App() {
             <span className="control-label">Gear <kbd className="control-shortcut">(G)</kbd></span>
             <span className="control-value">{state.gearDown ? 'Down' : 'Up'}</span>
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={state.controlOwner === 'agent' || !flightEnvelopeFor(state.mode).hasConventionalFlaps}
-            aria-keyshortcuts="F"
-            onClick={() => {
-              const index = flapSettings.indexOf(state.flapsDeg as (typeof flapSettings)[number])
-              flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Cockpit flap control')
-            }}
-          >
-            <span className="control-label">Flaps {flightEnvelopeFor(state.mode).hasConventionalFlaps ? <kbd className="control-shortcut">(F)</kbd> : null}</span>
-            <span className="control-value">{flightEnvelopeFor(state.mode).hasConventionalFlaps ? `${state.flapsDeg}°` : 'None'}</span>
-          </Button>
           <label className="throttle-control">
             <span>Power</span>
             <Slider
@@ -699,6 +709,8 @@ export default function App() {
         recommendation={deriveRecommendation(state)}
         plan={derivePlan(state)}
         action={deriveAction(state)}
+        crewActions={crewActions}
+        crewActionStatus={crewActionStatus}
         approvalPending={state.approval.status === 'pending'}
         approvalPrompt={state.approval.question ?? 'Approve the copilot’s requested action?'}
         debrief={deriveDebrief(state)}

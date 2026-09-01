@@ -41,7 +41,7 @@ export function createCheckpointOrb() {
 
       waypointToWorldVector(waypoint, position)
       root.position.set(position.x, 0, position.z)
-      const radiusMeters = checkpointCaptureRadiusNm(waypoint, state.controlOwner) * NM_TO_METERS
+      const radiusMeters = checkpointCaptureRadiusNm(waypoint) * NM_TO_METERS
       root.scale.set(radiusMeters, 1, radiusMeters)
     },
   }

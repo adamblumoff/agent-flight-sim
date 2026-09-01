@@ -1,19 +1,9 @@
-import type { ControlOwner, RouteWaypoint } from './types'
+import type { RouteWaypoint } from './types'
 
-const HUMAN_CHECKPOINT_RADIUS_NM = 0.16
-const HUMAN_TOUCHDOWN_RADIUS_NM = 0.1
-const AGENT_CHECKPOINT_RADIUS_NM = 0.8
-const AGENT_FINAL_RADIUS_NM = 0.45
-export const checkpointCaptureRadiusNm = (waypoint: RouteWaypoint, controlOwner: ControlOwner) =>
-  controlOwner === 'human'
-    ? Math.max(waypoint.captureRadiusNm, waypoint.kind === 'touchdown' ? HUMAN_TOUCHDOWN_RADIUS_NM : HUMAN_CHECKPOINT_RADIUS_NM)
-    : Math.max(
-        waypoint.captureRadiusNm,
-        waypoint.kind === 'touchdown'
-          ? 0
-          : waypoint.id.startsWith('KSTL_COMPACT_TURN_')
-            ? 0.55
-          : waypoint.kind === 'final'
-            ? AGENT_FINAL_RADIUS_NM
-            : AGENT_CHECKPOINT_RADIUS_NM,
-      )
+const CHECKPOINT_RADIUS_FLOOR_NM = 0.16
+const TOUCHDOWN_RADIUS_FLOOR_NM = 0.1
+
+export const checkpointCaptureRadiusNm = (waypoint: RouteWaypoint) => Math.max(
+  waypoint.captureRadiusNm,
+  waypoint.kind === 'touchdown' ? TOUCHDOWN_RADIUS_FLOOR_NM : CHECKPOINT_RADIUS_FLOOR_NM,
+)

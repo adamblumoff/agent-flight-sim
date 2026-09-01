@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { executeFlightToolFromUnknown } from '../shared/executeFlightTool'
 import { flightSimulator } from '../sim/flightSimulator'
-import type { FlightMode, FlightState } from '../sim/types'
+import type { FlightState } from '../sim/types'
 import { buildRadioCue, type RadioCue } from '../audio/radioCues'
 import {
-  flightToolDefinitionsFor,
+  flightToolDefinitions,
   type FlightToolDefinition,
   type FlightToolName,
 } from '../shared/flightTools'
@@ -34,7 +34,7 @@ export interface WebMcpActivity {
 type BeginActivity = (activity: Pick<WebMcpActivity, 'tool' | 'title' | 'arguments'>) => number
 type CompleteActivity = (id: number, result: { readonly ok: boolean; readonly summary: string }, failed?: boolean) => void
 
-function createFlightTools(definitions: readonly FlightToolDefinition[], mode: FlightMode, beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
+function createFlightTools(definitions: readonly FlightToolDefinition[], beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
   return definitions.map((definition) => ({
     name: definition.name,
     title: definition.title,
@@ -44,9 +44,6 @@ function createFlightTools(definitions: readonly FlightToolDefinition[], mode: F
     execute: async (input: Record<string, unknown>) => {
       const activityId = beginActivity({ tool: definition.name, title: definition.title, arguments: input })
       try {
-        if (definition.name === 'start_flight' && flightSimulator.getState().mode !== mode) {
-          flightSimulator.reset(undefined, mode)
-        }
         const result = await executeFlightToolFromUnknown(definition.name, input)
         completeActivity(activityId, { ok: result.ok, summary: result.summary }, !result.ok)
         return result
@@ -58,7 +55,7 @@ function createFlightTools(definitions: readonly FlightToolDefinition[], mode: F
   }))
 }
 
-export function useWebMcp(mode: FlightMode) {
+export function useWebMcp() {
   const [status, setStatus] = useState<WebMcpStatus>('registering')
   const [activities, setActivities] = useState<readonly WebMcpActivity[]>([])
   const nextActivityId = useRef(1)
@@ -121,7 +118,7 @@ export function useWebMcp(mode: FlightMode) {
     async function registerTools() {
       try {
         await Promise.all(
-          createFlightTools(flightToolDefinitionsFor(mode), mode, beginActivity, completeActivity).map((tool) =>
+          createFlightTools(flightToolDefinitions, beginActivity, completeActivity).map((tool) =>
             modelContext.registerTool(tool, { signal: controller.signal }),
           ),
         )
@@ -137,7 +134,7 @@ export function useWebMcp(mode: FlightMode) {
 
     void registerTools()
     return () => controller.abort()
-  }, [mode])
+  }, [])
 
   return { status, activities, clearActivities }
 }

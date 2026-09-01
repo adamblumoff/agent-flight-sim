@@ -9,11 +9,10 @@ export function persistEvaluationEvidence(activities: readonly WebMcpActivity[],
   const key = `flightdeck:evaluation:${state.checkride.runId}`
   const terminal = state.mission.outcome !== 'in_progress'
   const payload = {
-    schemaVersion: 'flightdeck-evaluation-archive-v1',
+    schemaVersion: 'flightdeck-evaluation-archive-v2',
     runId: state.checkride.runId,
     buildId: state.checkride.buildId,
     profileId: state.checkride.profileId,
-    mode: state.mode,
     updatedAt: new Date().toISOString(),
     terminal,
     outcome: state.mission.outcome,

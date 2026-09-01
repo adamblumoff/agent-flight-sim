@@ -1,10 +1,9 @@
+import type { FlightControlInput } from '../sim/flightCommands.ts'
 import type {
-  ActiveLegRebuildStrategy, AircraftConfigurationInput, AutopilotTargetsInput, CheckrideSeed,
-  ConfigurationProcedure, ControlOwner, DiversionPlan, EvidenceSource, FlightEventType, FlightEvidence,
-  FlightMode, FlightState, EmergencyDecisionContext, MissionBrief, MissionPhase, RoutePlan,
+  ActiveLegRebuildStrategy, CheckrideSeed, ConfigurationProcedure, ControlOwner, DiversionPlan,
+  EmergencyDecisionContext, EvidenceSource, FlightEventType, FlightEvidence, FlightState, MissionBrief,
+  MissionPhase, RoutePlan,
 } from '../sim/types.ts'
-import { A380_ENVELOPE, CONCORDE_ENVELOPE } from '../sim/aircraftEnvelope.ts'
-import { KSTL_RUNWAY_30L } from '../sim/airfields.ts'
 
 type JsonSchema = Readonly<Record<string, unknown>>
 export type ToolReceiptTone = 'neutral' | 'success' | 'warning' | 'critical' | 'automation'
@@ -14,11 +13,10 @@ export type AgentFlightState = Omit<FlightState, 'checkride'> & {
 
 export interface FlightToolGuidance {
   readonly phase: MissionPhase
-  readonly requiredAction: string
-  readonly recommendedNextTool: FlightToolName | null
-  readonly recommendedArguments: Readonly<Record<string, unknown>> | null
-  readonly allowedNextTools: readonly FlightToolName[]
+  readonly objective: string
   readonly procedure: ConfigurationProcedure
+  readonly hazards: readonly string[]
+  readonly availableActions: readonly FlightToolName[]
   readonly eventRevision: number
   readonly decisionSecondsRemaining: number | null
 }
@@ -45,17 +43,15 @@ export interface FlightToolArguments {
   set_route: { readonly plan: 'continue_kmdw' | 'return_kstl'; readonly reason: string }
   request_diversion: { readonly plan: DiversionPlan; readonly reason: string }
   accept_clearance: { readonly clearance_id: string; readonly readback: string }
-  begin_takeoff: { readonly reason: string }
-  set_autopilot_targets: AutopilotTargetsInput
+  set_flight_controls: FlightControlInput
   rebuild_active_leg: { readonly strategy: ActiveLegRebuildStrategy; readonly reason: string }
-  configure_aircraft: AircraftConfigurationInput
   request_human_approval: { readonly question: string; readonly requested_action: string; readonly reason: string }
   wait_for_flight_event: { readonly after_revision?: number; readonly events?: readonly FlightEventType[]; readonly timeout_ms?: number }
   transfer_control: { readonly owner: ControlOwner; readonly reason?: string }
 }
 
 export interface FlightToolResults {
-  start_flight: FlightToolReceipt<{ readonly runId: string; readonly mode: FlightMode; readonly state: AgentFlightState }>
+  start_flight: FlightToolReceipt<{ readonly runId: string; readonly state: AgentFlightState }>
   get_mission_brief: FlightToolReceipt<{ readonly brief: MissionBrief }>
   get_flight_state: FlightToolReceipt<{ readonly state: AgentFlightState; readonly units: Readonly<Record<string, string>> }>
   get_decision_context: FlightToolReceipt<{ readonly available: boolean; readonly context: EmergencyDecisionContext | null }>
@@ -63,10 +59,8 @@ export interface FlightToolResults {
   set_route: FlightToolActionResult
   request_diversion: FlightToolActionResult
   accept_clearance: FlightToolActionResult
-  begin_takeoff: FlightToolActionResult
-  set_autopilot_targets: FlightToolActionResult
+  set_flight_controls: FlightToolActionResult
   rebuild_active_leg: FlightToolActionResult
-  configure_aircraft: FlightToolActionResult
   request_human_approval: FlightToolActionResult
   wait_for_flight_event: FlightToolWaitResult
   transfer_control: FlightToolReceipt<{ readonly controlOwner: ControlOwner; readonly state: AgentFlightState }>
@@ -101,7 +95,7 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_flight', title: 'Start flight', readOnly: false,
-    description: 'Start the page-selected flight and take copilot control. The environment privately selects a reproducible scenario; no future condition is disclosed before its flight event. This tool takes no arguments. Follow guidance.recommendedNextTool in every result. The lifecycle is start_flight, get_mission_brief, set_route, begin_takeoff, wait_for_flight_event, then request and accept any ATC diversion clearance.',
+    description: 'Start a fresh flight and take aircraft control. The environment privately selects a reproducible scenario; no future condition is disclosed before its flight event. Read the mission and live state, then operate the aircraft through the same control surface available to a human pilot.',
     inputSchema: emptySchema,
   },
   {
@@ -114,7 +108,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'get_decision_context', title: 'Read emergency options', readOnly: true,
-    description: 'Available only after emergency_detected. Read the newly available evidence, comfort envelope, fuel, decision time, and ranked route options. Before the event it returns available false without revealing routes or future conditions. This starts the agent decision clock if it has not started.', inputSchema: emptySchema,
+    description: 'Available only after emergency_detected. Read the newly available evidence, comfort envelope, fuel, decision time, and route options. Before the event it returns available false without revealing routes or future conditions. This starts the agent decision clock if it has not started.', inputSchema: emptySchema,
   },
   {
     name: 'inspect_flight_evidence', title: 'Inspect evidence', readOnly: true,
@@ -123,7 +117,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'set_route', title: 'Load preflight route', readOnly: false,
-    description: 'Before takeoff, load the dispatcher-filed plan in get_mission_brief.brief.assignedRoute into the FMS. Filing does not move the aircraft. Emergency diversions require request_diversion followed by an ATC clearance and accept_clearance. The flight director emits checkpoint_reached at each fly-through gate.',
+    description: 'Before takeoff, load the dispatcher-filed plan from the mission brief into the FMS. Filing does not move the aircraft. A later diversion requires an ATC request, clearance, and readback. The flight director emits checkpoint_reached when the aircraft flies through each gate.',
     inputSchema: { type: 'object', properties: { plan: { type: 'string', enum: routePlans }, reason: { type: 'string', minLength: 1 } }, required: ['plan', 'reason'], additionalProperties: false },
   },
   {
@@ -137,14 +131,27 @@ export const flightToolDefinitions = [
     inputSchema: { type: 'object', properties: { clearance_id: { type: 'string', minLength: 1 }, readback: { type: 'string', minLength: 1 } }, required: ['clearance_id', 'readback'], additionalProperties: false },
   },
   {
-    name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
-    description: `Begin the takeoff roll after filing continue_kmdw. Full mode uses the A380-style ${A380_ENVELOPE.rotateSpeedKt}-knot rotation profile. Judge mode uses Concorde: V1 ${CONCORDE_ENVELOPE.decisionSpeedKt}, VR ${CONCORDE_ENVELOPE.rotateSpeedKt}, V2 ${CONCORDE_ENVELOPE.takeoffSafetySpeedKt}, then ${CONCORDE_ENVELOPE.initialClimbSpeedKt} knots. Rotation is procedural guidance; liftoff occurs only when modeled aerodynamic lift exceeds aircraft weight. Both modes use the same real-time world, wind, turbulence, gravity, and collision response. Hold Lambert runway 12R heading through ${A380_ENVELOPE.departureHeadingReleaseAglFt} ft AGL.`,
-    inputSchema: { type: 'object', properties: { reason: { type: 'string', minLength: 1 } }, required: ['reason'], additionalProperties: false },
-  },
-  {
-    name: 'set_autopilot_targets', title: 'Set autopilot targets', readOnly: false,
-    description: `Set persistent intent-level heading, altitude, speed, or vertical mode. Full mode accepts ${A380_ENVELOPE.minCommandSpeedKt}-${A380_ENVELOPE.maxCommandSpeedKt} kt; Concorde Judge mode accepts ${CONCORDE_ENVELOPE.minCommandSpeedKt}-${CONCORDE_ENVELOPE.maxCommandSpeedKt} kt. Out-of-envelope speeds are clamped. Supplying heading selects heading hold. Set lateralMode to route to resume route guidance. Commands remain active until changed.`,
-    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: KSTL_RUNWAY_30L.elevationFt, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: A380_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, lateralMode: { type: 'string', enum: ['route', 'heading'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
+    name: 'set_flight_controls', title: 'Set flight controls', readOnly: false,
+    description: 'Apply persistent direct flight controls. Throttle ranges from 0 to 1. Pitch and bank intent range from -1 to 1; positive pitch is nose-up and positive bank is right. Omitted controls keep their current values. The command remains active until changed, and it uses the same aerodynamics, actuator response, collision rules, and consequences as keyboard input. Applying thrust after the preflight route is filed starts the takeoff roll.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        throttle: { type: 'number', minimum: 0, maximum: 1 },
+        pitchIntent: { type: 'number', minimum: -1, maximum: 1 },
+        bankIntent: { type: 'number', minimum: -1, maximum: 1 },
+        gearDown: { type: 'boolean' },
+        flapsDeg: { type: 'number', enum: [0, 10, 20, 30] },
+        reason: { type: 'string', minLength: 1 },
+      },
+      anyOf: [
+        { required: ['throttle'] },
+        { required: ['pitchIntent'] },
+        { required: ['bankIntent'] },
+        { required: ['gearDown'] },
+        { required: ['flapsDeg'] },
+      ],
+      additionalProperties: false,
+    },
   },
   {
     name: 'rebuild_active_leg', title: 'Rebuild active leg', readOnly: false,
@@ -152,13 +159,8 @@ export const flightToolDefinitions = [
     inputSchema: { type: 'object', properties: { strategy: { type: 'string', enum: ['direct_intercept', 'wider_pattern', 'skip_noncritical'] }, reason: { type: 'string', minLength: 1 } }, required: ['strategy', 'reason'], additionalProperties: false },
   },
   {
-    name: 'configure_aircraft', title: 'Configure aircraft', readOnly: false,
-    description: 'Configure the shared wide-body landing gear and flap detents. Copy state.procedure exactly. The simplified detents are 10° for CONF 1+F, 20° for CONF 3, and 30° for FULL. Out-of-sequence settings are rejected.',
-    inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0, 10, 20, 30] }, reason: { type: 'string', description: 'Explain only the configuration being commanded.' } }, minProperties: 1, additionalProperties: false },
-  },
-  {
     name: 'request_human_approval', title: 'Ask pilot', readOnly: false,
-    description: 'Ask the pilot to approve a consequential action. Existing autopilot targets keep the aircraft moving while the pilot decides.',
+    description: 'Ask the pilot to approve a consequential action. The current direct-control inputs remain active while the pilot decides.',
     inputSchema: { type: 'object', properties: { question: { type: 'string', minLength: 1 }, requested_action: { type: 'string', minLength: 1 }, reason: { type: 'string', minLength: 1 } }, required: ['question', 'requested_action', 'reason'], additionalProperties: false },
   },
   {
@@ -168,37 +170,10 @@ export const flightToolDefinitions = [
   },
   {
     name: 'transfer_control', title: 'Transfer control', readOnly: false,
-    description: 'Accept a pending handoff or return control to the pilot. Any direct pilot input also overrides the copilot immediately.',
+    description: 'Accept a pending handoff or return control to the pilot. Any direct pilot input also overrides the agent immediately.',
     inputSchema: { type: 'object', properties: { owner: { type: 'string', enum: ['human', 'agent'] }, reason: { type: 'string' } }, required: ['owner'], additionalProperties: false },
   },
 ] as const satisfies readonly FlightToolDefinition[]
-
-export function flightToolDefinitionsFor(mode: FlightMode): readonly FlightToolDefinition[] {
-  return flightToolDefinitions.map((definition) => {
-    const envelope = mode === 'judge' ? CONCORDE_ENVELOPE : A380_ENVELOPE
-    if (definition.name === 'begin_takeoff') {
-      return {
-        ...definition,
-        description: `Begin the takeoff roll after filing continue_kmdw. ${envelope.name}: V1 ${envelope.decisionSpeedKt}, VR ${envelope.rotateSpeedKt}, V2 ${envelope.takeoffSafetySpeedKt}, then ${envelope.initialClimbSpeedKt} knots. Hold Lambert runway 12R heading through ${envelope.departureHeadingReleaseAglFt} ft AGL. Both modes use the same real-time world, wind, turbulence, gravity, and collision response.`,
-      }
-    }
-    if (definition.name === 'set_autopilot_targets') {
-      return {
-        ...definition,
-        description: `Set persistent intent-level heading, altitude, speed, or vertical mode for the ${envelope.name}. The valid speed range is ${envelope.minCommandSpeedKt}-${envelope.maxCommandSpeedKt} kt. Out-of-envelope speeds are clamped. Supplying heading selects heading hold. Set lateralMode to route to resume route guidance. Commands remain active until changed.`,
-        inputSchema: { ...definition.inputSchema, properties: { ...definition.inputSchema.properties, airspeedKt: { type: 'number', minimum: envelope.minCommandSpeedKt, maximum: envelope.maxCommandSpeedKt } } },
-      }
-    }
-    if (definition.name !== 'configure_aircraft') return definition
-    return mode === 'judge'
-      ? {
-          ...definition,
-          description: 'Configure the Concorde landing gear and clean delta wing. Copy state.procedure exactly. Concorde has no conventional flaps, so flapsDeg must remain 0. Out-of-sequence settings are rejected.',
-          inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0] }, reason: { type: 'string', description: 'Explain the gear command and clean-delta configuration.' } }, minProperties: 1, additionalProperties: false },
-        }
-      : definition
-  })
-}
 
 export const flightToolDefinitionsByName = Object.fromEntries(flightToolDefinitions.map((definition) => [definition.name, definition])) as unknown as { readonly [Name in FlightToolName]: FlightToolDefinition<Name> }
 export function isFlightToolName(value: string): value is FlightToolName { return Object.hasOwn(flightToolDefinitionsByName, value) }

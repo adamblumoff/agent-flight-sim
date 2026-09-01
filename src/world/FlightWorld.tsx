@@ -17,7 +17,6 @@ import {
 } from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { flightSimulator, navigationBearingDeg } from '../sim/flightSimulator'
-import type { FlightMode } from '../sim/types'
 import { createAircraft, createCrashEffects } from './aircraft'
 import { createAircraftBreakup } from './aircraftBreakup'
 import { createAirportWorld, disposeScene } from './airportScene'
@@ -33,7 +32,6 @@ export type FlightWorldStatus =
   | { readonly kind: 'error'; readonly message: string }
 
 export interface FlightWorldProps {
-  readonly mode: FlightMode
   readonly cameraMode?: FlightCameraMode
   readonly compassRef?: RefObject<HTMLDivElement | null>
   readonly onStatusChange?: (status: FlightWorldStatus) => void
@@ -62,7 +60,7 @@ const flapVisualDeflectionDeg = (detent: number) => {
   return 0
 }
 
-export function FlightWorld({ mode: flightMode, cameraMode = 'chase', compassRef, onStatusChange }: FlightWorldProps) {
+export function FlightWorld({ cameraMode = 'chase', compassRef, onStatusChange }: FlightWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraModeRef = useRef(cameraMode)
   const [status, setStatus] = useState<FlightWorldStatus>(loadingStatus)
@@ -119,7 +117,7 @@ export function FlightWorld({ mode: flightMode, cameraMode = 'chase', compassRef
     controls.enabled = false
 
     const world = createAirportWorld(scene, Math.min(8, renderer.capabilities.getMaxAnisotropy()))
-    const aircraftRig = createAircraft(flightMode)
+    const aircraftRig = createAircraft()
     const aircraft = aircraftRig.root
     const view = aircraftRig.view
     const landingGear = aircraftRig.landingGear

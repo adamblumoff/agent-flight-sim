@@ -1,70 +1,70 @@
 # Flightdeck
 
-Flightdeck is a browser-native evaluation environment where a human and a browser agent share control of a live emergency-flight simulator through WebMCP. The core question is simple: can an agent observe a changing world, make a defensible plan, operate safely over time, and recover when that plan stops working?
+Flightdeck is a browser-native emergency-flight simulator built to test whether an agent can observe a changing world, fly over time, and recover when its original plan stops working. A human and a browser agent operate the same Concorde through one command path. WebMCP gives the agent the same decision-relevant cockpit information shown to the human, except for rendered scene pixels.
 
 **Live app:** [agent-flight-sim-production.up.railway.app](https://agent-flight-sim-production.up.railway.app/)
 
-The aircraft and autopilot run locally in a deterministic 60 Hz fixed-step loop. Three.js renders a procedural airport from the same state exposed to WebMCP. React receives lower-frequency snapshots for instruments and the copilot UI. No map service, Cesium token, webhook, or backend is required.
+The simulator runs locally in a deterministic 60 Hz fixed-step loop. Three.js renders a procedural airport from the authoritative state. React receives lower-frequency snapshots for the instruments and copilot panel. No map service, Cesium token, webhook, or backend is required.
 
-## Why it is an RL environment
+## The flight
 
-Every WebMCP call forms a transition:
+The root URL starts one short, real-time Concorde flight. The assigned preflight plan departs St. Louis Lambert for Chicago Midway. A sealed in-flight event may force the pilot to reconsider that plan and coordinate a return to Lambert. Every run uses the same aircraft profile, route builder, world clock, checkpoint rule, and scoring model.
 
-```text
-observation → tool action → simulator transition → reward delta → next observation
-```
+The Concorde profile covers departure and terminal flight, not the complete supersonic envelope. At the modeled dispatch mass it calls V1 at 130 kt, begins rotation at VR 170 kt, and targets V2 188 kt by the 35-foot screen height. The clean delta wing has no conventional flap settings. Arrival guidance uses roughly 170 kt in the pattern, 165 kt while establishing final, and 155 kt on a stabilized approach with a nose-high body attitude.
 
-After a terminal state, the app exports both a clean WebMCP call list and a separate `flightdeck-trajectory-v1` JSON file containing observations, actions, results, per-step score changes, latency, terminal flags, final score, and outcome. Seeds 17, 42, and 81 vary weather, engine health, traffic, and passenger urgency while preserving reproducibility.
+These values draw from the [FAA's Concorde accident record](https://www.faa.gov/lessons_learned/transport_airplane/accidents/F-BTSC), the [FAA-hosted BEA report](https://www.faa.gov/sites/faa.gov/files/2022-11/Concorde_Accident_Report.pdf), [NASA's operational Concorde report](https://ntrs.nasa.gov/api/citations/20180000699/downloads/20180000699.pdf), and [British Airways' Concorde specifications](https://www.britishairways.com/content/information/about-ba/history-and-heritage/celebrating-concorde). Actual V-speeds varied with weight and conditions. Mach 2 cruise and flight near 60,000 ft sit outside this terminal scenario.
 
-Judge Mode is a six-minute real-time Concorde evaluation. It keeps the same scoring, weather, collision model, 1× world clock, and WebMCP contract as the full mission, but uses a Concorde-specific aircraft envelope and a compact three-gate return to Lambert. Full Mission remains a ten-minute 1× A380-style run.
-
-### Concorde terminal profile
-
-Judge Mode models a short-sector Concorde departure and terminal arrival, not the aircraft's complete supersonic operating envelope. At the modeled dispatch mass it calls V1 at 130 kt, begins rotation at VR 170 kt, targets V2 188 kt by the 35-foot screen height, then accelerates toward 250 kt in the initial climb. The clean delta wing has no conventional flap settings. Arrival guidance uses 170 kt through the emergency pattern, 165 kt while establishing final, and approximately 155 kt stabilized on approach with a nose-high body attitude.
-
-The values are grounded in the [FAA's Concorde accident record](https://www.faa.gov/lessons_learned/transport_airplane/accidents/F-BTSC), the [FAA-hosted BEA report](https://www.faa.gov/sites/faa.gov/files/2022-11/Concorde_Accident_Report.pdf), [NASA's operational Concorde report](https://ntrs.nasa.gov/api/citations/20180000699/downloads/20180000699.pdf), and [British Airways' Concorde specifications](https://www.britishairways.com/content/information/about-ba/history-and-heritage/celebrating-concorde). Actual V-speeds varied with weight and conditions. Mach 2 cruise and operation near 60,000 ft are intentionally outside this short terminal scenario.
-
-## Architecture
+## One control contract
 
 ```mermaid
 flowchart LR
-  Agent[Browser agent] -->|WebMCP tools| Adapter[Typed tool adapter]
-  Human[Human pilot] -->|Keyboard and cockpit UI| Simulator[60 Hz flight simulator]
-  Adapter --> Simulator
-  Simulator -->|immutable snapshots| Adapter
-  Simulator -->|10 Hz UI snapshots| React[React cockpit]
-  Simulator -->|interpolated transforms| Three[Three.js world]
-  Adapter --> Trace[Live call trace]
-  Trace --> Export[WebMCP log + RL trajectory]
+  Human[Keyboard and cockpit UI] --> Commands[Shared flight commands]
+  Agent[Browser agent] -->|WebMCP| Commands
+  Commands --> Simulator[60 Hz flight simulator]
+  Simulator --> Observation[Current cockpit observation]
+  Observation --> Human
+  Observation --> Agent
+  Simulator --> Three[Three.js world]
+  Agent --> Trace[WebMCP trajectory]
 ```
 
-The WebMCP adapter is optional. Browsers without `document.modelContext` retain the complete manual cockpit; only agent control is unavailable.
+Keyboard, cockpit controls, and WebMCP all dispatch the same persistent flight command: throttle, pitch intent, bank intent, gear, and aircraft configuration. The simulator applies the same actuator limits, aircraft physics, checkpoints, collision rules, and score deductions regardless of who sent it. Caller identity exists for handoff and audit history, not for physics.
+
+WebMCP reports every value that can change a cockpit decision: position, attitude, speed, vertical motion, wind, configuration, route geometry, active checkpoint, aircraft limits, passenger condition, hazards, score, event revision, and terminal state. It does not reveal the sealed event before the simulator triggers it. It also does not prescribe the next tool call or silently turn a dangerous input into a safe maneuver.
+
+The WebMCP adapter is optional. Browsers without `document.modelContext` retain the complete manual cockpit.
 
 ## WebMCP tools
 
 | Tool | Purpose |
 | --- | --- |
-| `start_flight` | Start the page-selected mode with a privately selected scenario and take copilot control. |
-| `get_mission_brief` | Read the assigned preflight route, airports, runways, deadline, and landing criteria. |
-| `get_flight_state` | Read aircraft, navigation, weather, wind, passengers, configuration, score, and route progress. |
-| `get_decision_context` | After `emergency_detected`, read the newly available evidence, comfort limits, fuel, decision time, and ranked route options. |
-| `inspect_flight_evidence` | Read one or all weather, cockpit, traffic, and passenger reports. |
-| `set_route` | File the preflight route or select the emergency route with a reason. |
-| `begin_takeoff` | Begin the takeoff roll after route filing. |
-| `set_autopilot_targets` | Set persistent heading, altitude, speed, and vertical/lateral modes. |
-| `rebuild_active_leg` | Recover a stalled route with a direct intercept, wider pattern, or safe skip. |
-| `configure_aircraft` | Set gear and high-lift configuration. Full mode uses simplified A380 flap detents; Concorde Judge mode enforces a clean delta wing with no conventional flaps. |
-| `request_human_approval` | Pause a consequential decision while the aircraft keeps flying. |
-| `wait_for_flight_event` | Wait without polling for checkpoints, emergencies, configuration, landing, or failure. |
-| `transfer_control` | Accept a requested handoff or return control to the pilot. |
+| `start_flight` | Start a fresh flight with a privately selected scenario and take agent control. |
+| `get_mission_brief` | Read the assigned preflight plan, procedures, aircraft limits, deadline, and landing criteria. |
+| `get_flight_state` | Read the current cockpit observation and event revision. |
+| `get_decision_context` | After the in-flight event, read the new evidence, hazards, fuel, decision time, and route options. |
+| `inspect_flight_evidence` | Read current weather, cockpit, traffic, and passenger reports. |
+| `set_route` | File the assigned preflight route with a reason. |
+| `request_diversion` | Ask ATC for one of the routes in the current decision context. |
+| `accept_clearance` | Read back and accept the issued diversion clearance. |
+| `set_flight_controls` | Set persistent throttle, pitch, bank, gear, and configuration inputs. |
+| `rebuild_active_leg` | Request a direct intercept, wider pattern, or safe skip when route progress stalls. |
+| `request_human_approval` | Ask the human about a consequential decision while the aircraft keeps flying. |
+| `wait_for_flight_event` | Wait without polling for checkpoints, hazards, configuration changes, landing, or failure. |
+| `transfer_control` | Accept a requested handoff or return control to the human pilot. |
 
-The live copilot panel displays tool name, reason, completion state, call latency, summary, and reward change. This makes agent behavior judgeable without opening developer tools.
+The live copilot panel shows the tool, reason, result, latency, summary, and reward change. Guidance reports the current objective, procedures, hazards, mechanical limits, available actions, and event revision. It does not include filled answers or a preferred tool sequence.
 
-Every live tool result includes `guidance` with the required action, recommended tool and arguments, allowed tools, current procedure, event revision, and decision time. The scenario seed and future conditions stay out of live WebMCP results. The seed appears only in the completed trajectory so an evaluator can replay the episode.
+## Trajectories, reward, and termination
 
-## Reward and termination
+Each WebMCP call forms a transition:
 
-Each episode starts at 100 points. Deductions are event-based and individually listed in the terminal debrief: late emergency decisions, overtime, incorrect configuration, excessive G-load, abrupt control input, hard/off-center landings, and crashes. Passenger distress and deterministic injury probability are separate environment state. Episodes terminate on a safe stop, unsafe touchdown, crash, or fuel exhaustion.
+```text
+observation -> tool action -> simulator transition -> reward delta -> next observation
+```
+
+After a terminal state, the app exports a clean WebMCP call list and a `flightdeck-trajectory-v2` JSON file. The trajectory contains observations, actions, results, per-step score changes, latency, terminal flags, final score, and outcome. Seeds 17, 42, and 81 vary weather, engine health, traffic, and passenger urgency while keeping runs reproducible.
+
+Each flight starts at 100 points. The debrief lists each deduction, including late decisions, overtime, incorrect configuration, excessive G-load, abrupt input, hard or off-center landings, and crashes. Passenger distress and deterministic injury probability remain separate environment state. A flight ends after a safe stop, unsafe touchdown, crash, or fuel exhaustion.
 
 ## Run locally
 
@@ -73,9 +73,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL in a WebMCP-capable browser. Choose Judge Mode for a submission demo or Full Mission for the complete operational episode.
-
-Manual controls: `W/S` pitch, `A/D` bank, arrow keys power, `F` flaps in Full Mission, `G` gear, `X` level attitude, and `T` request/cancel/reclaim agent control. Any direct human flight input immediately overrides the agent.
+Open the root local URL in a WebMCP-capable browser. Manual controls are `W/S` pitch, `A/D` bank, arrow keys power, `G` gear, `X` level attitude, and `T` request, cancel, or reclaim agent control. Direct human input immediately reclaims the shared controls.
 
 ## Development diagnostics
 
@@ -87,19 +85,12 @@ npm run diagnostic:radio
 npm run diagnostic:reference-policy
 ```
 
-These commands are engineering diagnostics, not product tests and not evidence that an agent can fly the mission. They catch type, build, and deterministic simulation regressions without exercising browser discovery, tool selection, reasoning latency, event handling, or recovery through WebMCP.
+These commands can catch type, build, and deterministic simulation regressions. They are not product tests because they do not exercise browser discovery, tool selection, reasoning latency, event handling, or recovery through WebMCP.
 
 ## Acceptance testing
 
-A Judge Mode product test is a real flight by a fresh agent in the visible app. The agent receives only `Use [@Browser](plugin://browser@openai-bundled) to land the plane safely.` and can act only through the WebMCP tools published by that page. The scenario remains private until the simulator emits its in-flight event; no seed, route answer, direct simulator access, keyboard input, DOM control, or scripted policy is allowed. Full Mission remains a manually evaluated experience and is not subject to this acceptance gate.
+A product test is a real flight by a fresh agent in the visible root app. The agent receives only `Use [@Browser](plugin://browser@openai-bundled) to land the plane safely.` and acts only through the page-published WebMCP tools. The scenario stays private until the in-flight event. The agent receives no seed, route answer, direct simulator access, keyboard input, DOM control, screenshot control channel, or scripted policy.
 
-A run passes only when the aircraft reaches the terminal `landed` outcome and the exported `flightdeck-trajectory-v1` shows the complete observation → WebMCP action → result sequence. Release readiness requires three consecutive passing blind flights on fresh runs. See [EVALUATION.md](./EVALUATION.md) for the exact protocol and [BENCHMARK.md](./BENCHMARK.md) for the model-reporting matrix.
-
-## Submission evidence
-
-- Public deployment: Railway URL above.
-- Source license: [MIT](./LICENSE).
-- Reproducible environment: three fixed seeds and terminal JSON exports.
-- Challenge-period history: the repository commit log records the WebMCP tool contract, event waits, route recovery, safety scoring, audio, exports, Judge Mode, and submission documentation as separate commits.
+A run passes only when the aircraft reaches the terminal `landed` outcome and the exported `flightdeck-trajectory-v2` records every observation, WebMCP action, result, and terminal transition. Release readiness requires three consecutive passing blind flights on fresh runs. See [EVALUATION.md](./EVALUATION.md) for the protocol and [BENCHMARK.md](./BENCHMARK.md) for the reporting matrix.
 
 Flightdeck is an interactive research prototype, not a certified aviation-training device.

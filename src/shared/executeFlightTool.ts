@@ -1,4 +1,5 @@
 import { flightSimulator } from '../sim/flightSimulator.ts'
+import type { FlightControlInput } from '../sim/flightCommands.ts'
 import type { ActiveLegRebuildStrategy, CheckrideSeed, EvidenceSource, FlightState, RoutePlan } from '../sim/types.ts'
 import {
   checkrideSeeds, evidenceSources, flightEventValues, routePlans,
@@ -11,75 +12,67 @@ const evidenceSet = new Set<string>(evidenceSources)
 const routeSet = new Set<string>(routePlans)
 const eventSet = new Set<string>(flightEventValues)
 const rebuildStrategySet = new Set<string>(['direct_intercept', 'wider_pattern', 'skip_noncritical'])
-let missionBriefRead = false
 
-const reasonInput = (input: UnknownInput, fallback = 'Requested by the copilot') => typeof input.reason === 'string' && input.reason.trim() ? input.reason.trim() : fallback
+const reasonInput = (input: UnknownInput, fallback = 'Requested by the agent') => typeof input.reason === 'string' && input.reason.trim() ? input.reason.trim() : fallback
 const agentState = (state: FlightState): AgentFlightState => {
   const { seed: _privateSeed, ...checkride } = state.checkride
   return { ...state, checkride }
 }
 
-const next = (
-  state: FlightState,
-  requiredAction: string,
-  recommendedNextTool: FlightToolName | null,
-  recommendedArguments: Readonly<Record<string, unknown>> | null,
-  allowedNextTools: readonly FlightToolName[],
-): FlightToolGuidance => ({
+const observationActions = ['get_flight_state', 'inspect_flight_evidence', 'wait_for_flight_event'] as const satisfies readonly FlightToolName[]
+
+const hazardsFor = (state: FlightState): readonly string[] => {
+  const hazards: string[] = []
+  if (state.checkride.alert) hazards.push(state.checkride.alert)
+  if (state.motion.stalled) hazards.push('Aerodynamic stall detected.')
+  if (state.mission.routeStatus === 'stalled') hazards.push('The active route leg is no longer converging.')
+  if (!state.procedure.compliant) hazards.push(state.procedure.instruction)
+  if (state.passengerSafety.status !== 'comfortable') hazards.push(state.passengerSafety.summary)
+  if (state.fuelMinutesRemaining <= 3) hazards.push(`${state.fuelMinutesRemaining.toFixed(1)} minutes of fuel endurance remain.`)
+  if (state.checkride.decisionSecondsRemaining !== null) hazards.push(`${Math.ceil(state.checkride.decisionSecondsRemaining)} seconds remain for the active decision.`)
+  return Object.freeze([...new Set(hazards)])
+}
+
+const availableActionsFor = (state: FlightState): readonly FlightToolName[] => {
+  if (state.mission.outcome !== 'in_progress') return ['get_flight_state']
+  const actions: FlightToolName[] = [...observationActions]
+  if (state.controlOwner === 'human') {
+    if (state.handoffRequested) actions.push('transfer_control')
+    return Object.freeze(actions)
+  }
+  actions.push('set_flight_controls', 'transfer_control', 'request_human_approval')
+  if (state.mission.phase === 'preflight') actions.push('get_mission_brief', 'set_route')
+  if (state.checkride.status === 'decision_required') {
+    actions.push('get_decision_context')
+    if (state.checkride.decisionContextRead && state.atc.status === 'none') actions.push('request_diversion')
+    if (state.atc.status === 'cleared') actions.push('accept_clearance')
+  }
+  if (state.mission.routeStatus === 'stalled') actions.push('rebuild_active_leg')
+  return Object.freeze(actions)
+}
+
+const objectiveFor = (state: FlightState) => {
+  if (state.mission.outcome !== 'in_progress') return 'Review the completed flight and its debrief.'
+  if (state.controlOwner === 'human') return state.handoffRequested
+    ? 'A handoff is available; control remains with the pilot until it is accepted.'
+    : 'Monitor the flight until the pilot requests a handoff.'
+  if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned'
+    ? 'Review the assignment, file the preflight route, and prepare the aircraft for departure.'
+    : 'Conduct a safe departure on the filed route.'
+  if (state.checkride.status === 'decision_required') return 'Maintain control while assessing the new condition and coordinating any route change with ATC.'
+  if (state.mission.routeStatus === 'stalled') return 'Stabilize the aircraft and recover progress toward the active route leg.'
+  return 'Fly the active route, manage aircraft configuration, and land safely within the published limits.'
+}
+
+const guidanceFor = (state = flightSimulator.getState()): FlightToolGuidance => ({
   phase: state.mission.phase,
-  requiredAction,
-  recommendedNextTool,
-  recommendedArguments,
-  allowedNextTools,
+  objective: objectiveFor(state),
   procedure: state.procedure,
+  hazards: hazardsFor(state),
+  availableActions: availableActionsFor(state),
   eventRevision: state.mission.eventRevision,
   decisionSecondsRemaining: state.checkride.decisionSecondsRemaining,
 })
-
-const guidanceFor = (state = flightSimulator.getState()): FlightToolGuidance => {
-  if (state.mission.outcome !== 'in_progress') return next(state, 'review_debrief', null, null, ['get_flight_state'])
-  if (state.controlOwner === 'human') {
-    return state.handoffRequested
-      ? next(state, 'accept_requested_handoff', 'transfer_control', { owner: 'agent', reason: 'Accept the pilot handoff request.' }, ['get_flight_state', 'transfer_control', 'wait_for_flight_event'])
-      : next(state, 'wait_for_pilot_handoff', 'wait_for_flight_event', { after_revision: state.mission.eventRevision, events: ['handoff_requested', 'mission_complete', 'mission_failed'], timeout_ms: 15_000 }, ['get_flight_state', 'wait_for_flight_event'])
-  }
-  if (state.approval.status === 'pending') {
-    return next(state, 'wait_for_pilot_approval', 'wait_for_flight_event', { after_revision: state.mission.eventRevision, events: ['approval_resolved'], timeout_ms: 15_000 }, ['get_flight_state', 'wait_for_flight_event'])
-  }
-  if (state.mission.phase === 'preflight') {
-    if (state.route.plan === 'unassigned') {
-      return missionBriefRead
-        ? next(state, 'file_assigned_preflight_route', 'set_route', { plan: 'continue_kmdw', reason: 'File the assigned preflight route from the mission brief.' }, ['get_mission_brief', 'get_flight_state', 'set_route'])
-        : next(state, 'read_assigned_mission', 'get_mission_brief', {}, ['get_mission_brief', 'get_flight_state'])
-    }
-    return next(state, 'begin_takeoff', 'begin_takeoff', { reason: 'The assigned route is filed and the takeoff configuration is compliant.' }, ['get_mission_brief', 'get_flight_state', 'begin_takeoff'])
-  }
-  if (state.checkride.status === 'decision_required') {
-    if (!state.checkride.decisionContextRead) {
-      return next(state, 'assess_new_flight_condition', 'get_decision_context', {}, ['get_flight_state', 'get_decision_context', 'inspect_flight_evidence', 'wait_for_flight_event'])
-    }
-    if (state.atc.status === 'none') {
-      return next(state, 'request_atc_diversion', 'request_diversion', null, ['get_flight_state', 'get_decision_context', 'inspect_flight_evidence', 'request_diversion'])
-    }
-    if (state.atc.status === 'requested') {
-      return next(state, 'wait_for_atc_clearance', 'wait_for_flight_event', { after_revision: state.mission.eventRevision, events: ['atc_clearance_received'], timeout_ms: 15_000 }, ['get_flight_state', 'wait_for_flight_event'])
-    }
-    if (state.atc.status === 'cleared' && state.atc.clearance) {
-      const clearance = state.atc.clearance
-      return next(state, 'read_back_and_accept_atc_clearance', 'accept_clearance', {
-        clearance_id: clearance.id,
-        readback: `${clearance.destination} runway ${clearance.runway}, maintain ${clearance.altitudeFt} feet, initial heading ${Math.round(clearance.headingDeg)} degrees.`,
-      }, ['get_flight_state', 'accept_clearance'])
-    }
-  }
-  if (state.mission.routeStatus === 'stalled') {
-    return next(state, 'recover_active_route_leg', 'rebuild_active_leg', null, ['get_flight_state', 'rebuild_active_leg', 'wait_for_flight_event'])
-  }
-  if (!state.procedure.compliant) {
-    return next(state, 'apply_required_aircraft_configuration', 'configure_aircraft', { gearDown: state.procedure.gearDown, flapsDeg: state.procedure.flapsDeg, reason: state.procedure.instruction }, ['get_flight_state', 'configure_aircraft', 'wait_for_flight_event'])
-  }
-  return next(state, 'continue_flight_and_wait_for_change', 'wait_for_flight_event', { after_revision: state.mission.eventRevision, timeout_ms: 15_000 }, ['get_flight_state', 'set_autopilot_targets', 'wait_for_flight_event'])
-}
 
 const receipt = <T>(summary: string, tone: ToolReceiptTone, details: T, guidance = guidanceFor()) => ({ ok: true as const, summary, tone, guidance, details })
 const action = (result: ReturnType<typeof flightSimulator.setRoute>) => ({
@@ -103,26 +96,39 @@ const boundedTimeout = (value: unknown) => {
   return Math.min(15_000, Math.max(1_000, Math.floor(value)))
 }
 
+const flightControlInput = (input: FlightControlInput): FlightControlInput => {
+  const controlKeys = ['throttle', 'pitchIntent', 'bankIntent', 'gearDown', 'flapsDeg'] as const
+  if (!controlKeys.some((key) => input[key] !== undefined)) throw new TypeError('set_flight_controls requires at least one control value')
+  for (const key of ['throttle', 'pitchIntent', 'bankIntent'] as const) {
+    const value = input[key]
+    if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) throw new TypeError(`${key} must be a finite number`)
+  }
+  if (input.throttle !== undefined && (input.throttle < 0 || input.throttle > 1)) throw new RangeError('throttle must be between 0 and 1')
+  if (input.pitchIntent !== undefined && (input.pitchIntent < -1 || input.pitchIntent > 1)) throw new RangeError('pitchIntent must be between -1 and 1')
+  if (input.bankIntent !== undefined && (input.bankIntent < -1 || input.bankIntent > 1)) throw new RangeError('bankIntent must be between -1 and 1')
+  if (input.gearDown !== undefined && typeof input.gearDown !== 'boolean') throw new TypeError('gearDown must be a boolean')
+  if (input.flapsDeg !== undefined && !([0, 10, 20, 30] as const).includes(input.flapsDeg)) throw new RangeError('flapsDeg must be 0, 10, 20, or 30')
+  if (input.reason !== undefined && (typeof input.reason !== 'string' || !input.reason.trim())) throw new TypeError('reason must be a non-empty string')
+  return input
+}
+
 const executors: { readonly [Name in FlightToolName]: (input: FlightToolArguments[Name]) => Promise<FlightToolResults[Name]> } = {
   start_flight: async (input) => {
-    if (Object.keys(input).length > 0) throw new TypeError('start_flight takes no arguments; mode and scenario are selected by the environment')
-    const mode = flightSimulator.getState().mode
-    flightSimulator.reset(randomScenarioSeed(), mode)
-    flightSimulator.transferControl('agent', 'agent', 'Copilot started the assigned flight')
-    missionBriefRead = false
+    if (Object.keys(input).length > 0) throw new TypeError('start_flight takes no arguments; the scenario is selected by the environment')
+    flightSimulator.reset(randomScenarioSeed())
+    flightSimulator.transferControl('agent', 'agent', 'Agent started the assigned flight')
     const state = flightSimulator.getState()
-    return receipt(`${mode === 'judge' ? 'Judge' : 'Full'} flight is ready on St. Louis Lambert runway 12R. Read the assigned mission before moving.`, 'automation', { runId: state.checkride.runId, mode, state: agentState(state) }, guidanceFor(state))
+    return receipt('Flight is ready at St. Louis Lambert. Review the assignment before moving.', 'automation', { runId: state.checkride.runId, state: agentState(state) }, guidanceFor(state))
   },
   get_mission_brief: async () => {
-    missionBriefRead = true
-    return receipt('Assigned mission brief read. File brief.assignedRoute before takeoff.', 'neutral', { brief: flightSimulator.getMissionBrief() })
+    return receipt('Assigned mission brief read.', 'neutral', { brief: flightSimulator.getMissionBrief() })
   },
   get_flight_state: async () => receipt('Live flight state read', 'neutral', {
     state: agentState(flightSimulator.getState()),
     units: { altitude: 'feet MSL', airspeed: 'knots', verticalSpeed: 'feet per minute', angles: 'degrees', distance: 'nautical miles', fuelEndurance: 'minutes' },
   }),
   get_decision_context: async () => flightSimulator.getState().checkride.status === 'decision_required'
-    ? receipt('New flight condition assessed. Request one route from context.routeOptions through ATC.', 'neutral', { available: true, context: flightSimulator.getDecisionContext() })
+    ? receipt('New flight condition assessed.', 'neutral', { available: true, context: flightSimulator.getDecisionContext() })
     : receipt('Decision context is sealed until emergency_detected. Continue the assigned flight.', 'warning', { available: false, context: null }),
   inspect_flight_evidence: async (input) => {
     if (input.source !== undefined && !evidenceSet.has(input.source)) throw new TypeError('source must be weather, cockpit, traffic, or passenger')
@@ -146,17 +152,12 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     if (typeof input.readback !== 'string' || !input.readback.trim()) throw new TypeError('readback is required')
     return action(flightSimulator.acceptAtcClearance(input.clearance_id.trim(), input.readback.trim(), 'agent'))
   },
-  begin_takeoff: async (input) => {
-    if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
-    return action(flightSimulator.beginTakeoff('agent', input.reason.trim()))
-  },
-  set_autopilot_targets: async (input) => action(flightSimulator.setAutopilotTargets(input, 'agent', reasonInput({ ...input }))),
+  set_flight_controls: async (input) => action(flightSimulator.setFlightControls(flightControlInput(input), 'agent')),
   rebuild_active_leg: async (input) => {
     if (!rebuildStrategySet.has(input.strategy)) throw new TypeError('strategy must be direct_intercept, wider_pattern, or skip_noncritical')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
     return action(flightSimulator.rebuildActiveLeg(input.strategy as ActiveLegRebuildStrategy, input.reason.trim(), 'agent'))
   },
-  configure_aircraft: async (input) => action(flightSimulator.configureAircraft(input, 'agent')),
   request_human_approval: async (input) => {
     if (![input.question, input.requested_action, input.reason].every((value) => typeof value === 'string' && value.trim())) throw new TypeError('question, requested_action, and reason are required')
     return action(flightSimulator.requestHumanApproval(input.question.trim(), input.requested_action.trim(), input.reason.trim(), 'agent'))
@@ -180,7 +181,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     if (input.owner === 'agent' && current.controlOwner === 'human' && !current.handoffRequested) throw new Error('The pilot has not requested a copilot handoff.')
     flightSimulator.transferControl(input.owner, 'agent', reasonInput(input))
     const state = flightSimulator.getState()
-    return receipt(state.controlOwner === 'agent' ? 'Copilot has control' : 'Pilot has control', state.controlOwner === 'agent' ? 'automation' : 'success', { controlOwner: state.controlOwner, state: agentState(state) })
+    return receipt(state.controlOwner === 'agent' ? 'Agent has control' : 'Pilot has control', state.controlOwner === 'agent' ? 'automation' : 'success', { controlOwner: state.controlOwner, state: agentState(state) })
   },
 }
 

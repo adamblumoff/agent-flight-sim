@@ -1,11 +1,11 @@
 import type { FlightState } from '../sim/types'
+import { checkpointCaptureRadiusNm } from '../sim/checkpoints'
 import type { WebMcpActivity } from './useWebMcp'
 
 export const TRAJECTORY_OBSERVATION_SCHEMA = Object.freeze([
-  'mode', 'elapsedSeconds', 'lat', 'lon', 'altitudeFt', 'airspeedKt', 'verticalSpeedFpm', 'headingDeg', 'pitchDeg', 'bankDeg',
-  'throttle', 'flapsDeg', 'gearDown', 'fuelMinutesRemaining', 'controlOwner', 'agentMode', 'aircraftPhase',
+  'elapsedSeconds', 'lat', 'lon', 'altitudeFt', 'airspeedKt', 'verticalSpeedFpm', 'headingDeg', 'pitchDeg', 'bankDeg',
+  'throttle', 'pitchIntent', 'bankIntent', 'flapsDeg', 'gearDown', 'fuelMinutesRemaining', 'controlOwner', 'agentMode', 'aircraftPhase',
   'groundSpeedKt', 'trackDeg', 'headwindKt', 'crosswindKt', 'angleOfAttackDeg', 'stalled',
-  'autopilotEnabled', 'autopilotHeadingDeg', 'autopilotAltitudeFt', 'autopilotAirspeedKt', 'verticalMode', 'lateralMode',
   'impactSeverity', 'impactSinkRateFpm', 'impactOnRunway',
   'routePlan', 'routeDestination', 'routeRunway', 'activeWaypointIndex', 'activeWaypointId', 'activeWaypointKind',
   'activeWaypointAltitudeFt', 'activeWaypointAirspeedKt', 'activeWaypointCaptureRadiusNm', 'activeWaypointCaptureHeadingDeg',
@@ -22,13 +22,12 @@ export const TRAJECTORY_OBSERVATION_SCHEMA = Object.freeze([
 export type TrajectoryObservation = readonly unknown[]
 
 export interface FlightTrajectory {
-  readonly schemaVersion: 'flightdeck-trajectory-v1'
-  readonly environmentVersion: 'flightdeck-webmcp-v2'
+  readonly schemaVersion: 'flightdeck-trajectory-v2'
+  readonly environmentVersion: 'flightdeck-webmcp-v3'
   readonly buildId: string
   readonly profileId: string
   readonly runId: string
   readonly seed: number
-  readonly mode: FlightState['mode']
   readonly tickRateHz: 60
   readonly simulationRate: number
   readonly observationSchema: typeof TRAJECTORY_OBSERVATION_SCHEMA
@@ -50,17 +49,17 @@ function compactObservation(state: FlightState): TrajectoryObservation {
   const clearance = state.atc.clearance
   const impact = state.impact
   return Object.freeze([
-    state.mode, state.elapsedSeconds, state.lat, state.lon, state.altitudeFt, state.airspeedKt, state.verticalSpeedFpm,
-    state.headingDeg, state.pitchDeg, state.bankDeg, state.throttle, state.flapsDeg, state.gearDown,
+    state.elapsedSeconds, state.lat, state.lon, state.altitudeFt, state.airspeedKt, state.verticalSpeedFpm,
+    state.headingDeg, state.pitchDeg, state.bankDeg, state.throttle, state.controlInputs.pitchAxis, state.controlInputs.bankAxis,
+    state.flapsDeg, state.gearDown,
     state.fuelMinutesRemaining, state.controlOwner, state.agentMode, state.aircraftPhase,
     state.motion.groundSpeedKt, state.motion.trackDeg, state.motion.headwindKt, state.motion.crosswindKt,
     state.motion.angleOfAttackDeg, state.motion.stalled,
-    state.autopilot.enabled, state.autopilot.headingDeg, state.autopilot.altitudeFt, state.autopilot.airspeedKt,
-    state.autopilot.verticalMode, state.autopilot.lateralMode,
     impact?.severity ?? null, impact?.sinkRateFpm ?? null, impact?.onRunway ?? null,
     state.route.plan, state.route.destination, state.route.runway, state.route.activeWaypointIndex,
     activeWaypoint?.id ?? null, activeWaypoint?.kind ?? null, activeWaypoint?.altitudeFt ?? null,
-    activeWaypoint?.airspeedKt ?? null, activeWaypoint?.captureRadiusNm ?? null, activeWaypoint?.captureHeadingDeg ?? null,
+    activeWaypoint?.airspeedKt ?? null, activeWaypoint ? checkpointCaptureRadiusNm(activeWaypoint) : null,
+    activeWaypoint?.captureHeadingDeg ?? null,
     state.atc.status, state.atc.requestedPlan, clearance?.id ?? null, clearance?.plan ?? null,
     clearance?.headingDeg ?? null, clearance?.altitudeFt ?? null, clearance?.airspeedKt ?? null,
     state.scenario.weather.visibilityMiles, state.scenario.weather.ceilingFt, state.scenario.weather.windDirectionDeg,
@@ -83,13 +82,12 @@ function compactObservation(state: FlightState): TrajectoryObservation {
 export function createFlightTrajectory(activities: readonly WebMcpActivity[], finalState: FlightState): FlightTrajectory {
   const completed = activities.filter((activity) => activity.result && activity.nextObservation && activity.latencyMs !== null)
   return Object.freeze({
-    schemaVersion: 'flightdeck-trajectory-v1',
-    environmentVersion: 'flightdeck-webmcp-v2',
+    schemaVersion: 'flightdeck-trajectory-v2',
+    environmentVersion: 'flightdeck-webmcp-v3',
     buildId: finalState.checkride.buildId,
     profileId: finalState.checkride.profileId,
     runId: finalState.checkride.runId,
     seed: finalState.checkride.seed,
-    mode: finalState.mode,
     tickRateHz: 60,
     simulationRate: finalState.checkride.simulationRate,
     observationSchema: TRAJECTORY_OBSERVATION_SCHEMA,

@@ -10,7 +10,6 @@ export type RadioCueKind =
   | 'diversion-request'
   | 'clearance-issued'
   | 'clearance-readback'
-  | 'autopilot-targets'
   | 'checkpoint'
   | 'route-stalled'
   | 'route-rebuilt'
@@ -151,9 +150,7 @@ export const buildRadioCue = (event: TraceEvent, state: FlightState, runId = sta
       const flapsDeg = detailNumber(event, 'flapsDeg')
       if (gearDown === null || flapsDeg === null) return null
       const gear = gearDown ? 'Gear down' : 'Gear up'
-      const flaps = state.mode === 'judge'
-        ? 'clean delta'
-        : flapsDeg === 0 ? 'flaps up' : `flaps ${formatAviationNumber(flapsDeg)}`
+      const flaps = flapsDeg === 0 ? 'clean delta' : `high-lift setting ${formatAviationNumber(flapsDeg)}`
       return cue(event, runId, 'configuration', 'copilot', 'Copilot', 'low', `${gear}, ${flaps}.`)
     }
     case 'scenario_triggered':
@@ -189,18 +186,6 @@ export const buildRadioCue = (event: TraceEvent, state: FlightState, runId = sta
     }
     case 'atc_clearance_readback':
       return cue(event, runId, 'clearance-readback', 'copilot', 'Copilot', 'high', cleanText(event.reason))
-    case 'autopilot_targets': {
-      const headingDeg = detailNumber(event, 'headingDeg')
-      const altitudeFt = detailNumber(event, 'altitudeFt')
-      const airspeedKt = detailNumber(event, 'airspeedKt')
-      const fields = [
-        headingDeg === null ? null : `Heading ${formatAviationHeading(headingDeg)}`,
-        altitudeFt === null ? null : `maintain ${formatAviationNumber(altitudeFt)} feet`,
-        airspeedKt === null ? null : `speed ${formatAviationNumber(airspeedKt)} knots`,
-      ].filter((field): field is string => field !== null)
-      if (fields.length === 0) return null
-      return cue(event, runId, 'autopilot-targets', 'copilot', 'Copilot', 'normal', `${fields.join(', ')}.`)
-    }
     case 'checkpoint_reached': {
       const waypointName = detailString(event, 'waypointName') ?? cleanText(event.reason)
       const nextFix = detailString(event, 'nextFix') ?? state.route.waypoints[state.route.activeWaypointIndex]?.name ?? null
