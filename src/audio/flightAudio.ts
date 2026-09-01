@@ -4,8 +4,8 @@ import { buildRadioCue, type RadioCue } from './radioCues'
 import { radioVoiceClipFor } from './radioVoicePack'
 
 const clamp = (value: number, minimum = 0, maximum = 1) => Math.min(maximum, Math.max(minimum, value))
-const DEFAULT_VOLUME = 0.5
-const DEFAULT_RADIO_VOLUME = 0.34
+export const DEFAULT_ENVIRONMENT_VOLUME = 0
+export const DEFAULT_RADIO_VOLUME = 0
 const MAX_RADIO_HISTORY = 24
 
 export interface FlightRadioSnapshot {
@@ -37,7 +37,7 @@ class FlightAudioController {
   private frame = 0
   private running = false
   private unsubscribeSimulator: (() => void) | null = null
-  private environmentVolume = DEFAULT_VOLUME
+  private environmentVolume = DEFAULT_ENVIRONMENT_VOLUME
   private radioVolume = DEFAULT_RADIO_VOLUME
   private muted = false
   private previous: AudioSnapshot | null = null
@@ -67,7 +67,7 @@ class FlightAudioController {
   stop() {
     if (!this.running) return
     this.running = false
-    this.environmentVolume = DEFAULT_VOLUME
+    this.environmentVolume = DEFAULT_ENVIRONMENT_VOLUME
     this.radioVolume = DEFAULT_RADIO_VOLUME
     this.muted = false
     cancelAnimationFrame(this.frame)

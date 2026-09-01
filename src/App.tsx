@@ -17,7 +17,7 @@ import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
 import { RadioTranscript } from './components/radio-transcript'
 import { DREAMLINER_787_9_ENVELOPE } from './sim/aircraftEnvelope'
-import { flightAudio } from './audio/flightAudio'
+import { DEFAULT_ENVIRONMENT_VOLUME, DEFAULT_RADIO_VOLUME, flightAudio } from './audio/flightAudio'
 import { radioVoiceClipFor } from './audio/radioVoicePack'
 import { flightSimulator } from './sim/flightSimulator'
 import { MISSION_PROFILE } from './sim/missionProfiles'
@@ -312,8 +312,8 @@ export default function App() {
     flightAudio.getRadioSnapshot,
   )
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
-  const [environmentVolume, setEnvironmentVolume] = useState(50)
-  const [radioVolume, setRadioVolume] = useState(34)
+  const [environmentVolume, setEnvironmentVolume] = useState(DEFAULT_ENVIRONMENT_VOLUME * 100)
+  const [radioVolume, setRadioVolume] = useState(DEFAULT_RADIO_VOLUME * 100)
   const [audioMuted, setAudioMuted] = useState(false)
   const [captionsVisible, setCaptionsVisible] = useState(true)
   const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
