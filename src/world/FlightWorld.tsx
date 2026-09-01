@@ -49,12 +49,7 @@ const readyStatus: FlightWorldStatus = {
 }
 
 const DEG_TO_RAD = Math.PI / 180
-const RUNWAY_HEADING_DEG = 159
-const chaseOffset = new Vector3(0, 28, 105)
-const chaseLookAhead = new Vector3(0, -10, -120)
-const cockpitOffset = new Vector3(0, 10.5, -34)
-const cockpitLookAhead = new Vector3(0, 10, -240)
-const crashOrigin = new Vector3(0, 8, -34)
+const RUNWAY_HEADING_DEG = WORLD_RUNWAY.headingDeg
 const normalizeHeading = (degrees: number) => ((degrees % 360) + 360) % 360
 const relativeBearing = (bearing: number, heading: number) => ((bearing - heading + 540) % 360) - 180
 const interpolatedHeading = (previous: number, current: number, alpha: number) =>
@@ -126,6 +121,7 @@ export function FlightWorld({ mode: flightMode, cameraMode = 'chase', compassRef
     const world = createAirportWorld(scene, Math.min(8, renderer.capabilities.getMaxAnisotropy()))
     const aircraftRig = createAircraft(flightMode)
     const aircraft = aircraftRig.root
+    const view = aircraftRig.view
     const landingGear = aircraftRig.landingGear
     const flaps = aircraftRig.flaps
     const breakup = createAircraftBreakup(aircraft, aircraftRig.breakawayParts)
@@ -140,14 +136,16 @@ export function FlightWorld({ mode: flightMode, cameraMode = 'chase', compassRef
     const currentAircraftPosition = new Vector3()
     const desiredCameraPosition = new Vector3()
     const desiredCameraTarget = new Vector3()
+    const chaseOffset = new Vector3(...view.chaseOffset)
+    const chaseLookAhead = new Vector3(...view.chaseLookAhead)
+    const cockpitOffset = new Vector3(...view.cockpitOffset)
+    const cockpitLookAhead = new Vector3(...view.cockpitLookAhead)
+    const crashOrigin = new Vector3(...view.crashOrigin)
     const dynamicChaseOffset = chaseOffset.clone()
     const dynamicChaseLookAhead = chaseLookAhead.clone()
     const smoothedTarget = new Vector3()
     const freeLookDirection = new Vector3()
     const explosionPosition = new Vector3()
-    const activeCockpitOffset = flightMode === 'judge' ? new Vector3(0, 5.6, -30) : cockpitOffset
-    const activeCockpitLookAhead = flightMode === 'judge' ? new Vector3(0, 5, -240) : cockpitLookAhead
-    const activeCrashOrigin = flightMode === 'judge' ? new Vector3(0, 4.2, -29) : crashOrigin
     const aircraftBounds = new Box3()
     const visiblePartBounds = new Box3()
     const attitude = new Euler(0, 0, 0, 'YXZ')
@@ -288,7 +286,7 @@ export function FlightWorld({ mode: flightMode, cameraMode = 'chase', compassRef
       breakup.update(deltaSeconds, groundY)
       const crashActive = Boolean(destructiveImpact)
       if (crashActive && !crashWasActive) {
-        explosionPosition.copy(activeCrashOrigin).applyQuaternion(attitudeQuaternion).add(aircraft.position)
+        explosionPosition.copy(crashOrigin).applyQuaternion(attitudeQuaternion).add(aircraft.position)
         crashEffects.start(explosionPosition)
       } else if (!crashActive && crashWasActive) crashEffects.reset()
       crashEffects.update(deltaSeconds, groundY)
@@ -306,9 +304,15 @@ export function FlightWorld({ mode: flightMode, cameraMode = 'chase', compassRef
       )
       smoothedAcceleration = MathUtils.damp(smoothedAcceleration, MathUtils.clamp(renderedAcceleration, -8, 8), 3.5, deltaSeconds)
       const accelerationCue = MathUtils.clamp(smoothedAcceleration / 5, -1, 1)
-      dynamicChaseOffset.set(0, 28, 105 + (accelerationCue >= 0 ? accelerationCue * 14 : accelerationCue * 8))
-      dynamicChaseLookAhead.set(0, -10, -120 - accelerationCue * 10)
-      const targetFov = mode === 'cockpit' ? 70 : mode === 'chase' ? 56 + accelerationCue * 4 : 56
+      const speedCue = MathUtils.clamp((state.motion.groundSpeedKt - 100) / 180, 0, 1)
+      dynamicChaseOffset.copy(chaseOffset)
+      dynamicChaseOffset.y -= speedCue * view.speedCameraDropMeters
+      dynamicChaseOffset.z += accelerationCue >= 0 ? accelerationCue * 14 : accelerationCue * 8
+      dynamicChaseLookAhead.copy(chaseLookAhead)
+      dynamicChaseLookAhead.z -= accelerationCue * 10
+      const targetFov = mode === 'cockpit'
+        ? 70
+        : mode === 'chase' ? 56 + accelerationCue * 4 + speedCue * view.speedFovBoostDeg : 56
       const previousFov = camera.fov
       camera.fov = previousMode !== mode ? targetFov : MathUtils.damp(camera.fov, targetFov, 4, deltaSeconds)
       if (Math.abs(camera.fov - previousFov) > 0.01) {
@@ -328,8 +332,8 @@ export function FlightWorld({ mode: flightMode, cameraMode = 'chase', compassRef
         controls.update()
       } else {
         controls.enabled = false
-        const cameraOffset = mode === 'cockpit' ? activeCockpitOffset : dynamicChaseOffset
-        const cameraLookAhead = mode === 'cockpit' ? activeCockpitLookAhead : dynamicChaseLookAhead
+        const cameraOffset = mode === 'cockpit' ? cockpitOffset : dynamicChaseOffset
+        const cameraLookAhead = mode === 'cockpit' ? cockpitLookAhead : dynamicChaseLookAhead
         desiredCameraPosition.copy(cameraOffset).applyQuaternion(attitudeQuaternion).add(aircraft.position)
         desiredCameraTarget.copy(cameraLookAhead).applyQuaternion(attitudeQuaternion).add(aircraft.position)
 

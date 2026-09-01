@@ -33,7 +33,7 @@ export function createCheckpointOrb() {
 
   return {
     root,
-    update(state: FlightState, elapsedSeconds: number) {
+    update(state: FlightState, _elapsedSeconds: number) {
       const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
       const complete = !waypoint || state.route.completedWaypointIds.includes(waypoint.id)
       root.visible = !complete && state.mission.phase !== 'complete' && state.mission.phase !== 'failed'
@@ -42,8 +42,7 @@ export function createCheckpointOrb() {
       waypointToWorldVector(waypoint, position)
       root.position.set(position.x, 0, position.z)
       const radiusMeters = checkpointCaptureRadiusNm(waypoint, state.controlOwner) * NM_TO_METERS
-      const pulse = 1 + Math.sin(elapsedSeconds * 1.5) * 0.025
-      root.scale.set(radiusMeters * pulse, 1, radiusMeters * pulse)
+      root.scale.set(radiusMeters, 1, radiusMeters)
     },
   }
 }

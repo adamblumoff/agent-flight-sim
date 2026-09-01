@@ -91,15 +91,14 @@ const detailBoolean = (event: TraceEvent, key: string) => typeof event.details[k
 
 const destinationCodeForPlan = (plan: string | null): string | null => {
   if (!plan) return null
-  if (plan === 'continue_klak') return 'KLAK'
+  if (plan === 'continue_kmdw') return 'KMDW'
   if (plan === 'return_kstl') return 'KSTL'
   return null
 }
 
 const airportName = (code: string) => {
   if (code === 'KSTL') return 'St. Louis Lambert'
-  if (code === 'KLAK') return 'Lakeside Municipal'
-  if (code === 'KNFD') return 'North Field'
+  if (code === 'KMDW') return 'Chicago Midway'
   return code
 }
 
@@ -145,7 +144,7 @@ export const buildRadioCue = (event: TraceEvent, state: FlightState, runId = sta
     case 'takeoff_started': {
       const runway = detailString(event, 'runway')
       if (!runway) return null
-      return cue(event, runId, 'takeoff-clearance', 'atc', 'North Field tower', 'normal', `${callsign}, runway ${formatAviationRunway(runway)}, cleared for takeoff.`)
+      return cue(event, runId, 'takeoff-clearance', 'atc', 'St. Louis tower', 'normal', `${callsign}, runway ${formatAviationRunway(runway)}, cleared for takeoff.`)
     }
     case 'aircraft_configured': {
       const gearDown = detailBoolean(event, 'gearDown')

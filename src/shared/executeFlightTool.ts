@@ -49,7 +49,7 @@ const guidanceFor = (state = flightSimulator.getState()): FlightToolGuidance => 
   if (state.mission.phase === 'preflight') {
     if (state.route.plan === 'unassigned') {
       return missionBriefRead
-        ? next(state, 'file_assigned_preflight_route', 'set_route', { plan: 'continue_klak', reason: 'File the assigned preflight route from the mission brief.' }, ['get_mission_brief', 'get_flight_state', 'set_route'])
+        ? next(state, 'file_assigned_preflight_route', 'set_route', { plan: 'continue_kmdw', reason: 'File the assigned preflight route from the mission brief.' }, ['get_mission_brief', 'get_flight_state', 'set_route'])
         : next(state, 'read_assigned_mission', 'get_mission_brief', {}, ['get_mission_brief', 'get_flight_state'])
     }
     return next(state, 'begin_takeoff', 'begin_takeoff', { reason: 'The assigned route is filed and the takeoff configuration is compliant.' }, ['get_mission_brief', 'get_flight_state', 'begin_takeoff'])
@@ -111,7 +111,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     flightSimulator.transferControl('agent', 'agent', 'Copilot started the assigned flight')
     missionBriefRead = false
     const state = flightSimulator.getState()
-    return receipt(`${mode === 'judge' ? 'Judge' : 'Full'} flight is ready on North Field runway 18. Read the assigned mission before moving.`, 'automation', { runId: state.checkride.runId, mode, state: agentState(state) }, guidanceFor(state))
+    return receipt(`${mode === 'judge' ? 'Judge' : 'Full'} flight is ready on St. Louis Lambert runway 12R. Read the assigned mission before moving.`, 'automation', { runId: state.checkride.runId, mode, state: agentState(state) }, guidanceFor(state))
   },
   get_mission_brief: async () => {
     missionBriefRead = true
@@ -132,12 +132,12 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     return receipt(input.source ? `${input.source} report read` : 'All evidence read', 'neutral', { evidence, inspectedSources: flightSimulator.getState().checkride.inspectedSources })
   },
   set_route: async (input) => {
-    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kstl')
+    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_kmdw or return_kstl')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
     return action(flightSimulator.setRoute(input.plan as RoutePlan, input.reason.trim(), 'agent'))
   },
   request_diversion: async (input) => {
-    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_klak or return_kstl')
+    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_kmdw or return_kstl')
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
     return action(flightSimulator.requestDiversion(input.plan as Exclude<RoutePlan, 'unassigned'>, input.reason.trim(), 'agent'))
   },

@@ -34,7 +34,7 @@ export interface WebMcpActivity {
 type BeginActivity = (activity: Pick<WebMcpActivity, 'tool' | 'title' | 'arguments'>) => number
 type CompleteActivity = (id: number, result: { readonly ok: boolean; readonly summary: string }, failed?: boolean) => void
 
-function createFlightTools(definitions: readonly FlightToolDefinition[], beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
+function createFlightTools(definitions: readonly FlightToolDefinition[], mode: FlightMode, beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
   return definitions.map((definition) => ({
     name: definition.name,
     title: definition.title,
@@ -44,6 +44,9 @@ function createFlightTools(definitions: readonly FlightToolDefinition[], beginAc
     execute: async (input: Record<string, unknown>) => {
       const activityId = beginActivity({ tool: definition.name, title: definition.title, arguments: input })
       try {
+        if (definition.name === 'start_flight' && flightSimulator.getState().mode !== mode) {
+          flightSimulator.reset(undefined, mode)
+        }
         const result = await executeFlightToolFromUnknown(definition.name, input)
         completeActivity(activityId, { ok: result.ok, summary: result.summary }, !result.ok)
         return result
@@ -118,7 +121,7 @@ export function useWebMcp(mode: FlightMode) {
     async function registerTools() {
       try {
         await Promise.all(
-          createFlightTools(flightToolDefinitionsFor(mode), beginActivity, completeActivity).map((tool) =>
+          createFlightTools(flightToolDefinitionsFor(mode), mode, beginActivity, completeActivity).map((tool) =>
             modelContext.registerTool(tool, { signal: controller.signal }),
           ),
         )

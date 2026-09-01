@@ -3,7 +3,9 @@ import type { WebMcpActivity } from './useWebMcp'
 
 export interface FlightTrajectory {
   readonly schemaVersion: 'flightdeck-trajectory-v1'
-  readonly environmentVersion: 'flightdeck-webmcp-v1'
+  readonly environmentVersion: 'flightdeck-webmcp-v2'
+  readonly buildId: string
+  readonly profileId: string
   readonly runId: string
   readonly seed: number
   readonly mode: FlightState['mode']
@@ -26,7 +28,9 @@ export function createFlightTrajectory(activities: readonly WebMcpActivity[], fi
   const completed = activities.filter((activity) => activity.result && activity.nextObservation && activity.latencyMs !== null)
   return Object.freeze({
     schemaVersion: 'flightdeck-trajectory-v1',
-    environmentVersion: 'flightdeck-webmcp-v1',
+    environmentVersion: 'flightdeck-webmcp-v2',
+    buildId: finalState.checkride.buildId,
+    profileId: finalState.checkride.profileId,
     runId: finalState.checkride.runId,
     seed: finalState.checkride.seed,
     mode: finalState.mode,

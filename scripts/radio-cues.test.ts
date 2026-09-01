@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { statSync } from 'node:fs'
 import { buildRadioCue, formatAviationHeading, formatAviationRunway } from '../src/audio/radioCues.ts'
+import { RADIO_VOICE_PACK, radioVoiceClipFor, radioVoicePackCovers } from '../src/audio/radioVoicePack.ts'
 import type { FlightState, TraceEvent } from '../src/sim/types.ts'
 
 const state = {
@@ -55,6 +57,13 @@ assert.deepEqual(diversion, {
   payloadRef: { traceId: 1, action: 'atc_diversion_requested' },
 })
 
+const midwayFiled = buildRadioCue(trace(11, 'preflight_route_filed', 'Filed route', {
+  destination: 'KMDW',
+  runway: '31C',
+}), state)
+assert.equal(midwayFiled?.text, 'Flight plan loaded for Chicago Midway, runway three one center.')
+assert.equal(radioVoiceClipFor(midwayFiled!), null, 'flight-plan captions must not produce copilot audio')
+
 const clearanceEvent = trace(2, 'atc_clearance_issued', 'clearance', {
   destination: 'KSTL',
   runway: '30L',
@@ -105,5 +114,20 @@ assert.deepEqual(buildRadioCue(clearanceEvent, state), buildRadioCue(clearanceEv
 assert.equal(JSON.stringify(buildRadioCue(clearanceEvent, state)), JSON.stringify(buildRadioCue(clearanceEvent, state)))
 assert.equal(formatAviationHeading(400), 'zero four zero')
 assert.equal(formatAviationRunway('KSTL-30L'), 'three zero left')
+
+const audibleKinds = [
+  'takeoff-clearance',
+  'clearance-issued',
+  'landing-clearance',
+] as const
+assert.equal(radioVoicePackCovers(audibleKinds), true, 'every ATC cue kind needs a deterministic clip')
+assert.deepEqual([...new Set(RADIO_VOICE_PACK.map(({ voice }) => voice))], ['af_heart'], 'the radio pack must use exactly one ATC voice')
+assert.ok(RADIO_VOICE_PACK.every((clip) => clip.speaker === 'atc'), 'non-ATC cues must never enter the voice pack')
+assert.equal(radioVoiceClipFor(clearance!)?.key, 'clearance-issued-kstl-30l')
+assert.equal(radioVoiceClipFor(approach!)?.key, 'landing-clearance-30l')
+assert.equal(radioVoiceClipFor(diversion!), null, 'copilot requests stay visible in the transcript but silent')
+for (const clip of RADIO_VOICE_PACK) {
+  assert.ok(statSync(`public${clip.url.split('?')[0]}`).size > 0, `missing generated audio for ${clip.key}`)
+}
 
 console.log('Deterministic radio cue tests passed')

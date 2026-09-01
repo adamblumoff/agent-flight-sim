@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "observed-webmcp-call-log-v1",
+  "runId": "311be346-8f45-4e33-a8eb-333b4eed2bba",
+  "mode": "judge",
+  "exportStatus": "unavailable: run never reached terminal debrief before browser session teardown",
+  "calls": [
+    { "tool": "start_flight", "arguments": {} },
+    { "tool": "get_mission_brief", "arguments": {} },
+    { "tool": "set_route", "arguments": { "plan": "continue_kmdw", "reason": "File the assigned Chicago Midway runway 31C route before departure." } },
+    { "tool": "begin_takeoff", "arguments": { "reason": "Assigned route filed; begin the Concorde takeoff roll." } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 1 } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 2 } },
+    { "tool": "configure_aircraft", "arguments": { "gearDown": false, "flapsDeg": 0, "reason": "Positive rate established; retract gear and keep clean delta-wing configuration." } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 4 } },
+    { "tool": "get_decision_context", "arguments": {} },
+    { "tool": "request_diversion", "arguments": { "plan": "return_kstl", "reason": "Engine thrust is deteriorating and the passenger has chest pain; return to nearby KSTL runway 30L with emergency priority." } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 5, "events": ["atc_clearance_received"] } },
+    { "tool": "accept_clearance", "arguments": { "clearance_id": "ATC-311be346-6", "readback": "KSTL runway 30L, maintain 1400 feet, initial heading 173 degrees." } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 8 } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 9 } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 10 } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 11 } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 12 } },
+    { "tool": "configure_aircraft", "arguments": { "gearDown": true, "flapsDeg": 0, "reason": "Final approach: lower gear and maintain the clean Concorde delta-wing configuration." } },
+    { "tool": "wait_for_flight_event", "arguments": { "after_revision": 16 } }
+  ]
+}

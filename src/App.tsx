@@ -18,10 +18,13 @@ import { FlightCompass } from './components/flight-compass'
 import { RadioTranscript } from './components/radio-transcript'
 import { flightEnvelopeFor } from './sim/aircraftEnvelope'
 import { flightAudio } from './audio/flightAudio'
+import { radioVoiceClipFor } from './audio/radioVoicePack'
 import { flightSimulator } from './sim/flightSimulator'
+import { missionProfileFor } from './sim/missionProfiles'
 import type { FlightMode, FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
 import { createFlightTrajectory } from './webmcp/trajectory'
+import { persistEvaluationEvidence } from './webmcp/evaluationArchive'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
@@ -39,7 +42,7 @@ const cameraOptions: ReadonlyArray<{
 
 const routePlanLabels: Record<RoutePlan, string> = {
   unassigned: 'Route pending',
-  continue_klak: 'Lakeside Municipal',
+  continue_kmdw: 'Chicago Midway',
   return_kstl: 'Return to KSTL',
 }
 
@@ -58,7 +61,7 @@ const pitchDirection = (degrees: number) => degrees > 0.05 ? '° UP' : degrees <
 const bankDirection = (degrees: number) => degrees > 0.05 ? '° R' : degrees < -0.05 ? '° L' : '° LVL'
 
 const deductionLabel = (id: string) => {
-  if (id === 'mission-overtime') return 'overtime'
+  if (id === 'mission-timeout') return 'time limit'
   if (id === 'decision-timeout') return 'late decision'
   if (id.startsWith('configuration-')) return 'configuration'
   if (id.startsWith('high-g-')) return 'high G'
@@ -106,8 +109,8 @@ function deriveObservations(state: FlightState): readonly CopilotObservation[] {
 
 function deriveRecommendation(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned'
-    ? 'File the Lakeside Municipal runway 22 route before beginning the takeoff roll.'
-    : 'The Lakeside route is filed. Apply power when you are ready to begin the takeoff roll.'
+    ? 'File the Chicago Midway runway 31C route before beginning the takeoff roll.'
+    : 'The Chicago Midway route is filed. Apply power when you are ready to begin the takeoff roll.'
   if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
   if (!state.procedure.compliant) return state.procedure.instruction
   if (state.mission.routeStatus === 'stalled') return 'The active leg is no longer converging. Rebuild it from the current position instead of continuing the orbit.'
@@ -137,9 +140,9 @@ function derivePlan(state: FlightState): readonly string[] {
   if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
     return [
       state.mode === 'judge'
-        ? 'File the Lakeside Municipal route; Judge Mode compresses the evaluation to four real-time minutes.'
-        : 'File and fly the Lakeside Municipal runway 22 route, about ten minutes away.',
-      'Take off from North Field runway 18, clean up the aircraft, and monitor for changes.',
+        ? 'File the compact Chicago Midway route; the physical return normally takes about four and a half minutes inside a six-minute hard window.'
+        : 'File the Chicago Midway runway 31C route before departure.',
+      'Take off from St. Louis Lambert runway 12R, clean up the aircraft, and monitor for changes.',
     ]
   }
   if (state.checkride.status === 'decision_required') {
@@ -199,7 +202,7 @@ function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
   if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') {
     const envelope = flightEnvelopeFor(state.mode)
-    return `Accelerating on runway 18. At ${envelope.rotateSpeedKt} knots, rotate toward ${envelope.initialClimbPitchDeg}°.`
+    return `Accelerating on Lambert runway 12R. At ${envelope.rotateSpeedKt} knots, rotate toward ${envelope.initialClimbPitchDeg}°.`
   }
   if (state.approval.status === 'pending') {
     return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
@@ -232,7 +235,7 @@ function deriveAction(state: FlightState): string {
 
 function deriveHeadline(state: FlightState): string {
   if (state.mission.phase === 'preflight') return 'Preflight route required'
-  if (state.mission.phase === 'takeoff') return 'Departing runway 18'
+  if (state.mission.phase === 'takeoff') return 'Departing Lambert runway 12R'
   if (state.checkride.status === 'armed') return 'Normal departure'
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'requested') return 'Waiting for ATC clearance'
@@ -318,7 +321,7 @@ export default function App() {
   )
   const [cameraMode, setCameraMode] = useState<FlightCameraMode>('chase')
   const [environmentVolume, setEnvironmentVolume] = useState(50)
-  const [radioVolume, setRadioVolume] = useState(68)
+  const [radioVolume, setRadioVolume] = useState(34)
   const [audioMuted, setAudioMuted] = useState(false)
   const [captionsVisible, setCaptionsVisible] = useState(true)
   const [showTakeoffBrief, setShowTakeoffBrief] = useState(true)
@@ -328,6 +331,7 @@ export default function App() {
     message: 'Loading the flight world.',
   })
   const selectedEnvelope = flightEnvelopeFor(selectedMode)
+  const selectedProfile = missionProfileFor(selectedMode)
 
   // The simulator loop is persistent; mode changes reset its episode without
   // tearing down audio or the 60 Hz clock.
@@ -390,13 +394,17 @@ export default function App() {
   }, [])
 
   const filePreflightRoute = useCallback(() => {
-    flightSimulator.setRoute('continue_klak', 'Pilot filed the normal route to Lakeside Municipal runway 22 before departure.', 'human')
+    flightSimulator.setRoute('continue_kmdw', 'Pilot filed the normal route to Chicago Midway runway 31C before departure.', 'human')
     setShowTakeoffBrief(false)
   }, [])
 
   useEffect(() => {
     if (state.mission.phase !== 'preflight') setShowTakeoffBrief(false)
   }, [state.mission.phase])
+
+  useEffect(() => {
+    persistEvaluationEvidence(activities, state)
+  }, [activities, state.checkride.runId, state.debrief.status])
 
   useEffect(() => {
     const heldFlightKeys = new Set<string>()
@@ -510,25 +518,25 @@ export default function App() {
         >
           <div className="takeoff-briefing-card">
             <p>Flight briefing</p>
-            <h1 id="takeoff-briefing-title">Fly the North Field departure.</h1>
+            <h1 id="takeoff-briefing-title">Fly the St. Louis Lambert departure.</h1>
             <p id="takeoff-briefing-copy">
-              You are lined up on North Field runway 18. First file the normal route to Lakeside Municipal runway 22. Conditions may force the route to change after departure.
+              You are lined up on St. Louis Lambert runway 12R for Chicago Midway runway 31C. File that route before departure.
             </p>
             <div className="mission-mode-picker" role="group" aria-label="Mission length">
               <button type="button" aria-pressed={selectedMode === 'judge'} onClick={() => selectMissionMode('judge')}>
-                <strong>Judge mode</strong><span>4-minute compressed evaluation</span>
+                <strong>Judge mode</strong><span>{missionProfileFor('judge').label}</span>
               </button>
               <button type="button" aria-pressed={selectedMode === 'full'} onClick={() => selectMissionMode('full')}>
-                <strong>Full mission</strong><span>10-minute operational run</span>
+                <strong>Full mission</strong><span>{missionProfileFor('full').label}</span>
               </button>
             </div>
             <ol>
-              <li><kbd>↑</kbd><span>{selectedMode === 'judge' ? 'Set full power for takeoff; Judge mode models reheat as part of takeoff thrust.' : 'Hold to set full power, or drag Power to 100%.'}</span></li>
-              <li><kbd>W</kbd><span>{selectedMode === 'judge' ? `V1 is ${selectedEnvelope.decisionSpeedKt} knots. Rotate at ${selectedEnvelope.rotateSpeedKt}, cross V2 at ${selectedEnvelope.takeoffSafetySpeedKt}, then accelerate toward ${selectedEnvelope.initialClimbSpeedKt} knots at ${selectedEnvelope.initialClimbPitchDeg}°.` : `At ${selectedEnvelope.rotateSpeedKt} knots, rotate at about ${selectedEnvelope.rotationRateDegPerSecond}°/s through liftoff near ${selectedEnvelope.liftoffPitchDeg}°, then target ${selectedEnvelope.initialClimbPitchDeg}° while accelerating toward ${selectedEnvelope.initialClimbSpeedKt} knots.`}</span></li>
-              <li><kbd>G</kbd><span>{selectedEnvelope.hasConventionalFlaps ? <>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</> : <>Retract the gear after positive rate. Concorde has no conventional flaps; use <kbd>X</kbd> to level.</>}</span></li>
+              <li><kbd>↑</kbd><span>{selectedMode === 'judge' ? 'Set full power for takeoff; reheat is included in the Concorde thrust model.' : 'Hold to set full power, or drag Power to 100%.'}</span></li>
+              <li><kbd>W</kbd><span>At {selectedEnvelope.rotateSpeedKt} knots, rotate at about {selectedEnvelope.rotationRateDegPerSecond}°/s toward {selectedEnvelope.initialClimbPitchDeg}°. Rotation is guidance; the aircraft lifts off only when its aerodynamic lift exceeds its weight.</span></li>
+              <li><kbd>G</kbd><span>{selectedEnvelope.hasConventionalFlaps ? <>Retract the gear after liftoff. Use <kbd>F</kbd> for flaps and <kbd>X</kbd> to level.</> : <>Retract the gear after positive rate. The delta wing has no flap detents; use <kbd>X</kbd> to level.</>}</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
-              <span>Filing arms the departure. Apply power when you are ready to roll.</span>
+              <span>{selectedProfile.label}. Filing arms the departure; apply power when ready.</span>
               <Button autoFocus onClick={filePreflightRoute}>Fly route</Button>
             </div>
           </div>
@@ -697,7 +705,13 @@ export default function App() {
         webMcpCalls={activities.filter((activity) => activity.status !== 'running').map((activity) => ({
           tool: activity.tool,
           arguments: activity.arguments,
-          radio: activity.radioCues.map(({ id, speaker, text, priority }) => ({ id, speaker, text, priority })),
+          radio: activity.radioCues.map((cue) => ({
+            id: cue.id,
+            speaker: cue.speaker,
+            text: cue.text,
+            priority: cue.priority,
+            audioClip: radioVoiceClipFor(cue)?.key ?? null,
+          })),
         }))}
         webMcpActivities={activities}
         trajectory={state.debrief.status === 'in_progress' ? null : createFlightTrajectory(activities, state)}
@@ -706,6 +720,8 @@ export default function App() {
           webMcp: webMcpLabels[webMcpStatus],
           missionRevision: state.mission.eventRevision,
           scenarioId: state.debrief.status === 'in_progress' ? 'Sealed until debrief' : `Seed ${state.checkride.seed}`,
+          buildId: state.checkride.buildId,
+          profileId: state.checkride.profileId,
           recentTools: activities.slice(-4).reverse().map((activity) => `${activity.title} · ${activity.status}`),
         }}
         onApprove={() => resolveApproval(true)}

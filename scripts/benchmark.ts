@@ -7,14 +7,23 @@ const runs = []
 for (const seed of seeds) {
   flightSimulator.reset(seed, 'judge')
   flightSimulator.transferControl('agent', 'agent', 'Reference benchmark policy')
-  flightSimulator.setRoute('continue_klak', 'File the normal preflight route.', 'agent')
+  flightSimulator.setRoute('continue_kmdw', 'File the normal preflight route.', 'agent')
   flightSimulator.beginTakeoff('agent', 'Begin the judge episode.')
   const maximumSteps = flightSimulator.getState().checkride.deadlineSeconds * 10
   for (let step = 0; step < maximumSteps && flightSimulator.getState().mission.outcome === 'in_progress'; step += 1) {
     const state = flightSimulator.getState()
     if (state.checkride.status === 'decision_required' && state.route.plan !== 'return_kstl') {
-      flightSimulator.getDecisionContext()
-      flightSimulator.setRoute('return_kstl', 'Return to the nearby priority runway.', 'agent')
+      if (!state.checkride.decisionContextRead) flightSimulator.getDecisionContext()
+      const atc = flightSimulator.getState().atc
+      if (atc.status === 'none') flightSimulator.requestDiversion('return_kstl', 'Return to the nearby priority runway.', 'agent')
+      if (atc.status === 'cleared' && atc.clearance) {
+        const clearance = atc.clearance
+        flightSimulator.acceptAtcClearance(
+          clearance.id,
+          `${clearance.destination} runway ${clearance.runway}, maintain ${clearance.altitudeFt} feet, initial heading ${Math.round(clearance.headingDeg)} degrees.`,
+          'agent',
+        )
+      }
     }
     const current = flightSimulator.getState()
     if (!current.procedure.compliant) {
@@ -31,6 +40,21 @@ for (const seed of seeds) {
     invalidCalls: 0,
     passengerInjuries: state.passengerSafety.status === 'injured' ? 1 : 0,
     routeRebuilds: flightSimulator.getTrace().filter((event) => event.action === 'active_leg_rebuilt').length,
+    checkpointTimes: flightSimulator.getTrace()
+      .filter((event) => event.action === 'checkpoint_reached')
+      .map((event) => ({ elapsedSeconds: Number(event.elapsedSeconds.toFixed(1)), waypoint: event.details.waypointName })),
+    terminalState: {
+      phase: state.mission.phase,
+      nextFix: state.mission.nextFix,
+      distanceToNextFixNm: state.mission.distanceToNextFixNm,
+      altitudeFt: state.altitudeFt,
+      airspeedKt: state.airspeedKt,
+      headingDeg: state.headingDeg,
+      bankDeg: state.bankDeg,
+      groundTrackDeg: state.motion.trackDeg,
+      centerlineErrorNm: state.mission.centerlineErrorNm,
+      distanceToThresholdNm: state.mission.distanceToThresholdNm,
+    },
     landing: state.debrief.landing,
   })
 }

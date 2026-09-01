@@ -1,4 +1,5 @@
 import type { CheckrideSeed, FlightMode, ScenarioConditions } from './types'
+import { flightEnvelopeFor } from './aircraftEnvelope.ts'
 
 const radians = (degrees: number) => degrees * Math.PI / 180
 const degrees = (value: number) => value * 180 / Math.PI
@@ -15,6 +16,7 @@ export interface GroundMotion {
 export interface StallResponse {
   readonly angleOfAttackDeg: number
   readonly stallSpeedKt: number
+  readonly liftToWeightRatio: number
   readonly severity: number
   readonly sinkRateFpm: number
 }
@@ -160,15 +162,22 @@ export function stallResponseFor(
   const flightPathDeg = degrees(Math.atan2(verticalSpeedKt, Math.max(airspeedKt, 1)))
   const angleOfAttackDeg = pitchDeg - flightPathDeg
   const concorde = mode === 'judge'
-  const baseStallSpeedKt = concorde ? 150 : flapsDeg >= 30 ? 110 : flapsDeg >= 20 ? 116 : flapsDeg >= 10 ? 123 : 132
+  const envelope = flightEnvelopeFor(mode)
+  const baseStallSpeedKt = concorde
+    ? 150 * Math.sqrt(envelope.dispatchMassKg / envelope.maximumTakeoffMassKg)
+    : flapsDeg >= 30 ? 110 : flapsDeg >= 20 ? 116 : flapsDeg >= 10 ? 123 : 132
   const bankLoadFactor = 1 / Math.max(0.5, Math.cos(radians(Math.min(60, Math.abs(bankDeg)))))
   const stallSpeedKt = baseStallSpeedKt * Math.sqrt(bankLoadFactor)
+  const referenceLiftAngleDeg = concorde ? 18 : 14
+  const liftCoefficientFraction = clamp((angleOfAttackDeg + 1) / referenceLiftAngleDeg, 0, 1.2)
+  const liftToWeightRatio = (airspeedKt / Math.max(stallSpeedKt, 1)) ** 2 * liftCoefficientFraction
   const speedSeverity = clamp((stallSpeedKt - airspeedKt) / 32, 0, 1)
   const angleSeverity = clamp((angleOfAttackDeg - (concorde ? 18 : 13)) / 10, 0, 1)
   const severity = Math.max(speedSeverity, angleSeverity)
   return Object.freeze({
     angleOfAttackDeg,
     stallSpeedKt,
+    liftToWeightRatio,
     severity,
     sinkRateFpm: severity ** 1.45 * 3_200,
   })

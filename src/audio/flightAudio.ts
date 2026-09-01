@@ -1,10 +1,11 @@
 import { flightSimulator } from '../sim/flightSimulator'
 import type { FlightState } from '../sim/types'
 import { buildRadioCue, type RadioCue } from './radioCues'
+import { radioVoiceClipFor } from './radioVoicePack'
 
 const clamp = (value: number, minimum = 0, maximum = 1) => Math.min(maximum, Math.max(minimum, value))
 const DEFAULT_VOLUME = 0.5
-const DEFAULT_RADIO_VOLUME = 0.68
+const DEFAULT_RADIO_VOLUME = 0.34
 const MAX_RADIO_HISTORY = 24
 
 export interface FlightRadioSnapshot {
@@ -44,6 +45,10 @@ class FlightAudioController {
   private radioRunId = ''
   private radioQueue: RadioCue[] = []
   private currentCue: RadioCue | null = null
+  private currentRadioSource: AudioBufferSourceNode | null = null
+  private radioSpeechWatchdog = 0
+  private radioPlaybackRevision = 0
+  private readonly radioClipPromises = new Map<string, Promise<AudioBuffer | null>>()
   private radioSnapshot = EMPTY_RADIO_SNAPSHOT
   private readonly radioListeners = new Set<() => void>()
 
@@ -70,7 +75,7 @@ class FlightAudioController {
     window.removeEventListener('keydown', this.unlock, { capture: true })
     this.unsubscribeSimulator?.()
     this.unsubscribeSimulator = null
-    window.speechSynthesis?.cancel()
+    this.cancelCurrentRadioCue()
     void this.context?.close()
     this.context = null
     this.environmentGain = null
@@ -105,10 +110,8 @@ class FlightAudioController {
     this.environmentGain?.gain.setTargetAtTime(this.environmentLevel(), now, 0.04)
     this.radioEffectsGain?.gain.setTargetAtTime(this.radioLevel(), now, 0.04)
     if (muted) {
-      window.speechSynthesis?.cancel()
       this.radioQueue = []
-      this.currentCue = null
-      this.publishRadio()
+      this.cancelCurrentRadioCue()
     } else {
       void this.ensureAudio()
     }
@@ -332,59 +335,172 @@ class FlightAudioController {
         activeCueId: this.radioSnapshot.activeCueId,
       })
       this.radioListeners.forEach((listener) => listener())
-      if (!this.muted && this.radioVolume > 0) this.enqueueRadio(cue)
+      // Keep every event in the deterministic caption/audit log, but only ATC
+      // owns the radio channel. Copilot, cabin, and system cues stay silent.
+      if (cue.speaker === 'atc' && !this.muted && this.radioVolume > 0) this.enqueueRadio(cue)
     }
   }
 
   private enqueueRadio(cue: RadioCue) {
     if (cue.priority === 'interrupt') {
       this.radioQueue = this.radioQueue.filter((queued) => queued.priority === 'interrupt')
-      if (this.currentCue && this.currentCue.priority !== 'interrupt') window.speechSynthesis?.cancel()
+      if (this.currentCue && this.currentCue.priority !== 'interrupt') this.cancelCurrentRadioCue()
     }
     this.radioQueue.push(cue)
-    this.playNextRadioCue()
+    void this.playNextRadioCue()
   }
 
-  private playNextRadioCue() {
+  private async playNextRadioCue() {
     if (this.currentCue || this.muted || this.radioVolume <= 0) return
     const cue = this.radioQueue.shift()
-    if (!cue || !('speechSynthesis' in window)) return
+    if (!cue) return
+
+    const playbackRevision = ++this.radioPlaybackRevision
+    this.currentCue = cue
+    this.publishRadio()
+
+    const packedClip = radioVoiceClipFor(cue)
+    if (packedClip) {
+      const buffer = await this.loadRadioClip(packedClip.url)
+      if (playbackRevision !== this.radioPlaybackRevision || this.currentCue?.id !== cue.id) return
+      if (buffer && this.context) {
+        this.playRadioBuffer(cue, buffer, playbackRevision)
+        return
+      }
+    }
+
+    if (playbackRevision !== this.radioPlaybackRevision || this.currentCue?.id !== cue.id) return
+    this.playSpeechFallback(cue, playbackRevision)
+  }
+
+  private playRadioBuffer(cue: RadioCue, buffer: AudioBuffer, playbackRevision: number) {
+    const context = this.context
+    const output = this.radioEffectsGain
+    if (!context || !output) {
+      this.playSpeechFallback(cue, playbackRevision)
+      return
+    }
+
+    const source = context.createBufferSource()
+    const voiceGain = context.createGain()
+    const compressor = context.createDynamicsCompressor()
+    source.buffer = buffer
+    voiceGain.gain.value = 0.82
+    compressor.threshold.value = -24
+    compressor.knee.value = 12
+    compressor.ratio.value = 5
+    compressor.attack.value = 0.008
+    compressor.release.value = 0.14
+
+    const highpass = context.createBiquadFilter()
+    const lowpass = context.createBiquadFilter()
+    highpass.type = 'highpass'
+    highpass.frequency.value = 310
+    lowpass.type = 'lowpass'
+    lowpass.frequency.value = 3_250
+    source.connect(highpass).connect(lowpass).connect(compressor).connect(voiceGain).connect(output)
+    this.playSquelch(cue.id, false)
+
+    this.currentRadioSource = source
+    this.setRadioActive(cue)
+    source.onended = () => this.finishRadioCue(cue, playbackRevision)
+    source.start()
+  }
+
+  private playSpeechFallback(cue: RadioCue, playbackRevision: number) {
+    if (!('speechSynthesis' in window)) {
+      this.finishRadioCue(cue, playbackRevision)
+      return
+    }
 
     const utterance = new SpeechSynthesisUtterance(cue.text)
     utterance.volume = this.radioVolume
-    utterance.rate = cue.speaker === 'atc' ? 0.92 : 0.98
-    utterance.pitch = cue.speaker === 'atc' ? 0.88 : cue.speaker === 'cabin' ? 1.08 : 1
-    utterance.voice = this.voiceFor(cue)
-    this.currentCue = cue
-    this.publishRadio()
+    utterance.rate = 1.08
+    utterance.pitch = 0.96
+    utterance.voice = this.voiceFor()
     utterance.onstart = () => {
       this.setRadioActive(cue)
     }
-    let finished = false
-    const finish = () => {
-      if (finished) return
-      finished = true
-      window.clearTimeout(watchdog)
-      if (this.currentCue?.id === cue.id) this.playSquelch(cue.id, true)
-      this.currentCue = null
-      this.setRadioActive(null)
-      this.publishRadio()
-      this.playNextRadioCue()
-    }
+    const finish = () => this.finishRadioCue(cue, playbackRevision)
     utterance.onend = finish
     utterance.onerror = finish
-    const watchdog = window.setTimeout(finish, Math.min(20_000, Math.max(4_000, cue.text.length * 85)))
+    this.radioSpeechWatchdog = window.setTimeout(finish, Math.min(20_000, Math.max(4_000, cue.text.length * 85)))
     this.playSquelch(cue.id, false)
     window.speechSynthesis.speak(utterance)
   }
 
-  private voiceFor(cue: RadioCue) {
+  private voiceFor() {
     const voices = window.speechSynthesis.getVoices()
       .filter((voice) => voice.lang.toLowerCase().startsWith('en'))
-      .sort((left, right) => `${left.lang}:${left.name}`.localeCompare(`${right.lang}:${right.name}`))
+      .sort((left, right) => this.voiceScore(right) - this.voiceScore(left))
     if (voices.length === 0) return null
-    const offset = cue.speaker === 'atc' ? 0 : cue.speaker === 'cabin' ? 2 : cue.speaker === 'system' ? 3 : 1
-    return voices[offset % voices.length]
+    return voices[0]
+  }
+
+  private voiceScore(voice: SpeechSynthesisVoice) {
+    const name = voice.name.toLowerCase()
+    const preferred = ['aria', 'jenny', 'zira', 'samantha']
+    const preferredIndex = preferred.findIndex((candidate) => name.includes(candidate))
+    return (name.includes('natural') ? 100 : 0)
+      + (name.includes('online') ? 40 : 0)
+      + (preferredIndex >= 0 ? 30 - preferredIndex : 0)
+      - (name.includes('desktop') ? 20 : 0)
+  }
+
+  private loadRadioClip(url: string) {
+    const existing = this.radioClipPromises.get(url)
+    if (existing) return existing
+    const promise = this.decodeRadioClip(url)
+    this.radioClipPromises.set(url, promise)
+    return promise
+  }
+
+  private async decodeRadioClip(url: string): Promise<AudioBuffer | null> {
+    try {
+      await this.ensureAudio()
+      const context = this.context
+      if (!context) return null
+      const response = await fetch(url)
+      if (!response.ok) return null
+      return await context.decodeAudioData(await response.arrayBuffer())
+    } catch {
+      return null
+    }
+  }
+
+  private finishRadioCue(cue: RadioCue, playbackRevision: number) {
+    if (playbackRevision !== this.radioPlaybackRevision || this.currentCue?.id !== cue.id) return
+    window.clearTimeout(this.radioSpeechWatchdog)
+    this.radioSpeechWatchdog = 0
+    this.playSquelch(cue.id, true)
+    this.stopCurrentRadioSource()
+    this.currentCue = null
+    this.setRadioActive(null)
+    this.publishRadio()
+    void this.playNextRadioCue()
+  }
+
+  private cancelCurrentRadioCue() {
+    this.radioPlaybackRevision += 1
+    window.clearTimeout(this.radioSpeechWatchdog)
+    this.radioSpeechWatchdog = 0
+    window.speechSynthesis?.cancel()
+    this.stopCurrentRadioSource()
+    this.currentCue = null
+    this.setRadioActive(null)
+    this.publishRadio()
+  }
+
+  private stopCurrentRadioSource() {
+    const source = this.currentRadioSource
+    if (!source) return
+    this.currentRadioSource = null
+    source.onended = null
+    try {
+      source.stop()
+    } catch {
+      // A source that has already ended cannot be stopped again.
+    }
   }
 
   private setRadioActive(cue: RadioCue | null) {
@@ -443,11 +559,10 @@ class FlightAudioController {
   }
 
   private resetRadio(runId: string) {
-    window.speechSynthesis?.cancel()
+    this.cancelCurrentRadioCue()
     this.processedTraceId = 0
     this.radioRunId = runId
     this.radioQueue = []
-    this.currentCue = null
     this.radioSnapshot = EMPTY_RADIO_SNAPSHOT
     this.radioListeners.forEach((listener) => listener())
   }

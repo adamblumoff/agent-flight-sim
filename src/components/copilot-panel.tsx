@@ -39,6 +39,8 @@ export interface CopilotDiagnostics {
   readonly webMcp: string
   readonly missionRevision: number
   readonly scenarioId: string
+  readonly buildId: string
+  readonly profileId: string
   readonly recentTools: readonly string[]
 }
 
@@ -299,6 +301,8 @@ export function CopilotPanel({
           <div><dt>WebMCP</dt><dd>{diagnostics.webMcp}</dd></div>
           <div><dt>Revision</dt><dd>{diagnostics.missionRevision}</dd></div>
           <div><dt>Scenario</dt><dd>{diagnostics.scenarioId}</dd></div>
+          <div><dt>Build</dt><dd>{diagnostics.buildId}</dd></div>
+          <div><dt>Profile</dt><dd>{diagnostics.profileId}</dd></div>
         </dl>
         {diagnostics.recentTools.length > 0 ? (
           <div className="debug-tools">

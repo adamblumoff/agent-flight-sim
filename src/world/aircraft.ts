@@ -32,7 +32,38 @@ export interface AircraftRig {
   readonly landingGear: readonly Group[]
   readonly flaps: readonly Group[]
   readonly breakawayParts: readonly AircraftBreakawayPart[]
+  readonly view: AircraftViewProfile
 }
+
+export interface AircraftViewProfile {
+  readonly chaseOffset: readonly [number, number, number]
+  readonly chaseLookAhead: readonly [number, number, number]
+  readonly cockpitOffset: readonly [number, number, number]
+  readonly cockpitLookAhead: readonly [number, number, number]
+  readonly crashOrigin: readonly [number, number, number]
+  readonly speedFovBoostDeg: number
+  readonly speedCameraDropMeters: number
+}
+
+const widebodyView = Object.freeze({
+  chaseOffset: Object.freeze([0, 28, 105] as const),
+  chaseLookAhead: Object.freeze([0, -10, -120] as const),
+  cockpitOffset: Object.freeze([0, 10.5, -34] as const),
+  cockpitLookAhead: Object.freeze([0, 10, -240] as const),
+  crashOrigin: Object.freeze([0, 8, -34] as const),
+  speedFovBoostDeg: 0,
+  speedCameraDropMeters: 0,
+}) satisfies AircraftViewProfile
+
+const concordeView = Object.freeze({
+  chaseOffset: Object.freeze([0, 19, 78] as const),
+  chaseLookAhead: Object.freeze([0, -6, -150] as const),
+  cockpitOffset: Object.freeze([0, 5.6, -30] as const),
+  cockpitLookAhead: Object.freeze([0, 5, -240] as const),
+  crashOrigin: Object.freeze([0, 4.2, -29] as const),
+  speedFovBoostDeg: 7,
+  speedCameraDropMeters: 6,
+}) satisfies AircraftViewProfile
 
 const bodyMaterial = new MeshPhysicalMaterial({
   color: 0xf5f8f7,
@@ -452,6 +483,7 @@ function createWidebodyAircraft(): AircraftRig {
     root: aircraft,
     landingGear: landingGearAssemblies,
     flaps,
+    view: widebodyView,
     breakawayParts: [
       { name: 'left-wing', root: wingAssemblies[0] },
       { name: 'right-wing', root: wingAssemblies[1] },
@@ -540,7 +572,6 @@ function concordeEngine(name: AircraftBreakawayPart['name'], x: number, z: numbe
   const assembly = new Group()
   assembly.name = name
   assembly.position.set(x, 2.72, z)
-
   const nacelle = mesh(new BoxGeometry(1.72, 1.12, 7.3), accentMaterial)
   const intake = new Mesh(new PlaneGeometry(1.42, 0.82), windowMaterial)
   intake.position.z = -3.66
@@ -602,20 +633,12 @@ function createConcordeAircraft(): AircraftRig {
   visor.position.y = 5.3
   details.add(visor)
 
-  aircraft.add(
-    fuselage,
-    details,
-    leftWing.assembly,
-    rightWing.assembly,
-    finAssembly,
-    ...engines,
-    ...landingGearAssemblies,
-  )
-
+  aircraft.add(fuselage, details, leftWing.assembly, rightWing.assembly, finAssembly, ...engines, ...landingGearAssemblies)
   return {
     root: aircraft,
     landingGear: landingGearAssemblies,
     flaps,
+    view: concordeView,
     breakawayParts: [
       { name: 'left-wing', root: leftWing.assembly },
       { name: 'right-wing', root: rightWing.assembly },

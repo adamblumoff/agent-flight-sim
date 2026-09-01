@@ -7,9 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "benchmark": "node --experimental-strip-types scripts/benchmark.ts",
-    "test:sim": "node --experimental-strip-types scripts/simulation-smoke.ts",
-    "test:radio": "node --experimental-strip-types scripts/radio-cues.test.ts",
+    "diagnostic:reference-policy": "node --experimental-strip-types scripts/benchmark.ts",
+    "diagnostic:sim": "node --experimental-strip-types scripts/simulation-smoke.ts",
+    "diagnostic:radio": "node --experimental-strip-types scripts/radio-cues.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

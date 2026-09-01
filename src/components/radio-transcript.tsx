@@ -70,7 +70,7 @@ export function RadioTranscript({
         <div className="radio-transcript-title">
           <Radio aria-hidden="true" />
           <span>Radio</span>
-          <i aria-hidden="true" data-live={Boolean(activeCue)} />
+          <i aria-hidden="true" data-live={Boolean(activeCueId)} />
         </div>
         <div className="radio-transcript-controls" role="group" aria-label="Radio accessibility controls">
           <button

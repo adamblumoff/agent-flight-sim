@@ -27,11 +27,12 @@ import {
   Vector3,
 } from 'three'
 import type { FlightState } from '../sim/types'
-import { WORLD_DEPARTURE_RUNWAY, WORLD_LAKESIDE_RUNWAY, WORLD_RUNWAY } from './coordinates'
+import { WORLD_RUNWAY } from './coordinates'
 
 const runway = WORLD_RUNWAY
 const runwayLength = runway.lengthFt * 0.3048
 const runwayWidth = runway.widthFt * 0.3048
+const runwayPavedShoulderWidth = 75 * 0.3048
 const TERRAIN_SIZE_METERS = 24_000
 const TERRAIN_SNAP_METERS = 4_000
 
@@ -104,9 +105,9 @@ function createRunwayTexture(anisotropy: number, options: RunwayTextureOptions =
   const {
     widthMeters = runwayWidth,
     lengthMeters = runwayLength,
-    nearNumber = '16',
-    farNumber = '34',
-    seed = 16,
+    nearNumber = '30L',
+    farNumber = '12R',
+    seed = 30,
     surfaceColor = '#282d2e',
     includeAimingPoints = true,
   } = options
@@ -194,7 +195,7 @@ function groundBox(
 }
 
 function addRunway(root: Group, anisotropy: number) {
-  groundBox(root, runwayWidth + 15, runwayLength, 0, -runwayLength / 2, runwayShoulder, runway.surfaceY * 0.65)
+  groundBox(root, runwayWidth + runwayPavedShoulderWidth * 2, runwayLength, 0, -runwayLength / 2, runwayShoulder, runway.surfaceY * 0.65)
   const runwayMaterial = new MeshStandardMaterial({ map: createRunwayTexture(anisotropy), roughness: 0.92 })
   const runwaySurface = new Mesh(
     new BoxGeometry(runwayWidth, runway.surfaceY, runwayLength),
@@ -246,52 +247,6 @@ function addRunway(root: Group, anisotropy: number) {
       for (const lights of lightMeshes) lights.visible = opacity > 0.01
     },
   }
-}
-
-function addRemoteRunway(
-  root: Group,
-  anisotropy: number,
-  remote: typeof WORLD_DEPARTURE_RUNWAY,
-  style: { readonly name: string; readonly seed: number; readonly surfaceColor: string; readonly buildings: boolean },
-) {
-  const length = remote.lengthFt * 0.3048
-  const width = remote.widthFt * 0.3048
-  const group = new Group()
-  group.name = style.name
-  group.position.set(remote.x, remote.y, remote.z)
-  group.rotation.y = -remote.headingOffsetDeg * Math.PI / 180
-  const surfaceMaterial = new MeshStandardMaterial({
-    map: createRunwayTexture(anisotropy, {
-      widthMeters: width,
-      lengthMeters: length,
-      nearNumber: remote.nearNumber,
-      farNumber: remote.farNumber,
-      seed: style.seed,
-      surfaceColor: style.surfaceColor,
-      includeAimingPoints: false,
-    }),
-    roughness: 0.94,
-  })
-  const remoteAsphalt = new MeshStandardMaterial({ color: style.surfaceColor, roughness: 0.94 })
-  groundBox(group, width + 15, length, 0, -length / 2, runwayShoulder, remote.surfaceY * 0.65)
-  const surface = new Mesh(
-    new BoxGeometry(width, remote.surfaceY, length),
-    [remoteAsphalt, remoteAsphalt, surfaceMaterial, remoteAsphalt, remoteAsphalt, remoteAsphalt],
-  )
-  surface.castShadow = false
-  surface.receiveShadow = true
-  surface.position.set(0, remote.surfaceY / 2, -length / 2)
-  group.add(surface)
-
-  if (style.buildings) {
-    groundBox(group, 210, 320, 132, -390, concrete, 0.09)
-    const hangar = box(112, 31, 72, buildingWall)
-    hangar.position.set(138, 15.55, -365)
-    const utilityShed = box(36, 13, 32, buildingDark)
-    utilityShed.position.set(112, 6.55, -485)
-    group.add(hangar, utilityShed)
-  }
-  root.add(group)
 }
 
 function addAirport(root: Group) {
@@ -380,8 +335,6 @@ export function createAirportWorld(scene: Scene, anisotropy = 1) {
   terrain.receiveShadow = true
   root.add(terrain)
   const runwayLights = addRunway(root, anisotropy)
-  addRemoteRunway(root, anisotropy, WORLD_DEPARTURE_RUNWAY, { name: 'North Field runway 18', seed: 18, surfaceColor: '#4b4638', buildings: true })
-  addRemoteRunway(root, anisotropy, WORLD_LAKESIDE_RUNWAY, { name: 'Lakeside runway 22', seed: 22, surfaceColor: '#31383a', buildings: false })
   addAirport(root)
 
   const sky = createSky()

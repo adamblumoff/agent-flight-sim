@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Minus, Plus } from 'lucide-react'
-import { KSTL_RUNWAY_30L, LAKESIDE_RUNWAY_04, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
+import { KMDW_RUNWAY_31C, KSTL_RUNWAY_12R, KSTL_RUNWAY_30L } from '../sim/airfields'
 import { checkpointCaptureRadiusNm } from '../sim/checkpoints'
 import type { FlightState, MissionRunway } from '../sim/types'
 
@@ -18,12 +18,12 @@ const runwayPoints = (runway: MissionRunway): readonly MapPoint[] => [
 export function FlightMinimap({ state }: { readonly state: FlightState }) {
   const [collapsed, setCollapsed] = useState(false)
   const routePoints = state.route.waypoints
-  const destinationRunway = state.route.destination === 'KLAK'
-    ? state.route.runway === '04' ? LAKESIDE_RUNWAY_04 : LAKESIDE_RUNWAY_22
-    : state.route.destination === 'KSTL' ? KSTL_RUNWAY_30L : NORTH_FIELD_RUNWAY_18
-  const visibleRunways = state.route.destination === 'KLAK'
-    ? [NORTH_FIELD_RUNWAY_18, LAKESIDE_RUNWAY_22]
-    : [NORTH_FIELD_RUNWAY_18, KSTL_RUNWAY_30L]
+  const destinationRunway = state.route.destination === 'KMDW'
+    ? KMDW_RUNWAY_31C
+    : state.route.destination === 'KSTL' ? KSTL_RUNWAY_30L : KSTL_RUNWAY_12R
+  const visibleRunways = state.route.destination === 'KMDW'
+    ? [KSTL_RUNWAY_12R, KMDW_RUNWAY_31C]
+    : state.route.destination === 'KSTL' ? [KSTL_RUNWAY_30L] : [KSTL_RUNWAY_12R]
   const boundsPoints: readonly MapPoint[] = [state, ...visibleRunways.flatMap(runwayPoints), ...routePoints]
   const referenceLatitude = boundsPoints.reduce((sum, point) => sum + point.lat, 0) / boundsPoints.length
   const longitudeScale = Math.cos(referenceLatitude * Math.PI / 180)
@@ -96,7 +96,7 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
         {visibleRunways.map((runway) => {
           const start = mapPoint({ lat: runway.thresholdLat, lon: runway.thresholdLon })
           const end = mapPoint({ lat: runway.farEndLat, lon: runway.farEndLon })
-          const isDeparture = runway.id === NORTH_FIELD_RUNWAY_18.id
+          const isDeparture = runway.id === KSTL_RUNWAY_12R.id
           return (
             <g key={runway.id}>
               <line className={`minimap-runway ${isDeparture ? 'minimap-runway-departure' : 'minimap-runway-arrival'}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />

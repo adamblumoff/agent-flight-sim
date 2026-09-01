@@ -33,7 +33,7 @@ export interface FlightToolReceipt<T> {
 
 export const checkrideSeeds = [17, 42, 81] as const satisfies readonly CheckrideSeed[]
 export const evidenceSources = ['weather', 'cockpit', 'traffic', 'passenger'] as const satisfies readonly EvidenceSource[]
-export const routePlans = ['continue_klak', 'return_kstl'] as const satisfies readonly RoutePlan[]
+export const routePlans = ['continue_kmdw', 'return_kstl'] as const satisfies readonly RoutePlan[]
 export const flightEventValues = ['handoff_requested', 'emergency_detected', 'decision_timer_expired', 'atc_clearance_received', 'atc_clearance_accepted', 'plan_updated', 'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching', 'passenger_safety_update', 'configuration_required', 'configuration_confirmed', 'approval_required', 'approval_resolved', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
 export interface FlightToolArguments {
@@ -42,7 +42,7 @@ export interface FlightToolArguments {
   get_flight_state: Record<string, never>
   get_decision_context: Record<string, never>
   inspect_flight_evidence: { readonly source?: EvidenceSource }
-  set_route: { readonly plan: 'continue_klak' | 'return_kstl'; readonly reason: string }
+  set_route: { readonly plan: 'continue_kmdw' | 'return_kstl'; readonly reason: string }
   request_diversion: { readonly plan: DiversionPlan; readonly reason: string }
   accept_clearance: { readonly clearance_id: string; readonly readback: string }
   begin_takeoff: { readonly reason: string }
@@ -138,13 +138,13 @@ export const flightToolDefinitions = [
   },
   {
     name: 'begin_takeoff', title: 'Begin takeoff', readOnly: false,
-    description: `Begin the takeoff roll after filing continue_klak. Full mode uses the A380-style ${A380_ENVELOPE.rotateSpeedKt}-knot rotation profile. Judge mode models Concorde: V1 ${CONCORDE_ENVELOPE.decisionSpeedKt}, VR ${CONCORDE_ENVELOPE.rotateSpeedKt}, V2 ${CONCORDE_ENVELOPE.takeoffSafetySpeedKt}, then ${CONCORDE_ENVELOPE.initialClimbSpeedKt} knots. Both hold runway heading through ${A380_ENVELOPE.departureHeadingReleaseAglFt} ft AGL. A runway excursion or surface strike causes a crash.`,
+    description: `Begin the takeoff roll after filing continue_kmdw. Full mode uses the A380-style ${A380_ENVELOPE.rotateSpeedKt}-knot rotation profile. Judge mode uses Concorde: V1 ${CONCORDE_ENVELOPE.decisionSpeedKt}, VR ${CONCORDE_ENVELOPE.rotateSpeedKt}, V2 ${CONCORDE_ENVELOPE.takeoffSafetySpeedKt}, then ${CONCORDE_ENVELOPE.initialClimbSpeedKt} knots. Rotation is procedural guidance; liftoff occurs only when modeled aerodynamic lift exceeds aircraft weight. Both modes use the same real-time world, wind, turbulence, gravity, and collision response. Hold Lambert runway 12R heading through ${A380_ENVELOPE.departureHeadingReleaseAglFt} ft AGL.`,
     inputSchema: { type: 'object', properties: { reason: { type: 'string', minLength: 1 } }, required: ['reason'], additionalProperties: false },
   },
   {
     name: 'set_autopilot_targets', title: 'Set autopilot targets', readOnly: false,
     description: `Set persistent intent-level heading, altitude, speed, or vertical mode. Full mode accepts ${A380_ENVELOPE.minCommandSpeedKt}-${A380_ENVELOPE.maxCommandSpeedKt} kt; Concorde Judge mode accepts ${CONCORDE_ENVELOPE.minCommandSpeedKt}-${CONCORDE_ENVELOPE.maxCommandSpeedKt} kt. Out-of-envelope speeds are clamped. Supplying heading selects heading hold. Set lateralMode to route to resume route guidance. Commands remain active until changed.`,
-    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: KSTL_RUNWAY_30L.elevationFt, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: CONCORDE_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, lateralMode: { type: 'string', enum: ['route', 'heading'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
+    inputSchema: { type: 'object', properties: { headingDeg: { type: 'number', minimum: 0, maximum: 359.99 }, altitudeFt: { type: 'number', minimum: KSTL_RUNWAY_30L.elevationFt, maximum: 4000 }, airspeedKt: { type: 'number', minimum: A380_ENVELOPE.minCommandSpeedKt, maximum: A380_ENVELOPE.maxCommandSpeedKt }, verticalMode: { type: 'string', enum: ['climb', 'level', 'descend', 'approach'] }, lateralMode: { type: 'string', enum: ['route', 'heading'] }, reason: { type: 'string' } }, minProperties: 1, additionalProperties: false },
   },
   {
     name: 'rebuild_active_leg', title: 'Rebuild active leg', readOnly: false,
@@ -153,8 +153,8 @@ export const flightToolDefinitions = [
   },
   {
     name: 'configure_aircraft', title: 'Configure aircraft', readOnly: false,
-    description: 'Set the landing gear and, where supported, flap configuration. Copy state.procedure exactly. In Concorde Judge mode, keep the clean delta wing at 0° throughout and never refer to conventional flap detents. Full mode supplies its required flap setting in state.procedure. Out-of-sequence settings are rejected.',
-    inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0, 10, 20, 30] }, reason: { type: 'string', description: 'Explain only the configuration being commanded. In Judge mode, describe the clean delta wing and never mention nonzero flap settings.' } }, minProperties: 1, additionalProperties: false },
+    description: 'Configure the shared wide-body landing gear and flap detents. Copy state.procedure exactly. The simplified detents are 10° for CONF 1+F, 20° for CONF 3, and 30° for FULL. Out-of-sequence settings are rejected.',
+    inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0, 10, 20, 30] }, reason: { type: 'string', description: 'Explain only the configuration being commanded.' } }, minProperties: 1, additionalProperties: false },
   },
   {
     name: 'request_human_approval', title: 'Ask pilot', readOnly: false,
@@ -175,17 +175,28 @@ export const flightToolDefinitions = [
 
 export function flightToolDefinitionsFor(mode: FlightMode): readonly FlightToolDefinition[] {
   return flightToolDefinitions.map((definition) => {
+    const envelope = mode === 'judge' ? CONCORDE_ENVELOPE : A380_ENVELOPE
+    if (definition.name === 'begin_takeoff') {
+      return {
+        ...definition,
+        description: `Begin the takeoff roll after filing continue_kmdw. ${envelope.name}: V1 ${envelope.decisionSpeedKt}, VR ${envelope.rotateSpeedKt}, V2 ${envelope.takeoffSafetySpeedKt}, then ${envelope.initialClimbSpeedKt} knots. Hold Lambert runway 12R heading through ${envelope.departureHeadingReleaseAglFt} ft AGL. Both modes use the same real-time world, wind, turbulence, gravity, and collision response.`,
+      }
+    }
+    if (definition.name === 'set_autopilot_targets') {
+      return {
+        ...definition,
+        description: `Set persistent intent-level heading, altitude, speed, or vertical mode for the ${envelope.name}. The valid speed range is ${envelope.minCommandSpeedKt}-${envelope.maxCommandSpeedKt} kt. Out-of-envelope speeds are clamped. Supplying heading selects heading hold. Set lateralMode to route to resume route guidance. Commands remain active until changed.`,
+        inputSchema: { ...definition.inputSchema, properties: { ...definition.inputSchema.properties, airspeedKt: { type: 'number', minimum: envelope.minCommandSpeedKt, maximum: envelope.maxCommandSpeedKt } } },
+      }
+    }
     if (definition.name !== 'configure_aircraft') return definition
     return mode === 'judge'
       ? {
           ...definition,
-          description: 'Configure the Concorde landing gear and clean delta wing. Copy state.procedure exactly. Concorde has no conventional flaps, so flapsDeg must remain 0 and the reason must not refer to flap detents. Out-of-sequence settings are rejected.',
-          inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0] }, reason: { type: 'string', description: 'Explain the gear command and clean-delta configuration. Do not mention conventional flaps or flap detents.' } }, minProperties: 1, additionalProperties: false },
+          description: 'Configure the Concorde landing gear and clean delta wing. Copy state.procedure exactly. Concorde has no conventional flaps, so flapsDeg must remain 0. Out-of-sequence settings are rejected.',
+          inputSchema: { type: 'object', properties: { gearDown: { type: 'boolean' }, flapsDeg: { type: 'number', enum: [0] }, reason: { type: 'string', description: 'Explain the gear command and clean-delta configuration.' } }, minProperties: 1, additionalProperties: false },
         }
-      : {
-          ...definition,
-          description: 'Configure the A380-style landing gear and flap detents. Copy state.procedure exactly. The simplified detents are 10° for CONF 1+F, 20° for CONF 3, and 30° for FULL. Out-of-sequence settings are rejected.',
-        }
+      : definition
   })
 }
 

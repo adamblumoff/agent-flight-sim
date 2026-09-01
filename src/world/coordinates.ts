@@ -1,6 +1,6 @@
 import type { FlightState } from '../sim/types'
 import type { Vector3 } from 'three'
-import { KSTL_RUNWAY_30L, LAKESIDE_RUNWAY_22, NORTH_FIELD_RUNWAY_18 } from '../sim/airfields'
+import { KSTL_RUNWAY_30L } from '../sim/airfields'
 
 export const FEET_TO_METERS = 0.3048
 export const NM_TO_METERS = 1_852
@@ -30,27 +30,6 @@ export function positionToWorld(lat: number, lon: number, altitudeFt: number) {
     z: -alongNm * NM_TO_METERS,
   }
 }
-
-const remoteRunwayToWorld = (
-  source: typeof NORTH_FIELD_RUNWAY_18,
-  nearNumber: string,
-  farNumber: string,
-) => {
-  const threshold = positionToWorld(source.thresholdLat, source.thresholdLon, source.elevationFt)
-  return Object.freeze({
-    ...source,
-    surfaceY: 0.12,
-    x: threshold.x,
-    y: threshold.y,
-    z: threshold.z,
-    headingOffsetDeg: source.headingDeg - KSTL_RUNWAY_30L.headingDeg,
-    nearNumber,
-    farNumber,
-  })
-}
-
-export const WORLD_DEPARTURE_RUNWAY = remoteRunwayToWorld(NORTH_FIELD_RUNWAY_18, '18', '36')
-export const WORLD_LAKESIDE_RUNWAY = remoteRunwayToWorld(LAKESIDE_RUNWAY_22, '22', '04')
 
 export const stateToWorld = (state: FlightState) =>
   positionToWorld(state.lat, state.lon, state.altitudeFt)

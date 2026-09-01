@@ -16,11 +16,11 @@ observation → tool action → simulator transition → reward delta → next o
 
 After a terminal state, the app exports both a clean WebMCP call list and a separate `flightdeck-trajectory-v1` JSON file containing observations, actions, results, per-step score changes, latency, terminal flags, final score, and outcome. Seeds 17, 42, and 81 vary weather, engine health, traffic, and passenger urgency while preserving reproducibility.
 
-Judge Mode is a four-minute real-time Concorde evaluation. It keeps the same scoring and WebMCP contract as the full mission, but uses a Concorde-specific terminal envelope, runs the fixed-step simulation at 3×, and uses one turn checkpoint plus base and final. Full Mission remains a ten-minute 1× A380-style run.
+Judge Mode is a six-minute real-time Concorde evaluation. It keeps the same scoring, weather, collision model, 1× world clock, and WebMCP contract as the full mission, but uses a Concorde-specific aircraft envelope and a compact three-gate return to Lambert. Full Mission remains a ten-minute 1× A380-style run.
 
 ### Concorde terminal profile
 
-Judge Mode models a representative high-weight Concorde departure and terminal arrival, not the aircraft's complete supersonic operating envelope. It calls V1 at 150 kt, begins rotation at VR 198 kt, targets V2 220 kt by the 35-foot screen height, then accelerates toward 250 kt in the initial climb. The clean delta wing has no conventional flap settings. Arrival guidance uses 200 kt on base, 175 kt while establishing final, and approximately 165 kt stabilized on approach with a nose-high body attitude.
+Judge Mode models a short-sector Concorde departure and terminal arrival, not the aircraft's complete supersonic operating envelope. At the modeled dispatch mass it calls V1 at 130 kt, begins rotation at VR 170 kt, targets V2 188 kt by the 35-foot screen height, then accelerates toward 250 kt in the initial climb. The clean delta wing has no conventional flap settings. Arrival guidance uses 170 kt through the emergency pattern, 165 kt while establishing final, and approximately 155 kt stabilized on approach with a nose-high body attitude.
 
 The values are grounded in the [FAA's Concorde accident record](https://www.faa.gov/lessons_learned/transport_airplane/accidents/F-BTSC), the [FAA-hosted BEA report](https://www.faa.gov/sites/faa.gov/files/2022-11/Concorde_Accident_Report.pdf), [NASA's operational Concorde report](https://ntrs.nasa.gov/api/citations/20180000699/downloads/20180000699.pdf), and [British Airways' Concorde specifications](https://www.britishairways.com/content/information/about-ba/history-and-heritage/celebrating-concorde). Actual V-speeds varied with weight and conditions. Mach 2 cruise and operation near 60,000 ft are intentionally outside this short terminal scenario.
 
@@ -77,16 +77,23 @@ Open the local URL in a WebMCP-capable browser. Choose Judge Mode for a submissi
 
 Manual controls: `W/S` pitch, `A/D` bank, arrow keys power, `F` flaps in Full Mission, `G` gear, `X` level attitude, and `T` request/cancel/reclaim agent control. Any direct human flight input immediately overrides the agent.
 
-## Verification
+## Development diagnostics
 
 ```bash
 npm run lint
 npm run build
-npm run test:sim
-npm run benchmark
+npm run diagnostic:sim
+npm run diagnostic:radio
+npm run diagnostic:reference-policy
 ```
 
-`test:sim` covers wind, drag, stall behavior, takeoff, timer semantics, checkpoints, route recovery, passenger comfort, all three full-mission seeds, both emergency destinations, and all three Judge Mode seeds. See [BENCHMARK.md](./BENCHMARK.md) for the baseline and the 3-model × 3-seed protocol.
+These commands are engineering diagnostics, not product tests and not evidence that an agent can fly the mission. They catch type, build, and deterministic simulation regressions without exercising browser discovery, tool selection, reasoning latency, event handling, or recovery through WebMCP.
+
+## Acceptance testing
+
+A Judge Mode product test is a real flight by a fresh agent in the visible app. The agent receives only `Use [@Browser](plugin://browser@openai-bundled) to land the plane safely.` and can act only through the WebMCP tools published by that page. The scenario remains private until the simulator emits its in-flight event; no seed, route answer, direct simulator access, keyboard input, DOM control, or scripted policy is allowed. Full Mission remains a manually evaluated experience and is not subject to this acceptance gate.
+
+A run passes only when the aircraft reaches the terminal `landed` outcome and the exported `flightdeck-trajectory-v1` shows the complete observation → WebMCP action → result sequence. Release readiness requires three consecutive passing blind flights on fresh runs. See [EVALUATION.md](./EVALUATION.md) for the exact protocol and [BENCHMARK.md](./BENCHMARK.md) for the model-reporting matrix.
 
 ## Submission evidence
 
