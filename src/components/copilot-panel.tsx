@@ -82,7 +82,7 @@ function MissionDebrief({
   const DebriefIcon = landed ? Check : CircleAlert
   const webMcpExportHref = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(webMcpCalls, null, 2))}`
   const trajectoryExportHref = trajectory
-    ? `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(trajectory, null, 2))}`
+    ? `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(trajectory))}`
     : null
 
   return (
