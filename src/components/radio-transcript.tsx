@@ -21,7 +21,6 @@ export interface RadioTranscriptProps {
   readonly onEnvironmentVolumeChange: (volume: number) => void
   readonly onRadioVolumeChange: (volume: number) => void
   readonly maxRecent?: number
-  readonly className?: string
 }
 
 const speakerLabels: Readonly<Record<string, string>> = {
@@ -50,7 +49,6 @@ export function RadioTranscript({
   onEnvironmentVolumeChange,
   onRadioVolumeChange,
   maxRecent = 3,
-  className,
 }: RadioTranscriptProps) {
   const activeCue = activeCueId
     ? cues.find((cue) => cue.id === activeCueId)
@@ -62,7 +60,7 @@ export function RadioTranscript({
 
   return (
     <section
-      className={`radio-transcript${className ? ` ${className}` : ''}`}
+      className="radio-transcript"
       aria-label="Flight radio"
       data-captions-visible={captionsVisible}
     >

@@ -11,6 +11,7 @@ import { Button } from './ui/button'
 import type { WebMcpActivity } from '../webmcp/useWebMcp'
 import type { FlightTrajectory } from '../webmcp/trajectory'
 import type { RadioCue } from '../audio/radioCues'
+import { RadioTranscript, type RadioTranscriptProps } from './radio-transcript'
 
 export interface CopilotObservation {
   readonly label: string
@@ -52,6 +53,7 @@ export interface CopilotCrewAction {
 }
 
 export interface CopilotPanelProps {
+  readonly radio: RadioTranscriptProps
   readonly phase: string
   readonly headline: string
   readonly observations: readonly CopilotObservation[]
@@ -189,6 +191,7 @@ function MissionDebrief({
 }
 
 export function CopilotPanel({
+  radio,
   phase,
   headline,
   observations,
@@ -218,6 +221,8 @@ export function CopilotPanel({
         </div>
         <span className="phase-label">{phase}</span>
       </header>
+
+      <RadioTranscript {...radio} maxRecent={1} />
 
       {debrief ? (
         <MissionDebrief debrief={debrief} webMcpCalls={webMcpCalls} trajectory={trajectory} onReset={onReset} />

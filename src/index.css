@@ -504,13 +504,6 @@ summary:focus-visible {
   backdrop-filter: blur(8px);
 }
 
-.flight-radio {
-  position: absolute;
-  z-index: 9;
-  right: 400px;
-  bottom: 128px;
-}
-
 .minimap-collapse-toggle:hover,
 .minimap-collapse-toggle:focus-visible {
   border-color: rgb(244 239 222 / 12%);
@@ -1880,10 +1873,6 @@ summary:focus-visible {
   }
 
   .camera-divider {
-    display: none;
-  }
-
-  .flight-radio {
     display: none;
   }
 

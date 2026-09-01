@@ -15,7 +15,6 @@ import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
-import { RadioTranscript } from './components/radio-transcript'
 import { DREAMLINER_787_9_ENVELOPE } from './sim/aircraftEnvelope'
 import { DEFAULT_ENVIRONMENT_VOLUME, DEFAULT_RADIO_VOLUME, flightAudio } from './audio/flightAudio'
 import { radioVoiceClipFor } from './audio/radioVoicePack'
@@ -623,20 +622,6 @@ export default function App() {
 
       <FlightMinimap state={state} />
       <FlightCompass ref={compassRef} />
-      <RadioTranscript
-        className="flight-radio"
-        cues={radio.cues}
-        activeCueId={radio.activeCueId}
-        captionsVisible={captionsVisible}
-        audioMuted={audioMuted}
-        environmentVolume={environmentVolume}
-        radioVolume={radioVolume}
-        onCaptionsVisibleChange={setCaptionsVisible}
-        onAudioMutedChange={changeAudioMuted}
-        onEnvironmentVolumeChange={changeEnvironmentVolume}
-        onRadioVolumeChange={changeRadioVolume}
-      />
-
       <nav className="camera-switcher" aria-label="Camera view">
         {cameraOptions.map(({ mode, label, icon: Icon }) => (
           <button
@@ -721,6 +706,18 @@ export default function App() {
       </section>
 
       <CopilotPanel
+        radio={{
+          cues: radio.cues,
+          activeCueId: radio.activeCueId,
+          captionsVisible,
+          audioMuted,
+          environmentVolume,
+          radioVolume,
+          onCaptionsVisibleChange: setCaptionsVisible,
+          onAudioMutedChange: changeAudioMuted,
+          onEnvironmentVolumeChange: changeEnvironmentVolume,
+          onRadioVolumeChange: changeRadioVolume,
+        }}
         phase={formatLabel(state.mission.phase)}
         headline={deriveHeadline(state)}
         observations={deriveObservations(state)}
