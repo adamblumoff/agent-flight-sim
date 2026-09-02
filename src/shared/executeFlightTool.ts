@@ -33,7 +33,7 @@ const hazardsFor = (state: FlightState): readonly string[] => {
   if (state.aircraftPhase === 'airborne' && (state.mission.airspeedErrorToNextFixKt ?? 0) > 30) hazards.push(`Low energy: airspeed is ${state.mission.airspeedErrorToNextFixKt!.toFixed(0)} kt below the active target. Increase throttle toward 1.00 and avoid climbing until speed recovers.`)
   if (Math.abs(state.bankDeg) >= COMFORT_BANK_WARNING_DEG) hazards.push(`Bank is ${state.bankDeg.toFixed(1)}°. Do not deepen this turn; command bankIntent with the opposite sign to roll toward wings level.`)
   if (state.mission.routeStatus === 'stalled') hazards.push('The active route leg is no longer converging.')
-  if (state.mission.goAroundRequired) hazards.push('The approach is unsafe. Initiate a go-around and climb before trying another approach.')
+  if (state.mission.goAroundRequired) hazards.push('The approach is unsafe. Reprogram immediately with restart_route true. Lead with an exact pitch of at least 5°, throttle of at least 0.85, gear up, and no more than 10° flaps; use altitude hold only after the climb is established.')
   if (!state.procedure.compliant) hazards.push(state.procedure.instruction)
   if (state.passengerSafety.status !== 'comfortable') hazards.push(state.passengerSafety.summary)
   if (state.fuelMinutesRemaining <= 3) hazards.push(`${state.fuelMinutesRemaining.toFixed(1)} minutes of fuel endurance remain.`)
@@ -80,7 +80,7 @@ const objectiveFor = (state: FlightState) => {
 const controlCueFor = (state: FlightState) => {
   if (state.controlOwner !== 'agent' || state.mission.outcome !== 'in_progress' || !state.mission.nextFix) return null
   if (state.motion.stalled) return 'STALL: use throttle 0.85 or higher, negative pitchIntent, gear up, flaps 0° or 10°, and bankIntent toward wings level.'
-  if (state.mission.goAroundRequired) return 'The approach is unsafe. Replace the return_kstl command program with exact go-around commands.'
+  if (state.mission.goAroundRequired) return 'GO AROUND: replace the return_kstl program with restart_route true. The immediate command must use positive pitch and high throttle with gear up and no more than 10° flaps before altitude hold.'
   if (state.autopilot.engaged && state.autopilot.program && state.autopilot.activeCommandIndex !== null) {
     const command = state.autopilot.program.commands[state.autopilot.activeCommandIndex]
     return command ? `Command ${command.id} is active and will persist until its next declared trigger.` : null

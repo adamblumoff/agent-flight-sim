@@ -74,6 +74,8 @@ export interface RouteCommandPoint {
   readonly airspeedKt: number
   readonly distanceToRunwayNm: number
   readonly captureHeadingDeg?: number
+  readonly gearDown: boolean
+  readonly flapsDeg: 0 | 10 | 20 | 30
 }
 export interface RouteState { readonly plan: RoutePlan; readonly destination: 'KMDW' | 'KSTL' | null; readonly runway: '31C' | '30L' | null; readonly waypoints: readonly RouteWaypoint[]; readonly activeWaypointIndex: number; readonly completedWaypointIds: readonly string[]; readonly activeLegOrigin: { readonly lat: number; readonly lon: number }; readonly reason: string | null }
 

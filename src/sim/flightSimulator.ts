@@ -360,8 +360,8 @@ export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   assignedRoute: Object.freeze({
     plan: 'continue_kmdw', destination: 'KMDW', runway: '31C', altitudeFt: 3_000, airspeedKt: 230,
     commandPoints: Object.freeze([
-      Object.freeze({ id: 'KSTL_CLIMB', name: 'Lambert runway 12R climb', kind: 'departure' as const, altitudeFt: 1_200, airspeedKt: DREAMLINER_787_9_ENVELOPE.initialClimbSpeedKt, distanceToRunwayNm: 218.05, captureHeadingDeg: KSTL_RUNWAY_12R.headingDeg }),
-      Object.freeze({ id: 'KSTL_DEPARTURE_CORRIDOR', name: 'Chicago departure corridor', kind: 'departure' as const, altitudeFt: 3_000, airspeedKt: DREAMLINER_787_9_ENVELOPE.enrouteSpeedKt, distanceToRunwayNm: 218.34, captureHeadingDeg: KSTL_RUNWAY_12R.headingDeg }),
+      Object.freeze({ id: 'KSTL_CLIMB', name: 'Lambert runway 12R climb', kind: 'departure' as const, altitudeFt: 1_200, airspeedKt: DREAMLINER_787_9_ENVELOPE.initialClimbSpeedKt, distanceToRunwayNm: 218.05, captureHeadingDeg: KSTL_RUNWAY_12R.headingDeg, gearDown: false, flapsDeg: 10 as const }),
+      Object.freeze({ id: 'KSTL_DEPARTURE_CORRIDOR', name: 'Chicago departure corridor', kind: 'departure' as const, altitudeFt: 3_000, airspeedKt: DREAMLINER_787_9_ENVELOPE.enrouteSpeedKt, distanceToRunwayNm: 218.34, captureHeadingDeg: KSTL_RUNWAY_12R.headingDeg, gearDown: false, flapsDeg: 0 as const }),
     ]),
   }),
   availablePlans: Object.freeze(['return_kstl', 'continue_kmdw'] as const),
@@ -470,24 +470,46 @@ const waypoint = (
   captureHeadingDeg?: number,
 ): RouteWaypoint => Object.freeze({ id, name, kind, ...position, altitudeFt, airspeedKt, captureRadiusNm, ...(captureHeadingDeg === undefined ? {} : { captureHeadingDeg }) })
 
-const commandPointFor = (fix: RouteWaypoint, runwayThreshold: { lat: number; lon: number }): RouteCommandPoint => Object.freeze({
-  id: fix.id,
-  name: fix.name,
-  kind: fix.kind,
-  altitudeFt: fix.altitudeFt,
-  airspeedKt: fix.airspeedKt,
-  distanceToRunwayNm: Number(distanceNm(fix, runwayThreshold).toFixed(2)),
-  ...(fix.captureHeadingDeg === undefined ? {} : { captureHeadingDeg: fix.captureHeadingDeg }),
-})
+const commandPointFor = (fix: RouteWaypoint, runwayThreshold: { lat: number; lon: number }): RouteCommandPoint => {
+  const distanceToRunwayNm = Number(distanceNm(fix, runwayThreshold).toFixed(2))
+  const gearDown = fix.kind === 'final' || fix.kind === 'touchdown'
+  let flapsDeg: RouteCommandPoint['flapsDeg'] = 0
+  if (fix.id === 'KSTL_CLIMB') flapsDeg = 10
+  if (fix.kind === 'final') flapsDeg = distanceToRunwayNm <= 4.1 ? 30 : 20
+  if (fix.kind === 'touchdown') flapsDeg = 30
+  return Object.freeze({
+    id: fix.id,
+    name: fix.name,
+    kind: fix.kind,
+    altitudeFt: fix.altitudeFt,
+    airspeedKt: fix.airspeedKt,
+    distanceToRunwayNm,
+    ...(fix.captureHeadingDeg === undefined ? {} : { captureHeadingDeg: fix.captureHeadingDeg }),
+    gearDown,
+    flapsDeg,
+  })
+}
 
 const returnFinalLegs = (): readonly RouteWaypoint[] => {
   const envelope = DREAMLINER_787_9_ENVELOPE
   const reciprocalHeading = normalizeHeading(KSTL_RUNWAY_30L.headingDeg + 180)
-  const finalDistanceNm = 10
-  const finalPosition = offsetPosition(KSTL_THRESHOLD, reciprocalHeading, finalDistanceNm)
-  const finalAltitudeFt = Math.round((KSTL_ELEVATION + Math.tan(radians(3)) * finalDistanceNm * FEET_PER_NM) / 100) * 100
+  const finalCheckpoint = (id: string, name: string, distanceToRunwayNm: number, airspeedKt: number, captureRadiusNm: number) => waypoint(
+    id,
+    name,
+    'final',
+    offsetPosition(KSTL_THRESHOLD, reciprocalHeading, distanceToRunwayNm),
+    Math.round((KSTL_ELEVATION + Math.tan(radians(3)) * distanceToRunwayNm * FEET_PER_NM) / 100) * 100,
+    airspeedKt,
+    captureRadiusNm,
+    KSTL_RUNWAY_30L.headingDeg,
+  )
   return Object.freeze([
-    waypoint('KSTL_FINAL', 'Runway 30L final corridor', 'final', finalPosition, finalAltitudeFt, envelope.finalSpeedKt, 0.65, KSTL_RUNWAY_30L.headingDeg),
+    finalCheckpoint('KSTL_FINAL_10', 'Runway 30L final, 10 NM', 10, envelope.finalSpeedKt, 0.65),
+    finalCheckpoint('KSTL_FINAL_8', 'Runway 30L final, 8 NM', 8, 155, 0.45),
+    finalCheckpoint('KSTL_FINAL_6', 'Runway 30L final, 6 NM', 6, 150, 0.4),
+    finalCheckpoint('KSTL_FINAL_4', 'Runway 30L final, 4 NM', 4, 148, 0.35),
+    finalCheckpoint('KSTL_FINAL_2', 'Runway 30L final, 2 NM', 2, envelope.approachSpeedKt, 0.25),
+    finalCheckpoint('KSTL_FINAL_1', 'Runway 30L final, 1 NM', 1, envelope.approachSpeedKt, 0.18),
     waypoint('KSTL_TOUCHDOWN', 'Runway 30L touchdown', 'touchdown', offsetPosition(KSTL_THRESHOLD, KSTL_RUNWAY_30L.headingDeg, 0.14), KSTL_ELEVATION, envelope.approachSpeedKt, 0.012),
   ])
 }
@@ -563,16 +585,33 @@ export const flightCommandTargetsFor = (state: FlightState, command: FlightComma
     targetPitchDeg = command.vertical.pitchDeg
   } else {
     const altitudeErrorFt = command.vertical.altitudeFt - state.altitudeFt
-    const targetVerticalSpeedFpm = clamp(altitudeErrorFt * 1.1, -1_200, 1_200)
-    const pathAngleDeg = Math.asin(clamp(targetVerticalSpeedFpm * 60 / (Math.max(90, state.airspeedKt) * FEET_PER_NM), -0.25, 0.25)) * 180 / Math.PI
+    const lateral = command.lateral
+    const trackedFix = lateral.mode === 'track_fix'
+      ? state.route.waypoints.find((waypoint) => waypoint.id === lateral.waypointId)
+      : undefined
     const active = state.route.waypoints[state.route.activeWaypointIndex]
+    const secondsToFix = trackedFix && active?.id === trackedFix.id
+      ? Math.max(0, distanceNm(state, trackedFix) - checkpointCaptureRadiusNm(trackedFix))
+        / Math.max(90, state.motion.groundSpeedKt) * 3_600
+      : null
+    const scheduledVerticalSpeedFpm = secondsToFix === null
+      ? altitudeErrorFt * 3
+      : altitudeErrorFt * 60 / Math.max(8, secondsToFix)
+    const minimumVerticalSpeedFpm = active?.kind === 'final' || active?.kind === 'touchdown' ? -950 : -1_800
+    const targetVerticalSpeedFpm = clamp(scheduledVerticalSpeedFpm, minimumVerticalSpeedFpm, 1_800)
+    const pathAngleDeg = Math.asin(clamp(targetVerticalSpeedFpm * 60 / (Math.max(90, state.airspeedKt) * FEET_PER_NM), -0.25, 0.25)) * 180 / Math.PI
     const landingAngleOfAttackDeg = active?.kind === 'final' || active?.kind === 'touchdown' ? 8 : 0
     targetPitchDeg = clamp(landingAngleOfAttackDeg + pathAngleDeg, -10, 15)
   }
 
   const throttle = command.energy.mode === 'throttle'
     ? command.energy.throttle
-    : clamp(0.55 + (command.energy.airspeedKt - state.airspeedKt) * 0.012, 0.05, 1)
+    : clamp(
+        (0.55 + (command.energy.airspeedKt - state.airspeedKt) * 0.012)
+          / Math.max(0.35, state.scenario.engine.maximumPower),
+        0.05,
+        1,
+      )
   return Object.freeze({
     pitchDeg: targetPitchDeg,
     bankDeg: targetBankDeg,
@@ -973,6 +1012,18 @@ class FlightSimulator {
           : routeFor(program.plan, this.state))
     if (program.commands.length < 2 || program.commands.length > 16) return this.receipt(false, 'A flight program requires 2 to 16 ordered commands.')
     if (program.commands[0]?.when.type !== 'immediate') return this.receipt(false, 'The first flight command must use the immediate trigger.')
+    if (program.restartRoute && this.state.mission.goAroundRequired) {
+      const firstCommand = program.commands[0]
+      const safeGoAround = firstCommand.vertical.mode === 'pitch'
+        && firstCommand.vertical.pitchDeg >= 5
+        && firstCommand.energy.mode === 'throttle'
+        && firstCommand.energy.throttle >= 0.85
+        && !firstCommand.gearDown
+        && firstCommand.flapsDeg <= 10
+      if (!safeGoAround) {
+        return this.receipt(false, 'Unsafe go-around program. The immediate command must declare pitch of at least 5°, throttle of at least 0.85, gear up, and no more than 10° flaps before any altitude-hold command.')
+      }
+    }
     const ids = new Set(program.commands.map((command) => command.id))
     if (ids.size !== program.commands.length) return this.receipt(false, 'Every flight command id must be unique.')
     const routeFixIds = new Set(baseRoute.waypoints.map((waypoint) => waypoint.id))
@@ -1675,7 +1726,7 @@ class FlightSimulator {
         verticalSpeedFpm: partial.verticalSpeedFpm,
         centerlineErrorNm: mission.centerlineErrorNm,
       })
-      this.queueEvent('go_around_required', `${runway.id} approach is unsafe. Initiate a go-around now, command a climb, and follow the rebuilt arrival.`)
+      this.queueEvent('go_around_required', `${runway.id} approach is unsafe. Replace the flight program with an immediate climb and set restart_route true for a new circuit.`)
     }
     if (approachJustStabilized) {
       this.record('system', 'approach_stable', `${runway.id} approach is stable`, { runway: runway.id })
@@ -1757,14 +1808,6 @@ class FlightSimulator {
       ? horizontalDistanceNm <= captureRadiusNm
         && Math.abs(headingError(KSTL_RUNWAY_30L.headingDeg, _headingDeg)) <= 45
       : false
-    const finalFrame = active.id === 'KSTL_FINAL'
-      ? runwayFrame(position, KSTL_THRESHOLD, KSTL_RUNWAY_30L.headingDeg)
-      : null
-    const finalCorridorCaptured = finalFrame !== null
-      && finalFrame.alongNm >= -3.5
-      && finalFrame.alongNm <= -0.3
-      && Math.abs(finalFrame.crossNm) <= 0.35
-      && Math.abs(headingError(KSTL_RUNWAY_30L.headingDeg, _headingDeg)) <= 30
     const captureHeadingToleranceDeg = active.id === 'KSTL_COURSE_REVERSAL' ? 25 : 45
     const headingConstraintSatisfied = active.captureHeadingDeg === undefined
       || Math.abs(headingError(active.captureHeadingDeg, _headingDeg)) <= captureHeadingToleranceDeg
@@ -1780,7 +1823,7 @@ class FlightSimulator {
     )
     const reached = !route.completedWaypointIds.includes(active.id)
       && (active.kind === 'final' && route.destination === 'KSTL'
-        ? finalFrame === null ? runwayAlignedFinal : finalCorridorCaptured
+        ? runwayAlignedFinal
         : horizontalDistanceNm <= captureRadiusNm && headingConstraintSatisfied && departureCaptureSatisfied && goAroundCaptureSatisfied)
     const completedWaypointIds = reached
       ? Object.freeze([...route.completedWaypointIds, active.id])
@@ -1854,19 +1897,13 @@ class FlightSimulator {
     const active = state.route.waypoints[state.route.activeWaypointIndex]
     const directBearingToNextFixDeg = active ? navigationBearingDeg(state, active) : null
     const frame = runwayFrame(state, runway.threshold, runway.heading)
-    const runwayRelativeFinalGuidance = active?.id === 'KSTL_FINAL'
-      && frame.alongNm >= -14
-      && frame.alongNm <= -0.3
-      && Math.abs(frame.crossNm) <= 4
     const runwayRelativeTouchdownGuidance = active?.kind === 'touchdown'
       && state.route.destination === 'KSTL'
       && frame.alongNm >= -5
       && frame.alongNm <= 0.3
       && Math.abs(frame.crossNm) <= 0.5
-    const bearingToNextFixDeg = runwayRelativeFinalGuidance
-      ? normalizeHeading(KSTL_RUNWAY_30L.headingDeg + clamp(frame.crossNm * 20, -40, 40))
-      : runwayRelativeTouchdownGuidance
-        ? normalizeHeading(KSTL_RUNWAY_30L.headingDeg + clamp(frame.crossNm * 120, -25, 25))
+    const bearingToNextFixDeg = runwayRelativeTouchdownGuidance
+      ? normalizeHeading(KSTL_RUNWAY_30L.headingDeg + clamp(frame.crossNm * 120, -25, 25))
       : active && active.captureHeadingDeg !== undefined && distanceNm(state, active) <= checkpointCaptureRadiusNm(active)
         ? active.captureHeadingDeg
         : directBearingToNextFixDeg
@@ -1909,7 +1946,10 @@ class FlightSimulator {
       minimumTurnRadiusNm: coordinatedTurnRadiusNm(Math.max(state.airspeedKt, envelope.minCommandSpeedKt), envelope.routeBankDeg),
       routeStatus: active ? (this.routeProgress.eventSent ? 'stalled' : 'tracking') : 'idle',
       distanceToThresholdNm, centerlineErrorNm: frame.crossNm,
-      glidepathErrorFt, stableApproach: approach.stable, goAroundRequired: approach.goAroundRequired, eventRevision: this.eventRevision,
+      glidepathErrorFt,
+      stableApproach: approach.stable,
+      goAroundRequired: this.state.mission.goAroundRequired || approach.goAroundRequired,
+      eventRevision: this.eventRevision,
     })
   }
 

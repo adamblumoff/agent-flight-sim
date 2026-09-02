@@ -156,7 +156,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'get_mission_brief', title: 'Read mission brief', readOnly: true,
-    description: 'Read the assigned route, published command points with nominal crossing altitude, speed, runway distance, and capture heading, takeoff data, deadline, aircraft procedures, and landing criteria. Submit the ordered exact command program before takeoff. Future conditions remain sealed.', inputSchema: emptySchema,
+    description: 'Read the assigned route and its crossing checkpoints. Each checkpoint publishes runway distance, altitude, speed, heading, gear, and flap targets. These are targets to meet at the checkpoint, not controls the simulator will apply. Submit the ordered exact command program before takeoff. Future conditions remain sealed.', inputSchema: emptySchema,
   },
   {
     name: 'get_flight_state', title: 'Read flight state', readOnly: true,
@@ -168,7 +168,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'program_flight_plan', title: 'Program flight plan', readOnly: false,
-    description: 'Author the flight as 2-16 ordered exact commands. Each command persists until the next command trigger: choose one lateral mode (heading, track_fix, or bank), one vertical mode (pitch or altitude), one energy mode (throttle or airspeed), plus exact gear and flaps. The first trigger must be immediate; later triggers may use airspeed, altitude, active route waypoint, runway distance, or aircraft phase. Published command points include nominal crossing altitude, speed, runway distance, and capture heading so you can choose a complete vertical and lateral profile. Replacing commands preserves current route progress by default; set restart_route true only for a deliberate new circuit such as a go-around. The simulator only tracks declared setpoints at 60 Hz and does not invent route, configuration, flare, or rollout decisions. Use only command point IDs published in the mission brief or accepted ATC clearance. Replace the whole program after accepting a diversion clearance; the previous program keeps flying until then.',
+    description: 'Author the flight as 2-16 ordered exact commands. Each command persists until the next trigger. Choose one lateral mode, one vertical mode, one energy mode, plus exact gear and flaps. The first trigger must be immediate. Use an active_waypoint trigger to set the controls that fly toward that newly active checkpoint and meet its published crossing targets. The simulator supplies the route but only tracks your declared setpoints at 60 Hz; it never chooses pitch, speed, configuration, flare, or rollout. A landing program needs your own distance-triggered exact-pitch flare before touchdown and an aircraft_phase landing_roll command for runway heading, zero pitch, and idle power; commanding runway elevation is not a flare. Replacing commands preserves route progress. For a required go-around, set restart_route true and lead with your exact positive-pitch, high-throttle, gear-up, flaps-10-or-less command before altitude hold. Use only published checkpoint IDs.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -219,7 +219,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'accept_clearance', title: 'Read back ATC clearance', readOnly: false,
-    description: 'Accept the current ATC clearance by copying its clearance.id and reading back its destination, runway, altitude, and initial heading. The clearance publishes permitted command points and their nominal crossing targets; then replace the command program for that route.',
+    description: 'Accept the current ATC clearance by copying its clearance.id and reading back its destination, runway, altitude, and initial heading. The clearance then publishes the complete route and crossing targets. Replace the command program so the aircraft meets each checkpoint.',
     inputSchema: { type: 'object', properties: { clearance_id: { type: 'string', minLength: 1 }, readback: { type: 'string', minLength: 1 } }, required: ['clearance_id', 'readback'], additionalProperties: false },
   },
   {

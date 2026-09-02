@@ -6,7 +6,7 @@ import { DREAMLINER_787_9_ENVELOPE, staticThrustAccelerationKtPerSecond } from '
 import { KMDW_RUNWAY_31C, KSTL_DEPARTURE_START, KSTL_RUNWAY_12R, KSTL_RUNWAY_30L } from '../src/sim/airfields.ts'
 import { checkpointCaptureRadiusNm } from '../src/sim/checkpoints.ts'
 import { approachAssessmentFor, arrivalLegProgressed, deepensUnsafeBank, distanceNm, flightCommandTargetsFor, flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg, routeFor } from '../src/sim/flightSimulator.ts'
-import type { ControlOwner, FlightPlanProgram, RouteWaypoint, TraceActor } from '../src/sim/types.ts'
+import type { ControlOwner, FlightCommandStep, FlightPlanProgram, RouteCommandPoint, RouteWaypoint, TraceActor } from '../src/sim/types.ts'
 
 const weather = {
   visibilityMiles: 10,
@@ -241,24 +241,32 @@ for (const seed of [17, 42, 81] as const) {
   flightSimulator.advanceForTesting(5)
   const clearance = flightSimulator.getState().atc.clearance
   assert.ok(clearance, `Seed ${seed} must receive an ATC clearance`)
-  assert.deepEqual(clearance.commandPoints.map(({ id }) => id), ['KSTL_OUTBOUND', 'KSTL_COURSE_REVERSAL', 'KSTL_FINAL', 'KSTL_TOUCHDOWN'])
+  assert.deepEqual(clearance.commandPoints.map(({ id }) => id), [
+    'KSTL_OUTBOUND', 'KSTL_COURSE_REVERSAL',
+    'KSTL_FINAL_10', 'KSTL_FINAL_8', 'KSTL_FINAL_6', 'KSTL_FINAL_4', 'KSTL_FINAL_2', 'KSTL_FINAL_1',
+    'KSTL_TOUCHDOWN',
+  ])
   assert.ok(clearance.commandPoints.every(({ altitudeFt, airspeedKt, distanceToRunwayNm }) => altitudeFt > 0 && airspeedKt > 0 && distanceToRunwayNm >= 0))
   assert.equal(flightSimulator.acceptAtcClearance(
     clearance.id,
     `${clearance.destination} runway ${clearance.runway}, altitude ${clearance.altitudeFt}, heading ${Math.round(clearance.headingDeg)}`,
     'agent',
   ).accepted, true)
+  const commandForCheckpoint = (checkpoint: RouteCommandPoint, index: number): FlightCommandStep => {
+    return Object.freeze({
+      id: `cross-${checkpoint.id.toLowerCase()}`,
+      when: index === 0 ? Object.freeze({ type: 'immediate' as const }) : Object.freeze({ type: 'active_waypoint' as const, value: checkpoint.id }),
+      lateral: Object.freeze({ mode: 'track_fix' as const, waypointId: checkpoint.id }),
+      vertical: Object.freeze({ mode: 'altitude' as const, altitudeFt: checkpoint.altitudeFt }),
+      energy: Object.freeze({ mode: 'airspeed' as const, airspeedKt: checkpoint.airspeedKt }),
+      gearDown: checkpoint.gearDown,
+      flapsDeg: checkpoint.flapsDeg,
+    })
+  }
   const returnProgram: FlightPlanProgram = {
     plan: 'return_kstl',
     commands: [
-      { id: 'cleared-outbound', when: { type: 'immediate' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_OUTBOUND' }, vertical: { mode: 'altitude', altitudeFt: clearance.altitudeFt }, energy: { mode: 'airspeed', airspeedKt: clearance.airspeedKt }, gearDown: false, flapsDeg: 0 },
-      { id: 'course-reversal', when: { type: 'active_waypoint', value: 'KSTL_COURSE_REVERSAL' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_COURSE_REVERSAL' }, vertical: { mode: 'altitude', altitudeFt: clearance.altitudeFt }, energy: { mode: 'airspeed', airspeedKt: clearance.airspeedKt }, gearDown: false, flapsDeg: 0 },
-      { id: 'final-intercept', when: { type: 'active_waypoint', value: 'KSTL_FINAL' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_FINAL' }, vertical: { mode: 'altitude', altitudeFt: 3_000 }, energy: { mode: 'airspeed', airspeedKt: 165 }, gearDown: true, flapsDeg: 20 },
-      { id: 'eight-mile-step', when: { type: 'distance_to_runway_at_most', value: 8 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_FINAL' }, vertical: { mode: 'altitude', altitudeFt: 2_000 }, energy: { mode: 'airspeed', airspeedKt: 160 }, gearDown: true, flapsDeg: 20 },
-      { id: 'six-mile-step', when: { type: 'distance_to_runway_at_most', value: 6 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_FINAL' }, vertical: { mode: 'altitude', altitudeFt: 1_400 }, energy: { mode: 'airspeed', airspeedKt: 155 }, gearDown: true, flapsDeg: 20 },
-      { id: 'four-mile-step', when: { type: 'distance_to_runway_at_most', value: 4 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_FINAL' }, vertical: { mode: 'altitude', altitudeFt: 900 }, energy: { mode: 'airspeed', airspeedKt: 150 }, gearDown: true, flapsDeg: 20 },
-      { id: 'landing-descent', when: { type: 'active_waypoint', value: 'KSTL_TOUCHDOWN' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_TOUCHDOWN' }, vertical: { mode: 'altitude', altitudeFt: 700 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
-      { id: 'short-final', when: { type: 'distance_to_runway_at_most', value: 1 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_TOUCHDOWN' }, vertical: { mode: 'pitch', pitchDeg: 3.5 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+      ...clearance.commandPoints.map(commandForCheckpoint),
       { id: 'flare', when: { type: 'distance_to_runway_at_most', value: 0.35 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_TOUCHDOWN' }, vertical: { mode: 'pitch', pitchDeg: 7.2 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
       { id: 'decrab', when: { type: 'distance_to_runway_at_most', value: 0.05 }, lateral: { mode: 'heading', headingDeg: 299 }, vertical: { mode: 'pitch', pitchDeg: 7.2 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
       { id: 'rollout', when: { type: 'aircraft_phase', value: 'landing_roll' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 0 }, gearDown: true, flapsDeg: 30 },
