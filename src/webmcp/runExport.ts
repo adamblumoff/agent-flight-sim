@@ -50,10 +50,10 @@ export interface FlightRunExport {
 
 const compactResult = (result: WebMcpActivity['result']): Readonly<Record<string, unknown>> | null => {
   if (result === null) return null
-  const { state: _state, ...withoutState } = result as WebMcpActivity['result'] & { readonly state?: FlightState }
+  const { state: _state, ...withoutState } = result as WebMcpActivity['result'] & { readonly state?: unknown }
   const details = 'details' in withoutState ? withoutState.details : null
   if (typeof details !== 'object' || details === null || Array.isArray(details)) return Object.freeze(withoutState)
-  const { state: _detailsState, ...compactDetails } = details as Readonly<Record<string, unknown>> & { readonly state?: FlightState }
+  const { state: _detailsState, ...compactDetails } = details as Readonly<Record<string, unknown>> & { readonly state?: unknown }
   return Object.freeze({ ...withoutState, details: Object.freeze(compactDetails) })
 }
 

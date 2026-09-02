@@ -42,9 +42,7 @@ const gate: RouteWaypoint = {
 assert.equal(checkpointCaptureRadiusNm(gate), 0.16)
 
 const toolNames = flightToolDefinitions.map(({ name }) => name)
-assert.ok(toolNames.includes('fly_control_window'))
-assert.ok(toolNames.includes('program_flight_plan'))
-assert.ok(toolNames.includes('level_attitude'))
+assert.deepEqual(toolNames, ['start_flight', 'program_flight_plan', 'request_diversion', 'accept_clearance', 'wait_for_flight_event'])
 assert.ok(flightEventValues.includes('stall_warning'))
 assert.ok(!toolNames.includes('begin_takeoff' as never))
 assert.ok(!toolNames.includes('set_autopilot_targets' as never))
@@ -171,11 +169,10 @@ flightSimulator.reset(17)
 flightSimulator.transferControl('agent', 'agent', 'WebMCP diagnostic')
 const started = await executeFlightTool('start_flight', {})
 assert.equal(started.ok, true)
-const brief = await executeFlightTool('get_mission_brief', {})
-assert.equal(brief.details.brief.deadlineSeconds, 480)
-assert.deepEqual(brief.details.brief.assignedRoute.commandPoints.map(({ id }) => id), ['KSTL_CLIMB', 'KSTL_DEPARTURE_CORRIDOR'])
+assert.equal(started.details.brief.deadlineSeconds, 480)
+assert.deepEqual(started.details.brief.assignedRoute.commandPoints.map(({ id }) => id), ['KSTL_CLIMB', 'KSTL_DEPARTURE_CORRIDOR'])
 assert.deepEqual(
-  brief.details.brief.assignedRoute.commandPoints.map(({ altitudeFt, airspeedKt, captureHeadingDeg }) => ({ altitudeFt, airspeedKt, captureHeadingDeg })),
+  started.details.brief.assignedRoute.commandPoints.map(({ altitudeFt, airspeedKt, captureHeadingDeg }) => ({ altitudeFt, airspeedKt, captureHeadingDeg })),
   [
     { altitudeFt: 1_200, airspeedKt: 190, captureHeadingDeg: 124 },
     { altitudeFt: 3_000, airspeedKt: 235, captureHeadingDeg: 124 },
@@ -212,21 +209,15 @@ assert.equal(route.state.autopilot.engaged, true)
 const takeoffDirectorCommand = flightCommandTargetsFor(flightSimulator.getState(), program.commands[0])
 assert.equal(takeoffDirectorCommand.throttle, 1)
 assert.equal(takeoffDirectorCommand.flapsDeg, 10)
-const controls = await executeFlightTool('fly_control_window', { throttle: 1, pitchIntent: 0, bankIntent: 0, duration_ms: 250, reason: 'Start the takeoff roll.' })
-assert.equal(controls.ok, true)
-assert.equal(controls.state.mission.phase, 'takeoff')
-
-const controlWindow = await executeFlightTool('fly_control_window', {
-  pitchIntent: 0.25,
-  bankIntent: -0.2,
-  duration_ms: 250,
-  sample_interval_ms: 100,
-  reason: 'Verify finite agent controls and telemetry sampling.',
+flightSimulator.advanceForTesting(90)
+const emergency = await executeFlightTool('wait_for_flight_event', {
+  after_revision: route.eventRevision,
+  events: ['emergency_detected'],
+  timeout_ms: 1_000,
 })
-assert.equal(controlWindow.ok, true)
-assert.ok(controlWindow.samples.length >= 1)
-assert.equal(controlWindow.state.controlInputs.pitchAxis, 0)
-assert.equal(controlWindow.state.controlInputs.bankAxis, 0)
+assert.equal(emergency.event, 'emergency_detected')
+assert.ok(emergency.decisionContext)
+assert.equal(emergency.state.checkride.decisionContextRead, true)
 
 for (const seed of [17, 42, 81] as const) {
   flightSimulator.reset(seed)

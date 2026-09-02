@@ -1078,7 +1078,7 @@ class FlightSimulator {
   requestDiversion = (plan: DiversionPlan, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
     if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
     if (!this.emergencyTriggered || this.state.checkride.status !== 'decision_required') return this.receipt(false, 'No emergency diversion decision is active.')
-    if (!this.state.checkride.decisionContextRead) return this.receipt(false, 'Read get_decision_context before requesting a diversion.')
+    if (!this.state.checkride.decisionContextRead) return this.receipt(false, 'Wait for emergency_detected and review its decisionContext before requesting a diversion.')
     if (this.state.atc.status !== 'none') return this.receipt(false, `ATC is already ${this.state.atc.status}; continue the current clearance flow.`)
     this.decisionTimerRunning = false
     this.atcClearanceDueElapsedSeconds = this.state.elapsedSeconds + ATC_RESPONSE_WALL_SECONDS * MISSION_PROFILE.simulationRate
@@ -1664,7 +1664,7 @@ class FlightSimulator {
       })
       this.record('system', 'scenario_triggered', EMERGENCY_ALERT, { seed: this.state.checkride.seed })
       this.addDebrief('system', 'Unexpected emergency scenario received')
-      this.queueEvent('emergency_detected', `${EMERGENCY_ALERT} Weather: ${this.selectedScenario.weather.summary} Engine: ${this.selectedScenario.engine.summary} Passenger: ${this.selectedScenario.passenger.summary} Traffic: ${this.selectedScenario.traffic.summary} Read get_decision_context once, then request return_kstl or continue_kmdw from ATC within 60 seconds.`)
+      this.queueEvent('emergency_detected', `${EMERGENCY_ALERT} Weather: ${this.selectedScenario.weather.summary} Engine: ${this.selectedScenario.engine.summary} Passenger: ${this.selectedScenario.passenger.summary} Traffic: ${this.selectedScenario.traffic.summary} Review the decisionContext returned with this event, then request return_kstl or continue_kmdw from ATC within 60 seconds.`)
     }
     if (this.state.atc.status === 'requested'
       && this.atcClearanceDueElapsedSeconds !== null

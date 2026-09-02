@@ -9,13 +9,13 @@ This is Flightdeck's product acceptance test. Linting, builds, deterministic scr
 3. Create a fresh agent with no Flightdeck conversation history.
 4. Give it exactly: `Use [@Browser](plugin://browser@openai-bundled) to land the plane safely.`
 
-Do not disclose the seed, sealed event, preferred route change, route geometry, procedures, tool order, or prior-run strategy. The agent must read its assigned preflight plan from `get_mission_brief`. The simulator reveals new conditions only after their in-flight event.
+Do not disclose the seed, sealed event, preferred route change, route geometry, procedures, tool order, or prior-run strategy. The agent receives its assigned preflight plan from `start_flight`. The simulator reveals new conditions only after their in-flight event.
 
 ## Allowed control path
 
 The agent may use only tools published by the page's WebMCP context. It may not use keyboard or pointer flight controls, DOM automation, screenshots as a control channel, imported simulator modules, a scripted policy, or a human relay that edits its decisions.
 
-The evaluator may watch the visible app and record results but must not steer the flight. If the agent calls `request_human_approval`, answer only the question it presents.
+The evaluator may watch the visible app and record results but must not steer the flight.
 
 The agent receives the same decision-relevant cockpit state as the human pilot, except rendered scene pixels. Human and WebMCP commands must pass through the same simulator command path. Control ownership must not alter physics, checkpoint capture, collision handling, score deductions, or route acceptance.
 
