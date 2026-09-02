@@ -17,13 +17,11 @@ import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
 import { DREAMLINER_787_9_ENVELOPE } from './sim/aircraftEnvelope'
 import { DEFAULT_ENVIRONMENT_VOLUME, DEFAULT_RADIO_VOLUME, flightAudio } from './audio/flightAudio'
-import { radioVoiceClipFor } from './audio/radioVoicePack'
 import { flightSimulator } from './sim/flightSimulator'
 import { MISSION_PROFILE } from './sim/missionProfiles'
 import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
-import { createFlightTrajectory } from './webmcp/trajectory'
-import { persistEvaluationEvidence } from './webmcp/evaluationArchive'
+import { createFlightRunExport } from './webmcp/runExport'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
 
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
@@ -111,8 +109,9 @@ function deriveRecommendation(state: FlightState): string {
     ? 'File the Chicago Midway runway 31C route before beginning the takeoff roll.'
     : 'The Chicago Midway route is filed. Apply power when you are ready to begin the takeoff roll.'
   if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
+  if (state.mission.goAroundRequired) return 'Go around now. Climb away from the ground before trying another approach.'
   if (!state.procedure.compliant) return state.procedure.instruction
-  if (state.mission.routeStatus === 'stalled') return 'The active leg is no longer converging. Rebuild it from the current position instead of continuing the orbit.'
+  if (state.mission.routeStatus === 'stalled') return 'ATC has issued fresh arrival vectors. Follow the updated route guidance.'
   if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'requested') return 'Maintain the current hold while ATC prepares the diversion clearance.'
@@ -121,9 +120,6 @@ function deriveRecommendation(state: FlightState): string {
   }
   if (state.controlOwner === 'human' && state.route.plan === 'return_kstl') {
     return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KSTL runway 30L.'
-  }
-  if (state.approval.status === 'pending') {
-    return state.approval.requestedAction ?? 'Hold the current flight path until you decide.'
   }
   if (state.route.reason) return state.route.reason
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
@@ -136,12 +132,24 @@ function deriveRecommendation(state: FlightState): string {
 }
 
 function derivePlan(state: FlightState): readonly string[] {
-  if (state.mission.phase === 'preflight' || state.mission.phase === 'takeoff') {
+  if (state.mission.phase === 'preflight') {
+    if (state.route.plan !== 'unassigned') return [
+      'Advance power for takeoff from runway 12R.',
+      'Rotate at 155 knots, climb through 1,000 feet, then clean up the aircraft.',
+    ]
     return [
       'File the Chicago Midway runway 31C route before departure.',
       'Take off from St. Louis Lambert runway 12R, clean up the aircraft, and monitor for changes.',
     ]
   }
+  if (state.mission.phase === 'takeoff') return [
+    'Rotate at 155 knots and establish a positive climb rate.',
+    'Retract the gear, then clean up the aircraft above acceleration altitude.',
+  ]
+  if (state.mission.goAroundRequired) return [
+    'Initiate the go-around and command a positive climb.',
+    'Capture the climb-ahead point, then follow the outbound course reversal and final.',
+  ]
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'requested') return [
       `ATC is evaluating the ${routePlanLabels[state.atc.requestedPlan ?? 'unassigned'].toLowerCase()} request.`,
@@ -169,13 +177,6 @@ function derivePlan(state: FlightState): readonly string[] {
     ]
   }
 
-  if (state.mission.routeStatus === 'stalled') {
-    return [
-      'Rebuild the active leg with a direct intercept or wider pattern.',
-      'Resume route guidance after the new checkpoint is loaded.',
-    ]
-  }
-
   if (!state.procedure.compliant) {
     return [
       state.procedure.instruction,
@@ -200,16 +201,14 @@ function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') {
     return `Accelerating on Lambert runway 12R. At ${DREAMLINER_787_9_ENVELOPE.rotateSpeedKt} knots, rotate toward ${DREAMLINER_787_9_ENVELOPE.initialClimbPitchDeg}°.`
   }
-  if (state.approval.status === 'pending') {
-    return `Maintaining ${Math.round(state.headingDeg).toString().padStart(3, '0')}° while you decide.`
-  }
+  if (state.mission.goAroundRequired) return 'The approach is unsafe. Abandon the landing and climb.'
   if (state.checkride.status === 'armed') return 'Normal departure. Monitoring the aircraft and surrounding conditions.'
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'requested') return 'Diversion requested. Holding while ATC prepares the clearance.'
     if (state.atc.status === 'cleared') return `ATC clearance ${state.atc.clearance?.id ?? ''} is awaiting readback.`
     return 'Assessing the emergency before requesting a diversion clearance.'
   }
-  if (state.mission.routeStatus === 'stalled') return 'Route progress stalled. Waiting for a leg rebuild.'
+  if (state.mission.routeStatus === 'stalled') return 'ATC issued fresh vectors. Following the updated next fix.'
   if (state.controlOwner === 'human' && state.route.plan === 'return_kstl') {
     const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
     return waypoint
@@ -225,15 +224,15 @@ function deriveAction(state: FlightState): string {
 }
 
 function deriveHeadline(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return 'Preflight route required'
+  if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Preflight route required' : 'Ready for takeoff'
   if (state.mission.phase === 'takeoff') return 'Departing Lambert runway 12R'
+  if (state.mission.goAroundRequired) return 'Go around'
   if (state.checkride.status === 'armed') return 'Normal departure'
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'requested') return 'Waiting for ATC clearance'
     if (state.atc.status === 'cleared') return 'ATC clearance received'
     return 'Diversion decision required'
   }
-  if (state.approval.status === 'pending') return 'Holding for your decision'
   if (state.agentMode === 'requested' || state.agentMode === 'thinking') return 'Assessing the emergency'
   if (state.agentMode === 'flying') {
     return state.route.destination ? `Flying to ${state.route.destination}` : 'Managing the flight'
@@ -345,14 +344,6 @@ export default function App() {
     }
   }, [])
 
-  const resolveApproval = useCallback((approved: boolean) => {
-    flightSimulator.resolveHumanApproval(
-      approved,
-      'human',
-      approved ? 'Pilot approved the requested action' : 'Pilot declined the requested action',
-    )
-  }, [])
-
   const resetScenario = useCallback(() => {
     flightSimulator.reset()
     clearWebMcpActivities()
@@ -401,13 +392,17 @@ export default function App() {
     )
   }, [])
 
+  const initiateHumanGoAround = useCallback(() => {
+    flightSimulator.initiateGoAround('Pilot initiated a go-around after the approach became unsafe.', 'human')
+  }, [])
+
   useEffect(() => {
     if (state.mission.phase !== 'preflight') setShowTakeoffBrief(false)
   }, [state.mission.phase])
 
   useEffect(() => {
-    persistEvaluationEvidence(activities, state)
-  }, [activities, state.checkride.runId, state.debrief.status])
+    if (state.controlOwner === 'agent') setShowTakeoffBrief(false)
+  }, [state.controlOwner])
 
   useEffect(() => {
     const heldFlightKeys = new Set<string>()
@@ -495,17 +490,26 @@ export default function App() {
         ? `Runway ${state.route.runway}`
         : routePlanLabels[state.route.plan]
   const missionElapsedSeconds = state.elapsedSeconds / state.checkride.simulationRate
-  const missionSecondsRemaining = state.checkride.wallClockDeadlineSeconds - missionElapsedSeconds
-  const missionOvertime = missionSecondsRemaining < 0
+  const missionSecondsRemaining = state.checkride.wallClockSecondsRemaining ?? state.checkride.wallClockDeadlineSeconds
+  const missionOvertime = state.mission.outcome === 'timed_out'
   const lastDeduction = state.checkride.score.deductions.at(-1)
   const windDirection = state.scenario.weather.windDirectionDeg.toString().padStart(3, '0')
   const longitudinalWind = state.motion.headwindKt >= 0
     ? `${Math.round(state.motion.headwindKt)} kt headwind`
     : `${Math.round(Math.abs(state.motion.headwindKt))} kt tailwind`
   const windTitle = `Wind from ${windDirection}° at ${state.scenario.weather.windSpeedKt} kt · ${longitudinalWind} · ${Math.round(Math.abs(state.motion.crosswindKt))} kt crosswind${state.motion.turbulenceLevel === 'none' ? '' : ` · ${state.motion.turbulenceLevel} turbulence`}`
-  const crewActions = state.controlOwner !== 'human' || state.checkride.status !== 'decision_required'
+  const crewActions = state.controlOwner !== 'human'
     ? []
-    : state.atc.status === 'none'
+    : state.mission.goAroundRequired
+      ? [{
+          id: 'go-around',
+          label: 'Go around',
+          description: 'Abandon this approach, climb ahead, and receive a new outbound course reversal and final.',
+          onSelect: initiateHumanGoAround,
+        }]
+      : state.checkride.status !== 'decision_required'
+        ? []
+        : state.atc.status === 'none'
       ? [
           {
             id: 'return-kstl',
@@ -528,7 +532,7 @@ export default function App() {
             onSelect: acceptHumanClearance,
           }]
         : []
-  const crewActionStatus = state.controlOwner !== 'human' || state.checkride.status !== 'decision_required'
+  const crewActionStatus = state.controlOwner !== 'human' || state.mission.goAroundRequired || state.checkride.status !== 'decision_required'
     ? null
     : state.atc.status === 'requested'
       ? 'Diversion requested. Maintain control while ATC prepares the clearance.'
@@ -726,22 +730,9 @@ export default function App() {
         action={deriveAction(state)}
         crewActions={crewActions}
         crewActionStatus={crewActionStatus}
-        approvalPending={state.approval.status === 'pending'}
-        approvalPrompt={state.approval.question ?? 'Approve the copilot’s requested action?'}
         debrief={deriveDebrief(state)}
-        webMcpCalls={activities.filter((activity) => activity.status !== 'running').map((activity) => ({
-          tool: activity.tool,
-          arguments: activity.arguments,
-          radio: activity.radioCues.map((cue) => ({
-            id: cue.id,
-            speaker: cue.speaker,
-            text: cue.text,
-            priority: cue.priority,
-            audioClip: radioVoiceClipFor(cue)?.key ?? null,
-          })),
-        }))}
         webMcpActivities={activities}
-        trajectory={state.debrief.status === 'in_progress' ? null : createFlightTrajectory(activities, state)}
+        runExport={state.debrief.status === 'in_progress' ? null : createFlightRunExport(activities, state, flightSimulator.getMissionBrief(), flightSimulator.getTrace())}
         diagnostics={{
           world: worldStatus.message,
           webMcp: webMcpLabels[webMcpStatus],
@@ -751,8 +742,6 @@ export default function App() {
           profileId: state.checkride.profileId,
           recentTools: activities.slice(-4).reverse().map((activity) => `${activity.title} · ${activity.status}`),
         }}
-        onApprove={() => resolveApproval(true)}
-        onDeny={() => resolveApproval(false)}
         onReset={resetScenario}
       />
     </main>

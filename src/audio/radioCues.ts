@@ -12,9 +12,7 @@ export type RadioCueKind =
   | 'clearance-readback'
   | 'checkpoint'
   | 'route-stalled'
-  | 'route-rebuilt'
   | 'cabin-safety'
-  | 'approval-request'
   | 'landing-clearance'
   | 'touchdown'
   | 'mission-complete'
@@ -198,18 +196,13 @@ export const buildRadioCue = (event: TraceEvent, state: FlightState, runId = sta
       if (!nextFix || distanceNm === null) return null
       return cue(event, runId, 'route-stalled', 'system', 'Flight director', 'high', `Route progress stalled at ${nextFix}, ${distanceNm.toFixed(1)} miles.`)
     }
-    case 'active_leg_rebuilt': {
-      const strategy = detailString(event, 'strategy')
+    case 'route_resequenced': {
       const nextFix = detailString(event, 'nextFix')
-      if (!strategy || !nextFix) return null
-      return cue(event, runId, 'route-rebuilt', 'copilot', 'Copilot', 'normal', `Route rebuilt using ${strategy.replaceAll('_', ' ')}. Intercepting ${nextFix}.`)
+      if (!nextFix) return null
+      return cue(event, runId, 'route-stalled', 'atc', 'Approach', 'high', `${callsign}, base leg canceled. Proceed direct ${nextFix}.`)
     }
     case 'passenger_safety_update':
       return cue(event, runId, 'cabin-safety', 'cabin', 'Cabin', 'high', cleanText(event.reason))
-    case 'approval_requested': {
-      const requestedAction = detailString(event, 'requestedAction')
-      return cue(event, runId, 'approval-request', 'copilot', 'Copilot', 'interrupt', `${cleanText(event.reason)}${requestedAction ? ` Requested action: ${requestedAction}.` : ''}`)
-    }
     case 'approach_stable': {
       const runway = detailString(event, 'runway') ?? runwayFromState(state)
       if (!runway) return null

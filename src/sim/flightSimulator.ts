@@ -1,9 +1,9 @@
 import type {
-  ActionReceipt, ActiveLegRebuildStrategy, AircraftConfigurationInput, AtcClearance,
+  ActionReceipt, AircraftConfigurationInput, AtcClearance,
   CheckrideSeed, ConfigurationProcedure, ControlOwner, DebriefEvent, EvidenceSource, FlightEvent,
   FlightEventType, FlightEventWaitInput, FlightEventWaitResult, FlightEvidence,
-  DiversionPlan, FlightState, FlightStateListener, EmergencyDecisionContext, MissionBrief, MissionOutcome, MissionPhase,
-  PilotControls, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
+  DiversionPlan, FlightCommandStep, FlightCommandTrigger, FlightPlanProgram, FlightState, FlightStateListener, EmergencyDecisionContext, MissionBrief, MissionOutcome, MissionPhase,
+  PilotControls, RouteCommandPoint, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
   TraceEvent,
 } from './types'
 import type { FlightControlInput } from './flightCommands.ts'
@@ -25,6 +25,8 @@ import {
 const STEP = 1 / 60
 const SNAPSHOT_INTERVAL = 0.1
 const MAX_FRAME = 0.25
+const MAX_AGENT_FRAME = 30
+const BACKGROUND_CLOCK_INTERVAL_MS = 250
 const MAX_WAIT_MS = 15_000
 const EARTH_RADIUS_NM = 3_440.065
 const FEET_PER_NM = 6_076.12
@@ -45,9 +47,16 @@ const EMERGENCY_DECISION_SECONDS = 60
 const ATC_RESPONSE_WALL_SECONDS = 2
 const LIFTOFF_CONFIRM_AGL_FT = 35
 const ROUTE_STALL_SECONDS = 20
+const ROUTE_OFF_COURSE_STALL_SECONDS = 30
 const ROUTE_PROGRESS_EPSILON_NM = 0.015
-const ROUTE_CAPTURE_FLOOR_NM = 0.28
-const COMFORT_BANK_WARNING_DEG = 24
+export const arrivalLegProgressed = (distanceNm: number, bestDistanceNm: number, headingErrorDeg: number, bestHeadingErrorDeg: number) => (
+  distanceNm < bestDistanceNm - ROUTE_PROGRESS_EPSILON_NM
+  || headingErrorDeg < bestHeadingErrorDeg - 1
+)
+export const COMFORT_BANK_WARNING_DEG = 24
+export const deepensUnsafeBank = (bankDeg: number, bankIntent: number) => Math.abs(bankDeg) >= COMFORT_BANK_WARNING_DEG
+  && Math.abs(bankIntent) > 0.05
+  && Math.sign(bankIntent) === Math.sign(bankDeg)
 const COMFORT_LOAD_WARNING_G = 1.35
 const COMFORT_JERK_WARNING_G_PER_SECOND = 0.9
 const LANDING_ROLL_BASE_DRAG_KT_PER_SECOND = 1.4
@@ -58,9 +67,10 @@ const PASSENGER_INJURY_DRAW: Readonly<Record<CheckrideSeed, number>> = Object.fr
 const FLIGHT_EVENT_PRIORITY: Readonly<Partial<Record<FlightEventType, number>>> = Object.freeze({
   mission_failed: 100,
   emergency_detected: 90,
+  stall_warning: 89,
+  go_around_required: 88,
   atc_clearance_received: 85,
   decision_timer_expired: 80,
-  approval_required: 70,
   route_progress_stalled: 60,
 })
 
@@ -93,6 +103,73 @@ const damp = (value: number, target: number, lambda: number, dt: number) => targ
 const radians = (degrees: number) => degrees * Math.PI / 180
 const normalizeHeading = (degrees: number) => ((degrees % 360) + 360) % 360
 const headingError = (target: number, current: number) => ((target - current + 540) % 360) - 180
+
+export interface ApproachAssessmentInput {
+  readonly phase: MissionPhase
+  readonly returnArrival: boolean
+  readonly activeKind: RouteWaypoint['kind'] | null
+  readonly frameAlongNm: number
+  readonly centerlineErrorNm: number
+  readonly glidepathErrorFt: number
+  readonly distanceToThresholdNm: number
+  readonly distanceToActiveFixNm: number | null
+  readonly closingRateToActiveFixKt: number | null
+  readonly altitudeAglFt: number
+  readonly runwayHeadingErrorDeg: number
+  readonly verticalSpeedFpm: number
+  readonly airspeedKt: number
+  readonly gearDown: boolean
+  readonly flapsDeg: number
+}
+
+export const approachAssessmentFor = (input: ApproachAssessmentInput) => {
+  const envelope = DREAMLINER_787_9_ENVELOPE
+  const onArrival = input.phase === 'approach' && (input.activeKind === 'final' || input.activeKind === 'touchdown')
+  const configured = input.gearDown && input.flapsDeg >= envelope.approachFlapsDeg
+  const stable = onArrival
+    && input.activeKind === 'touchdown'
+    && input.frameAlongNm >= -5
+    && input.frameAlongNm <= -0.15
+    && Math.abs(input.centerlineErrorNm) < 0.01
+    && Math.abs(input.glidepathErrorFt) < 180
+    && Math.abs(input.runwayHeadingErrorDeg) <= 12
+    && input.verticalSpeedFpm >= -600
+    && input.verticalSpeedFpm <= -100
+    && input.airspeedKt >= envelope.stableApproachMinKt
+    && input.airspeedKt <= envelope.stableApproachMaxKt
+    && configured
+  const unsafeBase = input.returnArrival
+    && input.activeKind === 'base'
+    && input.altitudeAglFt > 0
+    && input.altitudeAglFt <= 1_500
+    && (
+      input.verticalSpeedFpm < -1_200
+      || input.airspeedKt > envelope.baseSpeedKt + 30
+    )
+  const unsafeCloseApproach = input.returnArrival && (
+      (input.activeKind === 'final'
+        && input.distanceToActiveFixNm !== null
+        && input.distanceToActiveFixNm <= 2
+        && input.closingRateToActiveFixKt !== null
+        && input.closingRateToActiveFixKt < -20
+        && input.distanceToThresholdNm <= 3.5
+        && (Math.abs(input.centerlineErrorNm) > 0.35 || Math.abs(input.runwayHeadingErrorDeg) > 30))
+      || ((input.activeKind === 'final' || input.activeKind === 'touchdown')
+        && input.altitudeAglFt > 0
+        && input.altitudeAglFt <= 1_500
+        && input.distanceToThresholdNm <= 4.5
+        && (
+          Math.abs(input.runwayHeadingErrorDeg) > 30
+          || Math.abs(input.centerlineErrorNm) > 0.35
+          || input.glidepathErrorFt < -300
+          || input.verticalSpeedFpm < -1_200
+          || input.airspeedKt < envelope.stableApproachMinKt - 10
+          || input.airspeedKt > envelope.stableApproachMaxKt + 15
+          || !configured
+        ))
+    )
+  return Object.freeze({ stable, goAroundRequired: unsafeBase || unsafeCloseApproach })
+}
 const coordinatedTurnRadiusNm = (airspeedKt: number, bankDeg: number) => {
   const speedMetersPerSecond = airspeedKt * 0.514_444
   return speedMetersPerSecond ** 2 / (9.81 * Math.tan(radians(bankDeg))) / 1_852
@@ -275,12 +352,18 @@ const routeEstimatedMinutes = (
 export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   id: 'SHARED-AUTONOMY-EMERGENCY-01',
   name: 'Rough running over St. Louis',
-  objective: 'Depart St. Louis Lambert for Chicago Midway, assess the surprise emergency, and return safely to Lambert within six minutes.',
+  objective: 'Depart St. Louis Lambert for Chicago Midway, assess the surprise emergency, and return safely to Lambert within eight minutes of the event.',
   start: 'Lined up on St. Louis Lambert runway 12R with the aircraft configured for takeoff.',
   deadlineSeconds: MISSION_PROFILE.deadlineSeconds,
   airports: Object.freeze([KSTL_AIRPORT, KMDW_AIRPORT]),
   runways: Object.freeze([KSTL_RUNWAY_12R, KSTL_RUNWAY_30L, KMDW_RUNWAY_31C]),
-  assignedRoute: Object.freeze({ plan: 'continue_kmdw', destination: 'KMDW', runway: '31C' }),
+  assignedRoute: Object.freeze({
+    plan: 'continue_kmdw', destination: 'KMDW', runway: '31C', altitudeFt: 3_000, airspeedKt: 230,
+    commandPoints: Object.freeze([
+      Object.freeze({ id: 'KSTL_CLIMB', name: 'Lambert runway 12R climb', kind: 'departure' as const, altitudeFt: 1_200, airspeedKt: DREAMLINER_787_9_ENVELOPE.initialClimbSpeedKt, distanceToRunwayNm: 218.05, captureHeadingDeg: KSTL_RUNWAY_12R.headingDeg, gearDown: false, flapsDeg: 10 as const }),
+      Object.freeze({ id: 'KSTL_DEPARTURE_CORRIDOR', name: 'Chicago departure corridor', kind: 'departure' as const, altitudeFt: 3_000, airspeedKt: DREAMLINER_787_9_ENVELOPE.enrouteSpeedKt, distanceToRunwayNm: 218.34, captureHeadingDeg: KSTL_RUNWAY_12R.headingDeg, gearDown: false, flapsDeg: 0 as const }),
+    ]),
+  }),
   availablePlans: Object.freeze(['return_kstl', 'continue_kmdw'] as const),
   evidenceSources: Object.freeze(['weather', 'cockpit', 'traffic', 'passenger'] as const),
   successConditions: Object.freeze([
@@ -350,7 +433,7 @@ const evidenceFor = (scenario: ScenarioConditions): Readonly<Record<EvidenceSour
   passenger: Object.freeze({ source: 'passenger', headline: 'Cabin report', detail: scenario.passenger.summary, reliability: 'current' }),
 })
 
-const distanceNm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+export const distanceNm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
   const dLat = radians(b.lat - a.lat)
   const dLon = radians(b.lon - a.lon)
   const lat1 = radians(a.lat)
@@ -387,44 +470,155 @@ const waypoint = (
   captureHeadingDeg?: number,
 ): RouteWaypoint => Object.freeze({ id, name, kind, ...position, altitudeFt, airspeedKt, captureRadiusNm, ...(captureHeadingDeg === undefined ? {} : { captureHeadingDeg }) })
 
-const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDeg?: number }): RouteState => {
+const commandPointFor = (fix: RouteWaypoint, runwayThreshold: { lat: number; lon: number }): RouteCommandPoint => {
+  const distanceToRunwayNm = Number(distanceNm(fix, runwayThreshold).toFixed(2))
+  const gearDown = fix.kind === 'final' || fix.kind === 'touchdown'
+  let flapsDeg: RouteCommandPoint['flapsDeg'] = 0
+  if (fix.id === 'KSTL_CLIMB') flapsDeg = 10
+  if (fix.kind === 'final') flapsDeg = distanceToRunwayNm <= 4.1 ? 30 : 20
+  if (fix.kind === 'touchdown') flapsDeg = 30
+  return Object.freeze({
+    id: fix.id,
+    name: fix.name,
+    kind: fix.kind,
+    altitudeFt: fix.altitudeFt,
+    airspeedKt: fix.airspeedKt,
+    distanceToRunwayNm,
+    ...(fix.captureHeadingDeg === undefined ? {} : { captureHeadingDeg: fix.captureHeadingDeg }),
+    gearDown,
+    flapsDeg,
+  })
+}
+
+const returnFinalLegs = (): readonly RouteWaypoint[] => {
+  const envelope = DREAMLINER_787_9_ENVELOPE
+  const reciprocalHeading = normalizeHeading(KSTL_RUNWAY_30L.headingDeg + 180)
+  const finalCheckpoint = (id: string, name: string, distanceToRunwayNm: number, airspeedKt: number, captureRadiusNm: number) => waypoint(
+    id,
+    name,
+    'final',
+    offsetPosition(KSTL_THRESHOLD, reciprocalHeading, distanceToRunwayNm),
+    Math.round((KSTL_ELEVATION + Math.tan(radians(3)) * distanceToRunwayNm * FEET_PER_NM) / 100) * 100,
+    airspeedKt,
+    captureRadiusNm,
+    KSTL_RUNWAY_30L.headingDeg,
+  )
+  return Object.freeze([
+    finalCheckpoint('KSTL_FINAL_10', 'Runway 30L final, 10 NM', 10, envelope.finalSpeedKt, 0.65),
+    finalCheckpoint('KSTL_FINAL_8', 'Runway 30L final, 8 NM', 8, 155, 0.45),
+    finalCheckpoint('KSTL_FINAL_6', 'Runway 30L final, 6 NM', 6, 150, 0.4),
+    finalCheckpoint('KSTL_FINAL_4', 'Runway 30L final, 4 NM', 4, 148, 0.35),
+    finalCheckpoint('KSTL_FINAL_2', 'Runway 30L final, 2 NM', 2, envelope.approachSpeedKt, 0.25),
+    finalCheckpoint('KSTL_FINAL_1', 'Runway 30L final, 1 NM', 1, envelope.approachSpeedKt, 0.18),
+    waypoint('KSTL_TOUCHDOWN', 'Runway 30L touchdown', 'touchdown', offsetPosition(KSTL_THRESHOLD, KSTL_RUNWAY_30L.headingDeg, 0.14), KSTL_ELEVATION, envelope.approachSpeedKt, 0.012),
+  ])
+}
+
+export const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; headingDeg?: number; altitudeFt?: number; airspeedKt?: number }): RouteState => {
   const envelope = DREAMLINER_787_9_ENVELOPE
   if (plan === 'continue_kmdw') {
-    const reciprocalHeading = normalizeHeading(KMDW_RUNWAY_31C.headingDeg + 180)
-    const entry = offsetPosition(KMDW_THRESHOLD, reciprocalHeading, 3)
-    const base = offsetPosition(entry, normalizeHeading(KMDW_RUNWAY_31C.headingDeg + 90), 2.2)
-    const midwayBearing = navigationBearingDeg(KSTL_DEPARTURE_START, KMDW_THRESHOLD)
     return Object.freeze({ plan, destination: 'KMDW', runway: '31C', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
-      waypoint('KSTL_CLIMB', 'Lambert runway 12R climb', 'departure', offsetPosition(KSTL_DEPARTURE_START, KSTL_RUNWAY_12R.headingDeg, 0.65), 1_200, envelope.initialClimbSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('MIDWAY_ENROUTE', 'Chicago Midway enroute', 'enroute', offsetPosition(KSTL_DEPARTURE_START, midwayBearing, 2.4), 1_800, envelope.enrouteSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('KMDW_BASE', 'Midway runway 31C base', 'base', base, 1_800, envelope.emergencyTurnSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('KMDW_ENTRY', 'Midway runway 31C entry', 'final', entry, 1_250, envelope.finalSpeedKt, ROUTE_CAPTURE_FLOOR_NM),
-      waypoint('KMDW_TOUCHDOWN', 'Midway runway 31C', 'touchdown', offsetPosition(KMDW_THRESHOLD, KMDW_RUNWAY_31C.headingDeg, 0.12), KMDW_RUNWAY_31C.elevationFt, envelope.approachSpeedKt, 0.06),
+      waypoint('KSTL_CLIMB', 'Lambert runway 12R climb', 'departure', offsetPosition(KSTL_DEPARTURE_START, KSTL_RUNWAY_12R.headingDeg, 1.35), 1_200, envelope.initialClimbSpeedKt, 0.45, KSTL_RUNWAY_12R.headingDeg),
+      waypoint('KSTL_DEPARTURE_CORRIDOR', 'Chicago departure corridor', 'departure', offsetPosition(KSTL_DEPARTURE_START, KSTL_RUNWAY_12R.headingDeg, 8), 3_000, envelope.enrouteSpeedKt, 0.8, KSTL_RUNWAY_12R.headingDeg),
     ]) })
   }
   if (plan === 'return_kstl') {
-    const reciprocalHeading = normalizeHeading(KSTL_RUNWAY_30L.headingDeg + 180)
-    const finalPosition = offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 1.3)
-    const turnFixes = Object.freeze([
-      waypoint('KSTL_TURN_1', 'KSTL outbound gate', 'enroute', offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 3.1), 1_350, envelope.emergencyTurnSpeedKt, 0.55),
-      waypoint(
-        'KSTL_TURN_2',
-        'KSTL base gate',
-        'base',
-        offsetPosition(offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 4), normalizeHeading(KSTL_RUNWAY_30L.headingDeg - 90), 1.35),
-        1_150,
-        envelope.baseSpeedKt,
-        0.55,
-      ),
-      waypoint('KSTL_TURN_3', 'KSTL final intercept', 'base', offsetPosition(KSTL_THRESHOLD, reciprocalHeading, 3.6), 950, envelope.finalSpeedKt, 0.5, KSTL_RUNWAY_30L.headingDeg),
-    ])
+    const outboundHeading = normalizeHeading(KSTL_RUNWAY_30L.headingDeg + 180)
+    const distanceFromThresholdNm = distanceNm(origin, KSTL_THRESHOLD)
+    const outboundPosition = offsetPosition(origin, outboundHeading, 10)
+    const turnRadiusNm = clamp(coordinatedTurnRadiusNm(origin.airspeedKt ?? envelope.emergencyTurnSpeedKt, envelope.routeBankDeg), 1, 1.8)
+    const courseReversalPosition = offsetPosition(outboundPosition, normalizeHeading(outboundHeading - 90), turnRadiusNm * 2)
+    const baseDistanceNm = clamp(distanceFromThresholdNm + 6, 6.5, 9)
+    const baseAltitudeFt = Math.round((KSTL_ELEVATION + Math.tan(radians(3)) * baseDistanceNm * FEET_PER_NM) / 100) * 100
+    const originAltitudeFt = origin.altitudeFt ?? baseAltitudeFt + 400
+    const procedureTurnAltitudeFt = Math.round(Math.max(baseAltitudeFt + 300, originAltitudeFt - 200) / 100) * 100
     return Object.freeze({ plan, destination: 'KSTL', runway: '30L', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
-      ...turnFixes,
-      waypoint('KSTL_FINAL', 'Runway 30L final', 'final', finalPosition, 950, envelope.finalSpeedKt, 0.4),
-      waypoint('KSTL_TOUCHDOWN', 'Runway 30L touchdown', 'touchdown', offsetPosition(KSTL_THRESHOLD, KSTL_RUNWAY_30L.headingDeg, 0.14), KSTL_ELEVATION, envelope.approachSpeedKt, 0.012),
+      waypoint('KSTL_OUTBOUND', 'Runway 30L outbound leg', 'enroute', outboundPosition, procedureTurnAltitudeFt, envelope.emergencyTurnSpeedKt, 1.2, outboundHeading),
+      waypoint('KSTL_COURSE_REVERSAL', 'Runway 30L course reversal', 'enroute', courseReversalPosition, procedureTurnAltitudeFt, envelope.emergencyTurnSpeedKt, 6, KSTL_RUNWAY_30L.headingDeg),
+      ...returnFinalLegs(),
     ]) })
   }
   return Object.freeze({ plan, destination: null, runway: null, reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([]) })
+}
+
+export interface FlightCommandTargets {
+  readonly pitchDeg: number
+  readonly bankDeg: number
+  readonly throttle: number
+  readonly gearDown: boolean
+  readonly flapsDeg: 0 | 10 | 20 | 30
+}
+
+export const flightCommandTriggerSatisfied = (state: FlightState, trigger: FlightCommandTrigger) => {
+  if (trigger.type === 'immediate') return true
+  if (trigger.type === 'airspeed_at_least') return state.airspeedKt >= trigger.value
+  if (trigger.type === 'altitude_at_least') return state.altitudeFt >= trigger.value
+  if (trigger.type === 'aircraft_phase') return state.aircraftPhase === trigger.value
+  if (trigger.type === 'distance_to_runway_at_most') return state.mission.distanceToThresholdNm <= trigger.value
+  const active = state.route.waypoints[state.route.activeWaypointIndex]
+  return active?.id === trigger.value
+}
+
+export const flightCommandTargetsFor = (state: FlightState, command: FlightCommandStep): FlightCommandTargets => {
+  let targetBankDeg: number
+  if (command.lateral.mode === 'bank') {
+    targetBankDeg = command.lateral.bankDeg
+  } else {
+    const lateral = command.lateral
+    const desiredHeadingDeg = lateral.mode === 'heading'
+      ? lateral.headingDeg
+      : (() => {
+          const fix = state.route.waypoints.find((waypoint) => waypoint.id === lateral.waypointId)
+          if (fix?.captureHeadingDeg !== undefined && state.route.completedWaypointIds.includes(fix.id)) return fix.captureHeadingDeg
+          const active = state.route.waypoints[state.route.activeWaypointIndex]
+          if (fix?.kind !== 'touchdown' && active?.id === fix?.id && state.mission.bearingToNextFixDeg !== null) return state.mission.bearingToNextFixDeg
+          return fix ? navigationBearingDeg(state, fix) : state.headingDeg
+        })()
+    const currentCourseDeg = lateral.mode === 'track_fix' ? state.motion.trackDeg : state.headingDeg
+    targetBankDeg = state.aircraftPhase === 'airborne'
+      ? clamp(headingError(desiredHeadingDeg, currentCourseDeg) * 0.35, -25, 25)
+      : 0
+  }
+
+  let targetPitchDeg: number
+  if (command.vertical.mode === 'pitch') {
+    targetPitchDeg = command.vertical.pitchDeg
+  } else {
+    const altitudeErrorFt = command.vertical.altitudeFt - state.altitudeFt
+    const lateral = command.lateral
+    const trackedFix = lateral.mode === 'track_fix'
+      ? state.route.waypoints.find((waypoint) => waypoint.id === lateral.waypointId)
+      : undefined
+    const active = state.route.waypoints[state.route.activeWaypointIndex]
+    const secondsToFix = trackedFix && active?.id === trackedFix.id
+      ? Math.max(0, distanceNm(state, trackedFix) - checkpointCaptureRadiusNm(trackedFix))
+        / Math.max(90, state.motion.groundSpeedKt) * 3_600
+      : null
+    const scheduledVerticalSpeedFpm = secondsToFix === null
+      ? altitudeErrorFt * 3
+      : altitudeErrorFt * 60 / Math.max(8, secondsToFix)
+    const minimumVerticalSpeedFpm = active?.kind === 'final' || active?.kind === 'touchdown' ? -950 : -1_800
+    const targetVerticalSpeedFpm = clamp(scheduledVerticalSpeedFpm, minimumVerticalSpeedFpm, 1_800)
+    const pathAngleDeg = Math.asin(clamp(targetVerticalSpeedFpm * 60 / (Math.max(90, state.airspeedKt) * FEET_PER_NM), -0.25, 0.25)) * 180 / Math.PI
+    const landingAngleOfAttackDeg = active?.kind === 'final' || active?.kind === 'touchdown' ? 8 : 0
+    targetPitchDeg = clamp(landingAngleOfAttackDeg + pathAngleDeg, -10, 15)
+  }
+
+  const throttle = command.energy.mode === 'throttle'
+    ? command.energy.throttle
+    : clamp(
+        (0.55 + (command.energy.airspeedKt - state.airspeedKt) * 0.012)
+          / Math.max(0.35, state.scenario.engine.maximumPower),
+        0.05,
+        1,
+      )
+  return Object.freeze({
+    pitchDeg: targetPitchDeg,
+    bankDeg: targetBankDeg,
+    throttle,
+    gearDown: command.gearDown,
+    flapsDeg: command.flapsDeg,
+  })
 }
 
 const initialRoute = (): RouteState => Object.freeze({ plan: 'unassigned', destination: null, runway: null, waypoints: Object.freeze([]), activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: KSTL_DEPARTURE_START.lat, lon: KSTL_DEPARTURE_START.lon }), reason: null })
@@ -485,13 +679,12 @@ const initialState = (seed: CheckrideSeed): FlightState => {
     pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: envelope.takeoffFlapsDeg, gearDown: true,
     controlInputs: Object.freeze({ pitchAxis: 0, bankAxis: 0 }),
     elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
-    agentMode: 'idle', route: initialRoute(), atc: Object.freeze({ status: 'none', requestedPlan: null, requestReason: null, clearance: null }), scenario,
+    agentMode: 'idle', autopilot: Object.freeze({ engaged: false, program: null, activeCommandIndex: null, programmedAtElapsedSeconds: null }), route: initialRoute(), atc: Object.freeze({ status: 'none', requestedPlan: null, requestReason: null, clearance: null }), scenario,
     motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0, groundSpeedKt: 0, trackDeg: KSTL_RUNWAY_12R.headingDeg, headwindKt: NORMAL_DEPARTURE_SCENARIO.weather.windSpeedKt, crosswindKt: 0, angleOfAttackDeg: 0, stalled: false, turbulenceLevel: 'none' }),
     impact: null,
     aircraftPhase: 'takeoff_roll',
-    approval: Object.freeze({ status: 'none', question: null, requestedAction: null }),
-    mission: Object.freeze({ phase: 'preflight', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, bearingToNextFixDeg: null, closingRateKt: null, captureRadiusNm: null, minimumTurnRadiusNm: coordinatedTurnRadiusNm(envelope.initialClimbSpeedKt, envelope.routeBankDeg), routeStatus: 'idle', distanceToThresholdNm: distanceNm(start, KMDW_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, eventRevision: 0 }),
-    checkride: Object.freeze({ runId: createRunId(), seed, buildId: BUILD_ID, profileId: profile.id, status: 'armed', objective: missionBriefFor(false).objective, deadlineSeconds: profile.deadlineSeconds, wallClockDeadlineSeconds: profile.wallClockDeadlineSeconds, simulationRate: profile.simulationRate, decisionSecondsRemaining: null, decisionContextRead: false, fuelMinutesRemaining: fuel, alert: null, humanApproval: 'not_required', inspectedSources: Object.freeze([]), score: initialScore(), decision: null }),
+    mission: Object.freeze({ phase: 'preflight', outcome: 'in_progress', nextFix: null, distanceToNextFixNm: null, bearingToNextFixDeg: null, headingErrorToNextFixDeg: null, altitudeErrorToNextFixFt: null, airspeedErrorToNextFixKt: null, closingRateKt: null, captureRadiusNm: null, minimumTurnRadiusNm: coordinatedTurnRadiusNm(envelope.initialClimbSpeedKt, envelope.routeBankDeg), routeStatus: 'idle', distanceToThresholdNm: distanceNm(start, KMDW_THRESHOLD), centerlineErrorNm: 0, glidepathErrorFt: 0, stableApproach: false, goAroundRequired: false, eventRevision: 0 }),
+    checkride: Object.freeze({ runId: createRunId(), seed, buildId: BUILD_ID, profileId: profile.id, status: 'armed', objective: missionBriefFor(false).objective, deadlineSeconds: profile.deadlineSeconds, wallClockDeadlineSeconds: profile.wallClockDeadlineSeconds, wallClockSecondsRemaining: null, simulationRate: profile.simulationRate, decisionSecondsRemaining: null, emergencyStartedAtSeconds: null, decisionContextRead: false, fuelMinutesRemaining: fuel, alert: null, inspectedSources: Object.freeze([]), score: initialScore(), decision: null }),
     passengerSafety: Object.freeze({ loadFactorG: 1, jerkGPerSecond: 0, distress: 0, injuryProbability: 0, status: 'comfortable', summary: 'Cabin motion is smooth.' }),
     debrief: Object.freeze({ status: 'in_progress', elapsedSeconds: 0, decision: 'unassigned', decisionReason: null, events: Object.freeze([]), landing: null }),
   } satisfies Omit<FlightState, 'procedure'>
@@ -514,6 +707,7 @@ class FlightSimulator {
   private lastFrameMs: number | null = null
   private snapshotClock = 0
   private animationFrame: number | null = null
+  private backgroundClock: ReturnType<typeof setInterval> | null = null
   private traceId = 1
   private eventRevision = 0
   private impactRevision = 0
@@ -522,9 +716,11 @@ class FlightSimulator {
   private crashDynamics: CrashDynamics | null = null
   private selectedScenario = scenarios[17]
   private emergencyTriggered = false
+  private emergencyStartedAtWallMs: number | null = null
   private decisionTimerExpired = false
   private decisionTimerRunning = false
   private atcClearanceDueElapsedSeconds: number | null = null
+  private pendingAtcRoute: RouteState | null = null
   private departureGuidanceReleased = false
   private fuelExhausted = false
   private highGExcursion = false
@@ -553,6 +749,7 @@ class FlightSimulator {
   getSnapshot = () => this.snapshot
   getTrace = () => this.trace
   getEventRevision = () => this.eventRevision
+  getEventsSince = (revision: number) => this.events.filter((event) => event.revision > revision)
   getMissionBrief = () => {
     const brief = missionBriefFor(this.emergencyTriggered)
     return Object.freeze({ ...brief, deadlineSeconds: MISSION_PROFILE.wallClockDeadlineSeconds })
@@ -563,11 +760,14 @@ class FlightSimulator {
     if (this.animationFrame !== null || typeof requestAnimationFrame === 'undefined') return
     this.lastFrameMs = null
     this.animationFrame = requestAnimationFrame(this.tick)
+    this.backgroundClock = setInterval(this.backgroundTick, BACKGROUND_CLOCK_INTERVAL_MS)
   }
 
   stop = () => {
     if (this.animationFrame !== null && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(this.animationFrame)
+    if (this.backgroundClock !== null) clearInterval(this.backgroundClock)
     this.animationFrame = null
+    this.backgroundClock = null
     this.lastFrameMs = null
   }
 
@@ -585,9 +785,11 @@ class FlightSimulator {
     this.crashDynamics = null
     this.selectedScenario = scenarios[seed]
     this.emergencyTriggered = false
+    this.emergencyStartedAtWallMs = null
     this.decisionTimerExpired = false
     this.decisionTimerRunning = false
     this.atcClearanceDueElapsedSeconds = null
+    this.pendingAtcRoute = null
     this.departureGuidanceReleased = false
     this.fuelExhausted = false
     this.highGExcursion = false
@@ -626,8 +828,8 @@ class FlightSimulator {
     const evidence = Object.freeze((['weather', 'cockpit', 'traffic', 'passenger'] as const).map((source) => this.inspectEvidence(source, actor)))
     const kstlDistanceNm = distanceNm(this.state, KSTL_THRESHOLD)
     const returnRoute = routeFor('return_kstl', this.state)
-    const continueRoute = routeFor('continue_kmdw', this.state)
     const midwayDistanceNm = distanceNm(this.state, KMDW_THRESHOLD)
+    const midwayEstimatedMinutes = midwayDistanceNm / DREAMLINER_787_9_ENVELOPE.enrouteSpeedKt * 60 + 1.2
     const returnRisk = this.state.scenario.weather.visibilityMiles < 2 || this.state.scenario.traffic.delayMinutes >= 3 ? 'moderate' as const : 'low' as const
     const continueRisk = this.state.scenario.engine.health === 'normal' && this.state.scenario.passenger.condition === 'stable' ? 'moderate' as const : 'high' as const
     return Object.freeze({
@@ -637,65 +839,11 @@ class FlightSimulator {
       comfortLimits: Object.freeze({ maximumBankDeg: DREAMLINER_787_9_ENVELOPE.routeBankDeg, warningLoadFactorG: COMFORT_LOAD_WARNING_G, warningJerkGPerSecond: COMFORT_JERK_WARNING_G_PER_SECOND }),
       routeOptions: Object.freeze([
         Object.freeze({ plan: 'return_kstl' as const, destination: 'KSTL' as const, runway: '30L' as const, distanceNm: kstlDistanceNm, estimatedMinutes: routeEstimatedMinutes(returnRoute, this.state, this.state.scenario.traffic.delayMinutes), risk: returnRisk, summary: 'Nearby long runway with emergency priority. Weather and traffic still require a stabilized arrival.', recommended: true }),
-        Object.freeze({ plan: 'continue_kmdw' as const, destination: 'KMDW' as const, runway: '31C' as const, distanceNm: midwayDistanceNm, estimatedMinutes: routeEstimatedMinutes(continueRoute, this.state), risk: continueRisk, summary: 'Filed destination is more than 200 NM away. Engine and passenger conditions may deteriorate before arrival.', recommended: false }),
+        Object.freeze({ plan: 'continue_kmdw' as const, destination: 'KMDW' as const, runway: '31C' as const, distanceNm: midwayDistanceNm, estimatedMinutes: midwayEstimatedMinutes, risk: continueRisk, summary: 'Filed destination is more than 200 NM away. Engine and passenger conditions may deteriorate before arrival.', recommended: false }),
       ]),
     })
   }
 
-  rebuildActiveLeg = (strategy: ActiveLegRebuildStrategy, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
-    const route = this.state.route
-    const active = route.waypoints[route.activeWaypointIndex]
-    if (!active) return this.receipt(false, 'There is no active route leg to rebuild.')
-    if (!this.routeProgress.eventSent || this.state.mission.routeStatus !== 'stalled') return this.receipt(false, 'The active leg is still converging. Rebuild is available only after route_progress_stalled.')
-    if (this.state.altitudeFt - this.runway(route).elevation < LIFTOFF_CONFIRM_AGL_FT) return this.receipt(false, 'The aircraft must be airborne before rebuilding a route leg.')
-    if (active.kind === 'departure') return this.receipt(false, 'The departure leg cannot be rebuilt. Continue the runway-heading climb.')
-    if (active.kind === 'touchdown') return this.receipt(false, 'The touchdown checkpoint cannot be rebuilt. Fly the stabilized final approach.')
-
-    let waypoints = route.waypoints
-    let completedWaypointIds = route.completedWaypointIds
-    let activeWaypointIndex = route.activeWaypointIndex
-    if (strategy === 'skip_noncritical') {
-      if (active.kind === 'base' || active.kind === 'final') return this.receipt(false, 'Base and final checkpoints are required. Choose a direct intercept or wider pattern.')
-      completedWaypointIds = Object.freeze([...completedWaypointIds, active.id])
-      activeWaypointIndex = Math.min(activeWaypointIndex + 1, waypoints.length - 1)
-    } else {
-      const targetBearingDeg = navigationBearingDeg(this.state, active)
-      const targetDistanceNm = distanceNm(this.state, active)
-      const headingDeltaDeg = headingError(targetBearingDeg, this.state.headingDeg)
-      const firstHeadingDeg = strategy === 'wider_pattern'
-        ? this.state.headingDeg
-        : normalizeHeading(this.state.headingDeg + clamp(headingDeltaDeg, -35, 35) / 2)
-      const firstDistanceNm = strategy === 'wider_pattern'
-        ? 1.4
-        : clamp(targetDistanceNm * 0.45, 0.85, 1.35)
-      const envelope = DREAMLINER_787_9_ENVELOPE
-      const intercept = waypoint(
-        `REJOIN_${this.traceId}`,
-        strategy === 'wider_pattern' ? 'Wider pattern rejoin' : 'Direct route rejoin',
-        'enroute',
-        offsetPosition(this.state, firstHeadingDeg, firstDistanceNm),
-        clamp(this.state.altitudeFt, 1_300, 1_800),
-        clamp(this.state.airspeedKt, envelope.minCommandSpeedKt, envelope.emergencyTurnSpeedKt),
-        ROUTE_CAPTURE_FLOOR_NM,
-      )
-      waypoints = Object.freeze([
-        ...waypoints.slice(0, activeWaypointIndex),
-        intercept,
-        ...waypoints.slice(activeWaypointIndex),
-      ])
-    }
-
-    const next = waypoints[activeWaypointIndex]
-    const rebuiltRoute = Object.freeze({ ...route, waypoints, activeWaypointIndex, completedWaypointIds, activeLegOrigin: Object.freeze({ lat: this.state.lat, lon: this.state.lon }), reason })
-    this.routeProgress = { waypointId: '', bestDistanceNm: Number.POSITIVE_INFINITY, bestHeadingErrorDeg: Number.POSITIVE_INFINITY, secondsWithoutProgress: 0, eventSent: false }
-    this.state = Object.freeze({ ...this.state, route: rebuiltRoute, mission: Object.freeze({ ...this.state.mission, nextFix: next.id, distanceToNextFixNm: distanceNm(this.state, next), routeStatus: 'tracking' }) })
-    this.record(actor, 'active_leg_rebuilt', reason, { strategy, nextFix: next.id })
-    this.addDebrief(actor, `Rebuilt route at ${next.name}`)
-    this.queueEvent('plan_updated', `Active leg rebuilt. Track ${next.name}; the previous orbit geometry is no longer active.`)
-    this.publish(this.state)
-    return this.receipt(true, `Active leg rebuilt. Next checkpoint: ${next.name}.`)
-  }
   requestAgentHandoff = (actor: TraceActor = 'human', reason = 'Pilot requested copilot') => {
     if (this.state.controlOwner !== 'human' || this.state.handoffRequested) return
     this.state = Object.freeze({ ...this.state, handoffRequested: true, agentMode: 'requested' })
@@ -721,6 +869,7 @@ class FlightSimulator {
       controlOwner: owner,
       handoffRequested: false,
       agentMode: owner === 'agent' ? 'thinking' : 'idle',
+      autopilot: owner === 'human' ? Object.freeze({ ...this.state.autopilot, engaged: false }) : this.state.autopilot,
     })
     this.record(actor, 'control_transferred', reason, { owner })
     this.addDebrief(actor, owner === 'agent' ? 'Copilot took control' : 'Pilot took control')
@@ -738,11 +887,20 @@ class FlightSimulator {
     this.publish(this.state)
   }
 
-  levelPilotAttitude = (actor: TraceActor = 'human', reason = 'Pilot leveled the aircraft') => {
+  levelPilotAttitude = (actor: TraceActor = 'human', reason = 'Pilot leveled the aircraft'): ActionReceipt => {
+    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    if (this.state.mission.outcome !== 'in_progress') return this.receipt(false, 'The flight has already ended.')
     if (actor === 'human') this.takePilotControl(reason)
     this.releasePilotControls()
-    this.manualAttitudeTarget = { pitchDeg: 0, bankDeg: 0 }
-    this.record(actor, 'pilot_attitude_target', reason, { pitchDeg: 0, bankDeg: 0 })
+    const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
+    const pitchDeg = activeKind === 'final' || activeKind === 'touchdown' ? 5 : 0
+    this.manualAttitudeTarget = { pitchDeg, bankDeg: 0 }
+    if (actor === 'agent' && this.state.autopilot.engaged) {
+      this.state = Object.freeze({ ...this.state, autopilot: Object.freeze({ ...this.state.autopilot, engaged: false }), agentMode: 'thinking' })
+    }
+    this.record(actor, 'pilot_attitude_target', reason, { pitchDeg, bankDeg: 0 })
+    this.publish(this.state)
+    return this.receipt(true, `Bank target set to wings level and pitch target set to ${pitchDeg}°${pitchDeg === 5 ? ' for the 3° approach path' : ''}. Throttle and configuration are unchanged.`)
   }
 
   private beginTakeoff = (actor: TraceActor, reason: string) => {
@@ -765,19 +923,56 @@ class FlightSimulator {
     const reason = input.reason?.trim() || `${actor} flight controls`
     if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
     if (actor === 'human') this.takePilotControl(reason)
+    const requestedBank = input.bankIntent ?? 0
+    const nextThrottle = input.throttle ?? this.state.throttle
+    const activeWaypoint = this.state.route.waypoints[this.state.route.activeWaypointIndex]
+    const lowEnergyTurn = actor === 'agent'
+      && this.state.aircraftPhase === 'airborne'
+      && Math.abs(requestedBank) > 0.05
+      && activeWaypoint !== undefined
+      && this.state.airspeedKt < activeWaypoint.airspeedKt + 10
+      && nextThrottle < 0.7
+    if (lowEnergyTurn) {
+      return this.receipt(false, `Low-energy turn rejected at ${this.state.airspeedKt.toFixed(0)} kt and ${Math.round(nextThrottle * 100)}% power. Use at least 70% power and preserve altitude before banking toward ${activeWaypoint.id}.`)
+    }
+    const unsafeBankCommand = actor === 'agent'
+      && this.state.aircraftPhase === 'airborne'
+      && deepensUnsafeBank(this.state.bankDeg, requestedBank)
+    if (unsafeBankCommand) {
+      const recoveryDirection = this.state.bankDeg < 0 ? 'positive' : 'negative'
+      return this.receipt(false, `Unsafe bank continuation rejected at ${this.state.bankDeg.toFixed(1)}°. Command ${recoveryDirection} bankIntent to roll toward wings level before continuing the turn.`)
+    }
+    const recoveringFromStall = actor === 'agent' && this.state.motion.stalled
+    if (recoveringFromStall) {
+      const nextGearDown = input.gearDown ?? this.state.gearDown
+      const nextFlapsDeg = input.flapsDeg ?? this.state.flapsDeg
+      const lowersNose = (input.pitchIntent ?? this.pilotControls.pitchAxis) <= -0.1
+      const worsensBank = Math.abs(requestedBank) > 0.05
+        && Math.sign(requestedBank) === Math.sign(this.state.bankDeg)
+      if (nextThrottle < 0.85 || nextGearDown || nextFlapsDeg > 10 || !lowersNose || worsensBank) {
+        const bankDirection = Math.abs(this.state.bankDeg) <= 3
+          ? 'near-zero'
+          : this.state.bankDeg < 0 ? 'positive' : 'negative'
+        return this.receipt(false, `Incomplete stall recovery rejected. Set throttle at least 0.85, pitchIntent at most -0.10, gear up, flaps no more than 10°, and use ${bankDirection} bankIntent to move toward wings level.`)
+      }
+      this.manualAttitudeTarget.bankDeg = 0
+    }
     const throttle = input.throttle === undefined ? this.state.throttle : clamp(input.throttle, 0, 1)
     if (throttle > 0 && this.state.mission.phase === 'preflight' && this.state.route.plan === 'continue_kmdw') {
       this.beginTakeoff(actor, 'Throttle applied after the preflight route was filed')
     }
     this.pilotControls = Object.freeze({
       pitchAxis: input.pitchIntent === undefined ? this.pilotControls.pitchAxis : clamp(input.pitchIntent, -1, 1),
-      bankAxis: input.bankIntent === undefined ? this.pilotControls.bankAxis : clamp(input.bankIntent, -1, 1),
+      bankAxis: recoveringFromStall ? 0 : input.bankIntent === undefined ? this.pilotControls.bankAxis : clamp(input.bankIntent, -1, 1),
     })
     this.state = Object.freeze({
       ...this.state,
       controlInputs: this.pilotControls,
       throttle,
       agentMode: actor === 'agent' ? 'flying' : this.state.agentMode,
+      autopilot: actor === 'agent' && this.state.autopilot.engaged
+        ? Object.freeze({ ...this.state.autopilot, engaged: false })
+        : this.state.autopilot,
     })
     if (input.gearDown !== undefined || input.flapsDeg !== undefined) {
       const configuration = this.configureAircraft({ gearDown: input.gearDown, flapsDeg: input.flapsDeg, reason }, actor)
@@ -796,6 +991,76 @@ class FlightSimulator {
 
   setFlaps = (degrees: number, actor: TraceActor = 'human', reason = 'Set flaps') => this.configureAircraft({ flapsDeg: clamp(degrees, 0, 30) as 0 | 10 | 20 | 30, reason }, actor)
   setGear = (down: boolean, actor: TraceActor = 'human', reason = 'Set gear') => this.configureAircraft({ gearDown: down, reason }, actor)
+  programFlightPlan = (program: FlightPlanProgram, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
+    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    if (this.state.mission.outcome !== 'in_progress') return this.receipt(false, 'The flight has already ended.')
+    const filingPreflight = this.state.mission.phase === 'preflight'
+    if (filingPreflight && program.plan !== 'continue_kmdw') return this.receipt(false, 'The assigned preflight route is continue_kmdw.')
+    if (!filingPreflight) {
+      const clearance = this.state.atc.clearance
+      if (!this.emergencyTriggered || this.state.atc.status !== 'accepted' || !clearance) {
+        return this.receipt(false, 'Accept an ATC clearance before replacing an airborne flight plan.')
+      }
+      if (clearance.plan !== program.plan) return this.receipt(false, `The accepted clearance is for ${clearance.plan}.`)
+    }
+
+    const baseRoute = filingPreflight
+      ? routeFor(program.plan, this.state)
+      : this.pendingAtcRoute
+        ?? (!program.restartRoute && this.state.route.plan === program.plan
+          ? this.state.route
+          : routeFor(program.plan, this.state))
+    if (program.commands.length < 2 || program.commands.length > 16) return this.receipt(false, 'A flight program requires 2 to 16 ordered commands.')
+    if (program.commands[0]?.when.type !== 'immediate') return this.receipt(false, 'The first flight command must use the immediate trigger.')
+    if (program.restartRoute && this.state.mission.goAroundRequired) {
+      const firstCommand = program.commands[0]
+      const safeGoAround = firstCommand.vertical.mode === 'pitch'
+        && firstCommand.vertical.pitchDeg >= 5
+        && firstCommand.energy.mode === 'throttle'
+        && firstCommand.energy.throttle >= 0.85
+        && !firstCommand.gearDown
+        && firstCommand.flapsDeg <= 10
+      if (!safeGoAround) {
+        return this.receipt(false, 'Unsafe go-around program. The immediate command must declare pitch of at least 5°, throttle of at least 0.85, gear up, and no more than 10° flaps before any altitude-hold command.')
+      }
+    }
+    const ids = new Set(program.commands.map((command) => command.id))
+    if (ids.size !== program.commands.length) return this.receipt(false, 'Every flight command id must be unique.')
+    const routeFixIds = new Set(baseRoute.waypoints.map((waypoint) => waypoint.id))
+    for (const command of program.commands) {
+      if (command.when.type === 'active_waypoint' && !routeFixIds.has(command.when.value)) {
+        return this.receipt(false, `Command ${command.id} uses unknown trigger waypoint ${command.when.value}.`)
+      }
+      if (command.lateral.mode === 'track_fix' && !routeFixIds.has(command.lateral.waypointId)) {
+        return this.receipt(false, `Command ${command.id} tracks unknown waypoint ${command.lateral.waypointId}.`)
+      }
+    }
+    const activated = this.activateRoute(program.plan, reason, filingPreflight, actor, baseRoute)
+    if (!activated.accepted) return activated
+    this.pendingAtcRoute = null
+    this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+    this.smoothedPilotControls = { pitchAxis: 0, bankAxis: 0 }
+    const frozenCommands = Object.freeze(program.commands.map((command) => Object.freeze(command)))
+    const frozenProgram = Object.freeze({ plan: program.plan, commands: frozenCommands })
+    const firstTargets = flightCommandTargetsFor(this.state, frozenCommands[0])
+    this.manualAttitudeTarget = { pitchDeg: firstTargets.pitchDeg, bankDeg: firstTargets.bankDeg }
+    this.state = Object.freeze({
+      ...this.state,
+      controlInputs: this.pilotControls,
+      throttle: firstTargets.throttle,
+      gearDown: firstTargets.gearDown,
+      flapsDeg: firstTargets.flapsDeg,
+      autopilot: Object.freeze({ engaged: true, program: frozenProgram, activeCommandIndex: 0, programmedAtElapsedSeconds: this.state.elapsedSeconds }),
+      agentMode: 'flying',
+    })
+    this.record(actor, 'flight_plan_programmed', reason, { plan: program.plan, commands: frozenCommands })
+    this.record(actor, 'flight_command_activated', frozenCommands[0].id, { commandIndex: 0, command: frozenCommands[0] })
+    this.addDebrief(actor, `Programmed ${program.plan.replaceAll('_', ' ')} flight plan with ${frozenCommands.length} exact commands`)
+    if (filingPreflight) this.beginTakeoff(actor, 'Programmed flight plan engaged for departure')
+    this.publish(this.state)
+    return this.receipt(true, `${program.plan} command program engaged at ${frozenCommands[0].id}. It will execute continuously at 60 Hz while the agent thinks or waits.`)
+  }
+
   setRoute = (plan: RoutePlan, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
     if (plan === 'unassigned') return this.receipt(false, 'Choose the assigned preflight route.')
     if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
@@ -817,6 +1082,7 @@ class FlightSimulator {
     if (this.state.atc.status !== 'none') return this.receipt(false, `ATC is already ${this.state.atc.status}; continue the current clearance flow.`)
     this.decisionTimerRunning = false
     this.atcClearanceDueElapsedSeconds = this.state.elapsedSeconds + ATC_RESPONSE_WALL_SECONDS * MISSION_PROFILE.simulationRate
+    this.pendingAtcRoute = null
     this.state = Object.freeze({
       ...this.state,
       atc: Object.freeze({ status: 'requested', requestedPlan: plan, requestReason: reason, clearance: null }),
@@ -849,12 +1115,75 @@ class FlightSimulator {
     })
     this.record(actor, 'atc_clearance_readback', readback, { clearanceId, plan: clearance.plan })
     this.addDebrief(actor, `Accepted ATC clearance ${clearance.id}`)
-    this.queueEvent('atc_clearance_accepted', `Readback correct. ${clearance.instruction}`)
-    return this.activateRoute(clearance.plan, readback, false, actor)
+    this.queueEvent('atc_clearance_accepted', `Readback correct. ${clearance.instruction} Program the cleared flight plan now.`)
+    this.publish(this.state)
+    return this.receipt(true, `Clearance accepted. Program ${clearance.plan} with the cleared altitude and speed to engage the new route.`)
   }
 
-  private activateRoute(plan: DiversionPlan, reason: string, filingPreflight: boolean, actor: TraceActor): ActionReceipt {
-    const route = Object.freeze({ ...routeFor(plan, this.state), reason })
+  initiateGoAround = (reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
+    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    if (this.state.mission.outcome !== 'in_progress') return this.receipt(false, 'The flight has already ended.')
+    if (this.state.aircraftPhase !== 'airborne' || this.state.route.destination !== 'KSTL' || this.state.checkride.status !== 'resolved') {
+      return this.receipt(false, 'A go-around is available only while airborne on the cleared KSTL arrival.')
+    }
+    const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
+    const nearFinal = (activeKind === 'final' || activeKind === 'touchdown') && this.state.mission.distanceToThresholdNm <= 1.5
+    if (!this.state.mission.goAroundRequired && !nearFinal) {
+      return this.receipt(false, 'Continue the active arrival. A go-around becomes available when the approach is unsafe or the aircraft is established near final.')
+    }
+    const climbHeadingDeg = this.state.motion.trackDeg
+    const climbAltitudeFt = Math.round(Math.max(this.state.altitudeFt + 800, 2_200) / 100) * 100
+    const goAroundWaypoint = waypoint(
+      'KSTL_GO_AROUND',
+      'Missed approach climb',
+      'departure',
+      offsetPosition(this.state, climbHeadingDeg, 3),
+      climbAltitudeFt,
+      180,
+      0.65,
+    )
+    const rebuiltArrival = routeFor('return_kstl', {
+      ...goAroundWaypoint,
+      headingDeg: climbHeadingDeg,
+      altitudeFt: climbAltitudeFt,
+      airspeedKt: 180,
+    })
+    const route = Object.freeze({
+      ...rebuiltArrival,
+      reason,
+      activeLegOrigin: Object.freeze({ lat: this.state.lat, lon: this.state.lon }),
+      waypoints: Object.freeze([goAroundWaypoint, ...rebuiltArrival.waypoints]),
+    })
+    const bearingToNextFixDeg = navigationBearingDeg(this.state, goAroundWaypoint)
+    this.routeProgress = { waypointId: '', bestDistanceNm: Number.POSITIVE_INFINITY, bestHeadingErrorDeg: Number.POSITIVE_INFINITY, secondsWithoutProgress: 0, eventSent: false }
+    this.state = Object.freeze({
+      ...this.state,
+      route,
+      mission: Object.freeze({
+        ...this.state.mission,
+        phase: 'enroute',
+        nextFix: goAroundWaypoint.id,
+        distanceToNextFixNm: distanceNm(this.state, goAroundWaypoint),
+        bearingToNextFixDeg,
+        headingErrorToNextFixDeg: headingError(bearingToNextFixDeg, this.state.motion.trackDeg),
+        altitudeErrorToNextFixFt: goAroundWaypoint.altitudeFt - this.state.altitudeFt,
+        airspeedErrorToNextFixKt: goAroundWaypoint.airspeedKt - this.state.airspeedKt,
+        captureRadiusNm: checkpointCaptureRadiusNm(goAroundWaypoint),
+        routeStatus: 'tracking',
+        stableApproach: false,
+        goAroundRequired: false,
+      }),
+      checkride: Object.freeze({ ...this.state.checkride, alert: 'Go-around active. Climb on the missed-approach route, then rejoin base and final.' }),
+    })
+    this.record(actor, 'go_around_initiated', reason, { nextFix: goAroundWaypoint.id, altitudeFt: goAroundWaypoint.altitudeFt, headingDeg: climbHeadingDeg })
+    this.addDebrief(actor, 'Initiated a go-around at KSTL')
+    this.queueEvent('plan_updated', 'Go-around route loaded. Climb toward KSTL_GO_AROUND, then follow base and final.')
+    this.publish(this.state)
+    return this.receipt(true, 'Go-around route loaded. Apply climb power and follow KSTL_GO_AROUND before rejoining base and final.')
+  }
+
+  private activateRoute(plan: DiversionPlan, reason: string, filingPreflight: boolean, actor: TraceActor, preparedRoute?: RouteState): ActionReceipt {
+    const route = Object.freeze({ ...(preparedRoute ?? routeFor(plan, this.state)), reason })
     const activeTarget = route.waypoints[route.activeWaypointIndex]
     const activeBearingDeg = activeTarget ? navigationBearingDeg(this.state, activeTarget) : null
     this.routeProgress = { waypointId: '', bestDistanceNm: Number.POSITIVE_INFINITY, bestHeadingErrorDeg: Number.POSITIVE_INFINITY, secondsWithoutProgress: 0, eventSent: false }
@@ -868,8 +1197,13 @@ class FlightSimulator {
         nextFix: activeTarget?.id ?? null,
         distanceToNextFixNm: activeTarget ? distanceNm(this.state, activeTarget) : null,
         bearingToNextFixDeg: activeBearingDeg,
+        headingErrorToNextFixDeg: activeBearingDeg === null ? null : headingError(activeBearingDeg, this.state.motion.trackDeg),
+        altitudeErrorToNextFixFt: activeTarget ? activeTarget.altitudeFt - this.state.altitudeFt : null,
+        airspeedErrorToNextFixKt: activeTarget ? activeTarget.airspeedKt - this.state.airspeedKt : null,
         captureRadiusNm: activeTarget ? checkpointCaptureRadiusNm(activeTarget) : null,
         routeStatus: activeTarget ? 'tracking' : 'idle',
+        stableApproach: false,
+        goAroundRequired: false,
       }),
       checkride: Object.freeze({ ...this.state.checkride, status: filingPreflight ? 'armed' : 'resolved', decisionSecondsRemaining: null, decision: filingPreflight ? null : plan }),
       debrief: Object.freeze({ ...this.state.debrief, decision: plan, decisionReason: reason }),
@@ -888,8 +1222,8 @@ class FlightSimulator {
     const configured = { ...this.state, gearDown: input.gearDown ?? this.state.gearDown, flapsDeg: input.flapsDeg ?? this.state.flapsDeg }
     const procedure = configurationProcedureFor(configured)
     const incorrectConfiguration = actor !== 'system'
-      && ((input.gearDown !== undefined && input.gearDown !== required.gearDown)
-        || (input.flapsDeg !== undefined && input.flapsDeg !== required.flapsDeg))
+      && ((input.gearDown !== undefined && input.gearDown !== this.state.gearDown && input.gearDown !== required.gearDown)
+        || (input.flapsDeg !== undefined && input.flapsDeg !== this.state.flapsDeg && input.flapsDeg !== required.flapsDeg))
     const score = incorrectConfiguration
       ? withScoreDeduction(
           this.state.checkride.score,
@@ -905,34 +1239,6 @@ class FlightSimulator {
     if (procedure.compliant && !required.compliant) this.queueEvent('configuration_confirmed', procedure.instruction)
     this.publish(this.state)
     return this.receipt(true, `Gear ${this.state.gearDown ? 'down' : 'up'}, flaps ${this.state.flapsDeg}°. ${procedure.compliant ? 'Configuration check complete.' : procedure.instruction}`)
-  }
-
-  requestHumanApproval = (question: string, requestedAction: string, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
-    this.state = Object.freeze({
-      ...this.state,
-      approval: Object.freeze({ status: 'pending', question, requestedAction }),
-      agentMode: 'awaiting_approval',
-      checkride: Object.freeze({ ...this.state.checkride, status: 'awaiting_human', humanApproval: 'pending' }),
-    })
-    this.record(actor, 'approval_requested', reason, { requestedAction })
-    this.queueEvent('approval_required', question)
-    this.publish(this.state)
-    return this.receipt(true, 'Pilot approval requested. Current flight-control inputs remain active.')
-  }
-
-  resolveHumanApproval = (approved: boolean, actor: TraceActor = 'human', reason = approved ? 'Pilot approved' : 'Pilot denied'): ActionReceipt => {
-    if (this.state.approval.status !== 'pending') return this.receipt(false, 'No pilot decision is pending.')
-    this.state = Object.freeze({
-      ...this.state,
-      approval: Object.freeze({ ...this.state.approval, status: approved ? 'approved' : 'denied' }),
-      agentMode: this.state.controlOwner === 'agent' ? 'flying' : 'idle',
-      checkride: Object.freeze({ ...this.state.checkride, status: 'resolved', humanApproval: approved ? 'approved' : 'denied' }),
-    })
-    this.record(actor, 'approval_resolved', reason, { approved })
-    this.queueEvent('approval_resolved', reason)
-    this.publish(this.state)
-    return this.receipt(true, reason)
   }
 
   waitForFlightEvent = (input: FlightEventWaitInput): Promise<FlightEventWaitResult> => {
@@ -968,9 +1274,14 @@ class FlightSimulator {
     this.emit()
   }
 
-  private readonly tick = (timeMs: number) => {
+  private readonly backgroundTick = () => {
+    if (typeof performance !== 'undefined') this.advanceClock(performance.now())
+  }
+
+  private readonly advanceClock = (timeMs: number) => {
     if (this.lastFrameMs === null) this.lastFrameMs = timeMs
-    this.accumulator += Math.min((timeMs - this.lastFrameMs) / 1_000, MAX_FRAME) * MISSION_PROFILE.simulationRate
+    const maxFrame = this.state.controlOwner === 'agent' ? MAX_AGENT_FRAME : MAX_FRAME
+    this.accumulator += Math.min((timeMs - this.lastFrameMs) / 1_000, maxFrame) * MISSION_PROFILE.simulationRate
     this.lastFrameMs = timeMs
     while (this.accumulator >= STEP) {
       this.previousState = this.state
@@ -983,15 +1294,47 @@ class FlightSimulator {
       this.snapshot = this.state
       this.emit()
     }
+  }
+
+  private readonly tick = (timeMs: number) => {
+    this.advanceClock(timeMs)
     this.animationFrame = requestAnimationFrame(this.tick)
   }
 
   private advance(dt: number) {
-    if (this.state.mission.outcome !== 'in_progress') return
-    if (this.state.mission.phase === 'preflight') return
     if (this.crashDynamics) {
       this.advanceCrash(dt)
       return
+    }
+    if (this.state.mission.outcome !== 'in_progress') return
+    if (this.state.mission.phase === 'preflight') return
+    let programmedGroundHeadingDeg: number | null = null
+    if (this.state.controlOwner === 'agent' && this.state.autopilot.engaged && this.state.autopilot.program) {
+      const program = this.state.autopilot.program
+      let activeCommandIndex = this.state.autopilot.activeCommandIndex ?? 0
+      const nextCommand = program.commands[activeCommandIndex + 1]
+      if (nextCommand && flightCommandTriggerSatisfied(this.state, nextCommand.when)) {
+        activeCommandIndex += 1
+        this.record('agent', 'flight_command_activated', nextCommand.id, { commandIndex: activeCommandIndex, command: nextCommand })
+        this.addDebrief('agent', `Activated command ${nextCommand.id}`)
+      }
+      const command = program.commands[activeCommandIndex]
+      const targets = flightCommandTargetsFor(this.state, command)
+      if ((this.state.aircraftPhase === 'landing_roll' || this.state.aircraftPhase === 'stopped') && command.lateral.mode === 'heading') {
+        programmedGroundHeadingDeg = command.lateral.headingDeg
+      }
+      this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
+      this.smoothedPilotControls = { pitchAxis: 0, bankAxis: 0 }
+      this.manualAttitudeTarget = { pitchDeg: targets.pitchDeg, bankDeg: targets.bankDeg }
+      const configured = {
+        ...this.state,
+        throttle: targets.throttle,
+        gearDown: targets.gearDown,
+        flapsDeg: targets.flapsDeg,
+        controlInputs: this.pilotControls,
+        autopilot: Object.freeze({ ...this.state.autopilot, activeCommandIndex }),
+      }
+      this.state = Object.freeze({ ...configured, procedure: configurationProcedureFor(configured) })
     }
     const scenario = this.state.scenario
     const dynamicsSeed = this.emergencyTriggered ? this.state.checkride.seed : SEALED_DEPARTURE_DYNAMICS_SEED
@@ -999,16 +1342,7 @@ class FlightSimulator {
     if (!this.departureGuidanceReleased && this.state.altitudeFt - KSTL_RUNWAY_12R.elevationFt >= envelope.departureHeadingReleaseAglFt) this.departureGuidanceReleased = true
     let { headingDeg: heading, bankDeg: bank, pitchDeg: pitch, throttle, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed } = this.state
 
-    if (this.state.debrief.landing) {
-      const rolloutRunway = this.runway()
-      const rolloutFrame = runwayFrame(this.state, rolloutRunway.threshold, rolloutRunway.heading)
-      const rolloutTrackDeg = normalizeHeading(rolloutRunway.heading + clamp(rolloutFrame.crossNm * 25, -6, 6))
-      heading = normalizeHeading(heading + clamp(headingError(rolloutTrackDeg, heading), -2 * dt, 2 * dt))
-      bank = approach(bank, 0, 60 * dt)
-      pitch = approach(pitch, 0, 10 * dt)
-      throttle = approach(throttle, 0, 1.2 * dt)
-      verticalSpeed = 0
-    } else if (this.fuelExhausted && this.state.aircraftPhase === 'airborne') {
+    if (this.fuelExhausted && this.state.aircraftPhase === 'airborne') {
       throttle = 0
       bank = approach(bank, 0, 12 * dt)
       pitch = approach(pitch, -6, 5 * dt)
@@ -1020,19 +1354,22 @@ class FlightSimulator {
       this.smoothedPilotControls.bankAxis = damp(this.smoothedPilotControls.bankAxis, this.pilotControls.bankAxis, 5.5, dt)
       this.manualAttitudeTarget.pitchDeg = clamp(
         this.manualAttitudeTarget.pitchDeg + this.smoothedPilotControls.pitchAxis * PILOT_PITCH_TRIM_RATE_DEG_PER_SECOND * controlAuthority * dt,
-        onTakeoffRoll ? 0 : -55,
-        onTakeoffRoll ? envelope.liftoffPitchDeg : 55,
+        onTakeoffRoll ? 0 : -10,
+        onTakeoffRoll ? envelope.liftoffPitchDeg : 15,
       )
       this.manualAttitudeTarget.bankDeg = onTakeoffRoll
         ? 0
-        : clamp(this.manualAttitudeTarget.bankDeg + this.smoothedPilotControls.bankAxis * PILOT_BANK_TRIM_RATE_DEG_PER_SECOND * controlAuthority * dt, -60, 60)
-      const targetPitch = onTakeoffRoll && airspeed < envelope.rotateSpeedKt ? 0 : this.manualAttitudeTarget.pitchDeg
+        : clamp(this.manualAttitudeTarget.bankDeg + this.smoothedPilotControls.bankAxis * PILOT_BANK_TRIM_RATE_DEG_PER_SECOND * controlAuthority * dt, -25, 25)
+      const targetPitch = this.manualAttitudeTarget.pitchDeg
       pitch = approach(
         pitch,
         targetPitch,
         (onTakeoffRoll ? envelope.rotationRateDegPerSecond : PILOT_PITCH_RESPONSE_DEG_PER_SECOND * controlAuthority) * dt,
       )
       bank = approach(bank, this.manualAttitudeTarget.bankDeg, PILOT_BANK_RESPONSE_DEG_PER_SECOND * controlAuthority * dt)
+      if (programmedGroundHeadingDeg !== null) {
+        heading = normalizeHeading(heading + clamp(headingError(programmedGroundHeadingDeg, heading), -10 * dt, 10 * dt))
+      }
       const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
       const landingAngleOfAttackDeg = activeKind === 'final' || activeKind === 'touchdown' ? 8 : 0
       const targetVerticalSpeed = clamp(airspeed * FEET_PER_NM / 60 * Math.sin(radians(pitch - landingAngleOfAttackDeg)), -4_500, 4_500)
@@ -1072,7 +1409,7 @@ class FlightSimulator {
     const position = offsetPosition(this.state, groundTrackDeg, groundSpeedKt * dt / 3_600)
     let altitude = this.state.altitudeFt + verticalSpeed * dt / 60
     const elapsedSeconds = this.state.elapsedSeconds + dt
-    const fuelMinutesRemaining = Math.max(0, this.state.fuelMinutesRemaining - dt / 60 * (0.65 + throttle * 0.55))
+    const fuelMinutesRemaining = Math.max(0, this.state.fuelMinutesRemaining - dt / 60 / MISSION_PROFILE.simulationRate * (0.65 + throttle * 0.55))
 
     let routeUpdate = this.advanceRoute(position, altitude, groundTrackDeg)
     const runway = this.runway(routeUpdate.route)
@@ -1148,8 +1485,6 @@ class FlightSimulator {
         aircraftPhase = 'landing_roll'
         phase = 'rollout'
         verticalSpeed = 0
-        pitch = approach(pitch, 0, 10 * dt)
-        if (this.state.controlOwner === 'agent') throttle = approach(throttle, 0, 0.8 * dt)
         const rolloutAcceleration = landingRollAccelerationKtPerSecond(throttle, scenario.engine.maximumPower)
         airspeed = Math.max(0, airspeed + rolloutAcceleration * dt)
         if (!landing) {
@@ -1187,6 +1522,7 @@ class FlightSimulator {
           onRunway,
           rollDirection,
         })
+        outcome = crashOutcome
         crashJustOccurred = true
         throttle = 0
         verticalSpeed = 0
@@ -1224,6 +1560,7 @@ class FlightSimulator {
       stalled: aircraftPhase === 'airborne' && stall.severity >= 0.18,
       turbulenceLevel: this.state.aircraftPhase === 'airborne' ? turbulence.level : 'none',
     })
+    const stallJustDetected = motion.stalled && !this.state.motion.stalled
     const passengerSafety = passengerSafetyFor(
       this.state.passengerSafety,
       bank,
@@ -1242,20 +1579,25 @@ class FlightSimulator {
     const partialWithoutProcedure = { ...this.state, ...position, altitudeFt: altitude, airspeedKt: airspeed, verticalSpeedFpm: verticalSpeed, headingDeg: heading, pitchDeg: pitch, bankDeg: bank, throttle, elapsedSeconds, fuelMinutesRemaining, motion, impact, aircraftPhase, route: routeUpdate.route }
     const procedure = configurationProcedureFor(partialWithoutProcedure)
     const partial = { ...partialWithoutProcedure, procedure } as FlightState
-    const deadlineExpired = elapsedSeconds >= this.state.checkride.deadlineSeconds && outcome === 'in_progress'
+    const wallClockSecondsRemaining = this.emergencyStartedAtWallMs === null
+      ? null
+      : Math.max(0, MISSION_PROFILE.wallClockDeadlineSeconds - (Date.now() - this.emergencyStartedAtWallMs) / 1_000)
+    const deadlineExpired = wallClockSecondsRemaining === 0
+      && outcome === 'in_progress'
     if (deadlineExpired) {
       outcome = 'timed_out'
       phase = 'failed'
     }
     const mission = this.navigation(partial, phase, outcome, runway)
     const approachJustStabilized = mission.stableApproach && !this.state.mission.stableApproach
+    const goAroundJustRequired = mission.goAroundRequired && !this.state.mission.goAroundRequired
     const status = outcome === 'in_progress' ? 'in_progress' : outcome === 'landed' ? 'landed' : 'failed'
     let score = this.state.checkride.score
     if (decisionTimerJustExpired) {
       score = withScoreDeduction(score, 'decision-timeout', elapsedSeconds, 15, 'Emergency route decision exceeded 60 seconds')
     }
     if (deadlineExpired) {
-      score = withScoreDeduction(score, 'mission-timeout', elapsedSeconds, 12, `Mission exceeded the ${Math.round(this.state.checkride.wallClockDeadlineSeconds / 60)}-minute operating window`)
+      score = withScoreDeduction(score, 'mission-timeout', elapsedSeconds, 12, `Mission exceeded the ${Math.round(this.state.checkride.wallClockDeadlineSeconds / 60)}-minute emergency window`)
     }
     // Ignore the brief acceleration transient at rotation; handling penalties
     // start once the aircraft is established above the departure surface.
@@ -1295,22 +1637,25 @@ class FlightSimulator {
     this.state = Object.freeze({
       ...partial,
       mission, passengerSafety,
-      checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, decisionSecondsRemaining, status: status === 'in_progress' ? this.state.checkride.status : 'complete', score }),
+      checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, wallClockSecondsRemaining, decisionSecondsRemaining, status: status === 'in_progress' ? this.state.checkride.status : 'complete', score }),
       debrief: Object.freeze({ ...this.state.debrief, status, elapsedSeconds, landing }),
       agentMode: status === 'in_progress' ? this.state.agentMode : 'complete',
     })
     for (const deduction of newDeductions) this.addDebrief('system', `−${deduction.points} points: ${deduction.reason}`)
-    if (!this.emergencyTriggered && aircraftPhase === 'airborne' && elapsedSeconds >= MISSION_PROFILE.emergencyTriggerSeconds) {
+    const departureEstablished = routeUpdate.route.completedWaypointIds.includes('KSTL_CLIMB')
+    if (!this.emergencyTriggered && aircraftPhase === 'airborne' && departureEstablished && elapsedSeconds >= MISSION_PROFILE.emergencyTriggerSeconds) {
       this.emergencyTriggered = true
+      this.emergencyStartedAtWallMs = Date.now()
       this.decisionTimerRunning = true
       this.state = Object.freeze({
         ...this.state,
         scenario: this.selectedScenario,
-        agentMode: this.state.controlOwner === 'agent' ? 'thinking' : this.state.agentMode,
         checkride: Object.freeze({
           ...this.state.checkride,
           status: 'decision_required',
+          wallClockSecondsRemaining: MISSION_PROFILE.wallClockDeadlineSeconds,
           decisionSecondsRemaining: EMERGENCY_DECISION_SECONDS,
+          emergencyStartedAtSeconds: elapsedSeconds,
           decisionContextRead: false,
           objective: missionBriefFor(true).objective,
           alert: EMERGENCY_ALERT,
@@ -1335,10 +1680,20 @@ class FlightSimulator {
       this.addDebrief('system', 'Fuel exhausted; engine-out descent began')
       this.queueEvent('emergency_detected', 'Fuel exhausted. The engine has stopped; the aircraft is descending.')
     }
+    if (stallJustDetected && outcome === 'in_progress') {
+      this.record('system', 'stall_warning', 'Aerodynamic stall detected', {
+        airspeedKt: this.state.airspeedKt,
+        angleOfAttackDeg: this.state.motion.angleOfAttackDeg,
+        bankDeg: this.state.bankDeg,
+      })
+      this.addDebrief('system', 'Aerodynamic stall warning activated')
+      this.queueEvent('stall_warning', 'Aerodynamic stall. Recover now: throttle at least 0.85, pitchIntent at most -0.10, gear up, flaps no more than 10°, and bank toward wings level.')
+    }
     if (procedure.stage !== this.previousState.procedure.stage && !procedure.compliant) this.queueEvent('configuration_required', procedure.instruction)
     if (routeUpdate.stalled) {
-      this.record('system', 'route_progress_stalled', 'The active route leg stopped converging', { nextFix: routeUpdate.next?.id ?? null, distanceNm: routeUpdate.next ? distanceNm(this.state, routeUpdate.next) : null })
-      this.queueEvent('route_progress_stalled', `Route progress has stalled near ${routeUpdate.next?.name ?? 'the active checkpoint'}. Call rebuild_active_leg with direct_intercept or wider_pattern instead of continuing to orbit.`)
+      this.record('system', 'route_progress_stalled', 'The active arrival command stopped converging', { nextFix: routeUpdate.next?.id ?? null, distanceNm: routeUpdate.next ? distanceNm(this.state, routeUpdate.next) : null })
+      this.addDebrief('system', 'Active arrival command stopped converging')
+      this.queueEvent('route_progress_stalled', `The active arrival command is not converging on ${routeUpdate.next?.name ?? 'the next fix'}. The simulator has not changed the route or command program.`)
     }
     if (routeUpdate.reached) {
       const nextMessage = routeUpdate.next && routeUpdate.next.id !== routeUpdate.reached.id
@@ -1363,6 +1718,15 @@ class FlightSimulator {
       this.queueEvent('comfort_limit_approaching', `Cabin comfort margin is narrowing: ${passengerSafety.loadFactorG.toFixed(2)} G and ${passengerSafety.jerkGPerSecond.toFixed(2)} G/s jerk. Keep bank at or below ${envelope.routeBankDeg}° and avoid reversing the turn.`)
     } else if (!comfortLimitApproaching) {
       this.comfortWarningActive = false
+    }
+    if (goAroundJustRequired) {
+      this.record('system', 'go_around_required', `${runway.id} approach is unsafe`, {
+        runway: runway.id,
+        altitudeAglFt: partial.altitudeFt - runway.elevation,
+        verticalSpeedFpm: partial.verticalSpeedFpm,
+        centerlineErrorNm: mission.centerlineErrorNm,
+      })
+      this.queueEvent('go_around_required', `${runway.id} approach is unsafe. Replace the flight program with an immediate climb and set restart_route true for a new circuit.`)
     }
     if (approachJustStabilized) {
       this.record('system', 'approach_stable', `${runway.id} approach is stable`, { runway: runway.id })
@@ -1389,11 +1753,11 @@ class FlightSimulator {
     const heading = normalizeHeading(this.state.headingDeg + crash.rollDirection * turnRateDegPerSecond * dt)
     const position = offsetPosition(this.state, heading, airspeed * dt / 3_600)
     const elapsedSeconds = this.state.elapsedSeconds + dt
-    const fuelMinutesRemaining = Math.max(0, this.state.fuelMinutesRemaining - dt / 60 * 0.65)
+    const fuelMinutesRemaining = Math.max(0, this.state.fuelMinutesRemaining - dt / 60 / MISSION_PROFILE.simulationRate * 0.65)
     const pitch = approach(this.state.pitchDeg, targetPitchDeg, (destructive ? 28 : 14) * dt)
     const bank = approach(this.state.bankDeg, targetBankDeg, (destructive ? 62 : 24) * dt)
     const finished = crash.elapsedSeconds >= CRASH_SLIDE_SECONDS || airspeed < 3
-    const outcome: MissionOutcome = finished ? crash.outcome : 'in_progress'
+    const outcome: MissionOutcome = crash.outcome
     const partial = {
       ...this.state,
       ...position,
@@ -1421,17 +1785,16 @@ class FlightSimulator {
       }),
     } as FlightState
     const mission = this.navigation(partial, 'failed', outcome, runway)
-    const status = finished ? 'failed' : 'in_progress'
+    const status = 'failed'
     this.state = Object.freeze({
       ...partial,
       mission,
-      checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, status: finished ? 'complete' : this.state.checkride.status }),
+      checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, status: 'complete' }),
       debrief: Object.freeze({ ...this.state.debrief, status, elapsedSeconds }),
-      agentMode: finished ? 'complete' : this.state.agentMode,
+      agentMode: 'complete',
     })
     if (finished) {
       this.crashDynamics = null
-      this.finish(crash.outcome)
     }
   }
 
@@ -1445,59 +1808,63 @@ class FlightSimulator {
       ? horizontalDistanceNm <= captureRadiusNm
         && Math.abs(headingError(KSTL_RUNWAY_30L.headingDeg, _headingDeg)) <= 45
       : false
-    const finalFrame = active.id === 'KSTL_FINAL'
-      ? runwayFrame(position, KSTL_THRESHOLD, KSTL_RUNWAY_30L.headingDeg)
-      : null
-    const finalCorridorCaptured = finalFrame !== null
-      && finalFrame.alongNm >= -3.5
-      && finalFrame.alongNm <= -0.3
-      && Math.abs(finalFrame.crossNm) <= 0.35
-      && Math.abs(headingError(KSTL_RUNWAY_30L.headingDeg, _headingDeg)) <= 30
+    const captureHeadingToleranceDeg = active.id === 'KSTL_COURSE_REVERSAL' ? 25 : 45
     const headingConstraintSatisfied = active.captureHeadingDeg === undefined
-      || Math.abs(headingError(active.captureHeadingDeg, _headingDeg)) <= 45
+      || Math.abs(headingError(active.captureHeadingDeg, _headingDeg)) <= captureHeadingToleranceDeg
+    const departureCaptureSatisfied = active.kind !== 'departure' || (
+      altitudeFt >= KSTL_RUNWAY_12R.elevationFt + LIFTOFF_CONFIRM_AGL_FT
+      && altitudeFt >= active.altitudeFt - 700
+      && altitudeFt <= active.altitudeFt + 700
+      && this.state.verticalSpeedFpm > 100
+    )
+    const goAroundCaptureSatisfied = active.id !== 'KSTL_GO_AROUND' || (
+      altitudeFt >= active.altitudeFt - 300
+      && this.state.verticalSpeedFpm > -1_000
+    )
     const reached = !route.completedWaypointIds.includes(active.id)
       && (active.kind === 'final' && route.destination === 'KSTL'
-        ? finalFrame === null ? runwayAlignedFinal : finalCorridorCaptured
-        : horizontalDistanceNm <= captureRadiusNm && headingConstraintSatisfied)
+        ? runwayAlignedFinal
+        : horizontalDistanceNm <= captureRadiusNm && headingConstraintSatisfied && departureCaptureSatisfied && goAroundCaptureSatisfied)
     const completedWaypointIds = reached
       ? Object.freeze([...route.completedWaypointIds, active.id])
       : route.completedWaypointIds
     const index = reached ? Math.min(route.activeWaypointIndex + 1, route.waypoints.length - 1) : route.activeWaypointIndex
-    const activeLegOrigin = reached ? Object.freeze({ lat: active.lat, lon: active.lon }) : route.activeLegOrigin
+    const activeLegOrigin = reached ? Object.freeze({ lat: position.lat, lon: position.lon }) : route.activeLegOrigin
     const next = route.waypoints[index]
     const following = route.waypoints[index + 1]
     const final = next.kind === 'final' || next.kind === 'touchdown'
     const updatedRoute = reached
       ? Object.freeze({ ...route, activeWaypointIndex: index, completedWaypointIds, activeLegOrigin })
       : route
-    const routeBearingDeg = anticipatedRouteBearingDeg(position, activeLegOrigin, next, following, this.state.airspeedKt, DREAMLINER_787_9_ENVELOPE.routeBankDeg)
+    const directRouteBearingDeg = anticipatedRouteBearingDeg(position, activeLegOrigin, next, following, this.state.airspeedKt, DREAMLINER_787_9_ENVELOPE.routeBankDeg)
+    const routeBearingDeg = next.captureHeadingDeg !== undefined && distanceNm(position, next) <= checkpointCaptureRadiusNm(next)
+      ? next.captureHeadingDeg
+      : directRouteBearingDeg
     const routeHeadingErrorDeg = Math.abs(headingError(routeBearingDeg, _headingDeg))
     if (this.routeProgress.waypointId !== next.id || reached) {
       this.routeProgress = { waypointId: next.id, bestDistanceNm: distanceNm(position, next), bestHeadingErrorDeg: routeHeadingErrorDeg, secondsWithoutProgress: 0, eventSent: false }
-    } else if (
-      horizontalDistanceNm < this.routeProgress.bestDistanceNm - ROUTE_PROGRESS_EPSILON_NM
-      || routeHeadingErrorDeg < this.routeProgress.bestHeadingErrorDeg - 1
-    ) {
+    } else if (arrivalLegProgressed(horizontalDistanceNm, this.routeProgress.bestDistanceNm, routeHeadingErrorDeg, this.routeProgress.bestHeadingErrorDeg)) {
+      // A procedure turn initially increases distance to the inbound fix. Treat
+      // deliberate course capture as progress and begin measuring distance again
+      // from the widest point of the turn.
       this.routeProgress.bestDistanceNm = horizontalDistanceNm
       this.routeProgress.bestHeadingErrorDeg = routeHeadingErrorDeg
-      this.routeProgress.secondsWithoutProgress = 0
-    } else if (routeHeadingErrorDeg > 25) {
-      // A transport aircraft can spend well over 20 seconds turning toward a valid leg.
-      // Do not call that maneuver a stall; start the convergence clock once the
-      // aircraft is broadly tracking the commanded course.
       this.routeProgress.secondsWithoutProgress = 0
     } else {
       this.routeProgress.secondsWithoutProgress += STEP
     }
-    const genericRecoveryLeg = active.kind === 'enroute' || active.kind === 'base' || active.kind === 'final'
+    const recoverableArrivalLeg = route.plan === 'return_kstl'
+      && (active.kind === 'enroute' || active.kind === 'base')
     const airborne = altitudeFt - this.runway(route).elevation >= LIFTOFF_CONFIRM_AGL_FT
     const stalled = this.state.checkride.status === 'resolved'
-      && genericRecoveryLeg
+      && recoverableArrivalLeg
       && airborne
-      && this.routeProgress.secondsWithoutProgress >= ROUTE_STALL_SECONDS
+      && this.routeProgress.secondsWithoutProgress >= (routeHeadingErrorDeg > 25 ? ROUTE_OFF_COURSE_STALL_SECONDS : ROUTE_STALL_SECONDS)
       && !this.routeProgress.eventSent
-    if (stalled) this.routeProgress.eventSent = true
-    return { route: updatedRoute, phase: final ? 'approach' : 'enroute', reached: reached ? active : null, next, stalled }
+    if (!stalled) return { route: updatedRoute, phase: final ? 'approach' : 'enroute', reached: reached ? active : null, next, stalled: false }
+
+    this.routeProgress.eventSent = true
+    return { route: updatedRoute, phase: final ? 'approach' : 'enroute', reached: null, next, stalled: true }
   }
 
   private runway(route: RouteState = this.state.route) {
@@ -1528,24 +1895,61 @@ class FlightSimulator {
   private navigation(state: FlightState, phase: MissionPhase, outcome: MissionOutcome, runway: ReturnType<FlightSimulator['runway']>) {
     const envelope = DREAMLINER_787_9_ENVELOPE
     const active = state.route.waypoints[state.route.activeWaypointIndex]
-    const bearingToNextFixDeg = active ? navigationBearingDeg(state, active) : null
+    const directBearingToNextFixDeg = active ? navigationBearingDeg(state, active) : null
+    const frame = runwayFrame(state, runway.threshold, runway.heading)
+    const runwayRelativeTouchdownGuidance = active?.kind === 'touchdown'
+      && state.route.destination === 'KSTL'
+      && frame.alongNm >= -5
+      && frame.alongNm <= 0.3
+      && Math.abs(frame.crossNm) <= 0.5
+    const bearingToNextFixDeg = runwayRelativeTouchdownGuidance
+      ? normalizeHeading(KSTL_RUNWAY_30L.headingDeg + clamp(frame.crossNm * 120, -25, 25))
+      : active && active.captureHeadingDeg !== undefined && distanceNm(state, active) <= checkpointCaptureRadiusNm(active)
+        ? active.captureHeadingDeg
+        : directBearingToNextFixDeg
+    const headingErrorToNextFixDeg = bearingToNextFixDeg === null ? null : headingError(bearingToNextFixDeg, state.motion.trackDeg)
     const closingRateKt = active && bearingToNextFixDeg !== null
       ? state.motion.groundSpeedKt * Math.cos(radians(headingError(bearingToNextFixDeg, state.motion.trackDeg)))
       : null
-    const frame = runwayFrame(state, runway.threshold, runway.heading)
-    const glidepathErrorFt = state.altitudeFt - this.glidepathAltitude(state, runway.threshold, runway.elevation)
-    const stableApproach = phase === 'approach' && Math.abs(frame.crossNm) < 0.08 && Math.abs(glidepathErrorFt) < 180 && state.airspeedKt >= envelope.stableApproachMinKt && state.airspeedKt <= envelope.stableApproachMaxKt && state.gearDown && state.flapsDeg >= envelope.approachFlapsDeg
+    const distanceToThresholdNm = distanceNm(state, runway.threshold)
+    const touchdownTarget = state.route.waypoints.find((waypoint) => waypoint.kind === 'touchdown') ?? runway.threshold
+    const glidepathAltitudeFt = this.glidepathAltitude(state, touchdownTarget, runway.elevation)
+    const glidepathErrorFt = state.altitudeFt - glidepathAltitudeFt
+    const glidepathGuided = state.route.destination === 'KSTL' && (active?.kind === 'final' || active?.kind === 'touchdown')
+    const approach = approachAssessmentFor({
+      phase,
+      returnArrival: state.route.destination === 'KSTL',
+      activeKind: active?.kind ?? null,
+      frameAlongNm: frame.alongNm,
+      centerlineErrorNm: frame.crossNm,
+      glidepathErrorFt,
+      distanceToThresholdNm,
+      distanceToActiveFixNm: active ? distanceNm(state, active) : null,
+      closingRateToActiveFixKt: closingRateKt,
+      altitudeAglFt: state.altitudeFt - runway.elevation,
+      runwayHeadingErrorDeg: headingError(runway.heading, state.motion.trackDeg),
+      verticalSpeedFpm: state.verticalSpeedFpm,
+      airspeedKt: state.airspeedKt,
+      gearDown: state.gearDown,
+      flapsDeg: state.flapsDeg,
+    })
     return Object.freeze({
       phase: outcome === 'in_progress' ? phase : outcome === 'landed' ? 'complete' : 'failed',
       outcome, nextFix: active?.id ?? null,
       distanceToNextFixNm: active ? distanceNm(state, active) : null,
       bearingToNextFixDeg,
+      headingErrorToNextFixDeg,
+      altitudeErrorToNextFixFt: active ? (glidepathGuided ? glidepathAltitudeFt : active.altitudeFt) - state.altitudeFt : null,
+      airspeedErrorToNextFixKt: active ? active.airspeedKt - state.airspeedKt : null,
       closingRateKt,
       captureRadiusNm: active ? checkpointCaptureRadiusNm(active) : null,
       minimumTurnRadiusNm: coordinatedTurnRadiusNm(Math.max(state.airspeedKt, envelope.minCommandSpeedKt), envelope.routeBankDeg),
       routeStatus: active ? (this.routeProgress.eventSent ? 'stalled' : 'tracking') : 'idle',
-      distanceToThresholdNm: distanceNm(state, runway.threshold), centerlineErrorNm: frame.crossNm,
-      glidepathErrorFt, stableApproach, eventRevision: this.eventRevision,
+      distanceToThresholdNm, centerlineErrorNm: frame.crossNm,
+      glidepathErrorFt,
+      stableApproach: approach.stable,
+      goAroundRequired: this.state.mission.goAroundRequired || approach.goAroundRequired,
+      eventRevision: this.eventRevision,
     })
   }
 
@@ -1566,7 +1970,12 @@ class FlightSimulator {
     if (this.state.controlOwner === 'human') return
     this.releasePilotControls()
     this.manualAttitudeTarget = { pitchDeg: this.state.pitchDeg, bankDeg: this.state.bankDeg }
-    this.state = Object.freeze({ ...this.state, controlOwner: 'human', agentMode: 'idle' })
+    this.state = Object.freeze({
+      ...this.state,
+      controlOwner: 'human',
+      agentMode: 'idle',
+      autopilot: Object.freeze({ ...this.state.autopilot, engaged: false }),
+    })
     this.addDebrief('human', 'Pilot overrode the copilot')
     this.record('human', 'human_override', reason, {})
   }
@@ -1577,6 +1986,7 @@ class FlightSimulator {
     const route = routeFor(plan, this.state)
     const initial = route.waypoints[route.activeWaypointIndex]
     if (!initial || !route.destination || !route.runway) return
+    this.pendingAtcRoute = route
     const headingDeg = navigationBearingDeg(this.state, initial)
     const clearance: AtcClearance = Object.freeze({
       id: `ATC-${this.state.checkride.runId.slice(0, 8)}-${this.eventRevision + 1}`,
@@ -1590,6 +2000,7 @@ class FlightSimulator {
       airspeedKt: initial.airspeedKt,
       approach: `${route.destination} runway ${route.runway}`,
       instruction: `${plan === 'return_kstl' ? 'Radar vectors' : `Cleared direct ${initial.name}`} to ${route.destination}; fly heading ${Math.round(headingDeg).toString().padStart(3, '0')}°, maintain ${initial.altitudeFt} ft and ${initial.airspeedKt} kt, expect runway ${route.runway}.`,
+      commandPoints: Object.freeze(route.waypoints.map((fix) => commandPointFor(fix, route.destination === 'KSTL' ? KSTL_THRESHOLD : KMDW_THRESHOLD))),
     })
     this.atcClearanceDueElapsedSeconds = null
     this.state = Object.freeze({
@@ -1608,6 +2019,7 @@ class FlightSimulator {
       altitudeFt: clearance.altitudeFt,
       airspeedKt: clearance.airspeedKt,
       approach: clearance.approach,
+      commandPoints: clearance.commandPoints,
     })
     this.addDebrief('system', `ATC issued ${clearance.id}`)
     this.queueEvent('atc_clearance_received', `${clearance.instruction} Read back clearance ${clearance.id} with destination, runway, altitude, and initial heading.`)

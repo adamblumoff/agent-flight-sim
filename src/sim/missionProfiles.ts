@@ -10,10 +10,10 @@ export interface MissionProfile {
 
 export const MISSION_PROFILE = Object.freeze({
   id: 'dreamliner-787-9-emergency-v1',
-  label: '6-minute flight',
-  deadlineSeconds: 6 * 60,
-  wallClockDeadlineSeconds: 6 * 60,
-  simulationRate: 1,
-  emergencyTriggerSeconds: 35,
-  targetCompletionSeconds: 4.75 * 60,
+  label: '8-minute flight',
+  deadlineSeconds: 8 * 60 * 2,
+  wallClockDeadlineSeconds: 8 * 60,
+  simulationRate: 2,
+  emergencyTriggerSeconds: 30 * 2,
+  targetCompletionSeconds: 6.5 * 60 * 2,
 } satisfies MissionProfile)

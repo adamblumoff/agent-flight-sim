@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   Bot,
   Check,
@@ -5,12 +6,10 @@ import {
   CircleAlert,
   Download,
   RotateCcw,
-  ShieldCheck,
 } from 'lucide-react'
 import { Button } from './ui/button'
 import type { WebMcpActivity } from '../webmcp/useWebMcp'
-import type { FlightTrajectory } from '../webmcp/trajectory'
-import type { RadioCue } from '../audio/radioCues'
+import type { FlightRunExport } from '../webmcp/runExport'
 import { RadioTranscript, type RadioTranscriptProps } from './radio-transcript'
 
 export interface CopilotObservation {
@@ -62,39 +61,35 @@ export interface CopilotPanelProps {
   readonly action: string
   readonly crewActions: readonly CopilotCrewAction[]
   readonly crewActionStatus: string | null
-  readonly approvalPending: boolean
-  readonly approvalPrompt: string
   readonly debrief: CopilotDebrief | null
   readonly diagnostics: CopilotDiagnostics
-  readonly webMcpCalls: readonly {
-    readonly tool: string
-    readonly arguments: Readonly<Record<string, unknown>>
-    readonly radio: readonly Pick<RadioCue, 'id' | 'speaker' | 'text' | 'priority'>[]
-  }[]
   readonly webMcpActivities: readonly WebMcpActivity[]
-  readonly trajectory: FlightTrajectory | null
-  readonly onApprove: () => void
-  readonly onDeny: () => void
+  readonly runExport: FlightRunExport | null
   readonly onReset: () => void
 }
 
 function MissionDebrief({
   debrief,
-  webMcpCalls,
-  trajectory,
+  runExport,
   onReset,
 }: {
   readonly debrief: CopilotDebrief
-  readonly webMcpCalls: CopilotPanelProps['webMcpCalls']
-  readonly trajectory: FlightTrajectory | null
+  readonly runExport: FlightRunExport | null
   readonly onReset: () => void
 }) {
   const landed = debrief.outcome === 'Landed'
   const DebriefIcon = landed ? Check : CircleAlert
-  const webMcpExportHref = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(webMcpCalls, null, 2))}`
-  const trajectoryExportHref = trajectory
-    ? `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(trajectory))}`
-    : null
+  const [runExportHref, setRunExportHref] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!runExport) {
+      setRunExportHref(null)
+      return
+    }
+    const href = URL.createObjectURL(new Blob([JSON.stringify(runExport, null, 2)], { type: 'application/json' }))
+    setRunExportHref(href)
+    return () => URL.revokeObjectURL(href)
+  }, [runExport])
 
   return (
     <div className="mission-debrief">
@@ -153,32 +148,18 @@ function MissionDebrief({
         </ol>
       ) : null}
 
-      {webMcpCalls.length > 0 ? (
-        <section className="debrief-export" aria-labelledby="webmcp-export-title">
+      {runExportHref ? (
+        <section className="debrief-export" aria-labelledby="run-export-title">
           <div>
-            <h3 id="webmcp-export-title">WebMCP call log</h3>
-            <p>{webMcpCalls.length} calls with deterministic radio cues · JSON only</p>
+            <h3 id="run-export-title">Complete run export</h3>
+            <p>{runExport?.calls.length ?? 0} WebMCP calls · results, telemetry, rewards, radio, trace, and final state</p>
           </div>
           <Button
             variant="outline"
-            render={<a href={webMcpExportHref} download="flightdeck-webmcp-calls.json" />}
+            nativeButton={false}
+            render={<a href={runExportHref} download={`flightdeck-run-${runExport?.run.runId ?? 'export'}.json`} />}
           >
             <Download data-icon="inline-start" /> Export JSON
-          </Button>
-        </section>
-      ) : null}
-
-      {trajectoryExportHref ? (
-        <section className="debrief-export" aria-labelledby="trajectory-export-title">
-          <div>
-            <h3 id="trajectory-export-title">RL trajectory</h3>
-            <p>{trajectory?.steps.length ?? 0} observation-action steps · rewards + terminal state</p>
-          </div>
-          <Button
-            variant="outline"
-            render={<a href={trajectoryExportHref} download="flightdeck-trajectory.json" />}
-          >
-            <Download data-icon="inline-start" /> Export trajectory
           </Button>
         </section>
       ) : null}
@@ -200,15 +181,10 @@ export function CopilotPanel({
   action,
   crewActions,
   crewActionStatus,
-  approvalPending,
-  approvalPrompt,
   debrief,
   diagnostics,
-  webMcpCalls,
   webMcpActivities,
-  trajectory,
-  onApprove,
-  onDeny,
+  runExport,
   onReset,
 }: CopilotPanelProps) {
   return (
@@ -225,7 +201,7 @@ export function CopilotPanel({
       <RadioTranscript {...radio} maxRecent={1} />
 
       {debrief ? (
-        <MissionDebrief debrief={debrief} webMcpCalls={webMcpCalls} trajectory={trajectory} onReset={onReset} />
+        <MissionDebrief debrief={debrief} runExport={runExport} onReset={onReset} />
       ) : (
         <div className="copilot-body">
           <section className="panel-section observation-section" aria-labelledby="observations-title">
@@ -307,19 +283,6 @@ export function CopilotPanel({
             </section>
           ) : null}
 
-          {approvalPending ? (
-            <section className="approval-request" role="alert" aria-labelledby="approval-title">
-              <div className="approval-heading">
-                <ShieldCheck aria-hidden="true" />
-                <h2 id="approval-title">Your decision</h2>
-              </div>
-              <p>{approvalPrompt}</p>
-              <div className="approval-actions">
-                <Button onClick={onApprove}>Approve</Button>
-                <Button variant="outline" onClick={onDeny}>Decline</Button>
-              </div>
-            </section>
-          ) : null}
         </div>
       )}
 
