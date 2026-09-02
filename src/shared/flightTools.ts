@@ -41,14 +41,16 @@ export interface FlightToolArguments {
   get_decision_context: Record<string, never>
   program_flight_plan: {
     readonly plan: 'continue_kmdw' | 'return_kstl'
-    readonly rotate_speed_kt: number
-    readonly climb_pitch_deg: number
-    readonly climb_speed_kt: number
-    readonly cruise_altitude_ft: number
-    readonly cruise_speed_kt: number
-    readonly max_bank_deg: number
-    readonly approach_speed_kt: number
-    readonly landing_flaps_deg: 20 | 30
+    readonly commands: readonly {
+      readonly id: string
+      readonly when: { readonly type: 'immediate' | 'airspeed_at_least' | 'altitude_at_least' | 'active_waypoint' | 'distance_to_runway_at_most' | 'aircraft_phase'; readonly value?: number | string }
+      readonly lateral: { readonly mode: 'heading' | 'track_fix' | 'bank'; readonly heading_deg?: number; readonly waypoint_id?: string; readonly bank_deg?: number }
+      readonly vertical: { readonly mode: 'pitch' | 'altitude'; readonly pitch_deg?: number; readonly altitude_ft?: number }
+      readonly energy: { readonly mode: 'throttle' | 'airspeed'; readonly throttle?: number; readonly airspeed_kt?: number }
+      readonly gear_down: boolean
+      readonly flaps_deg: 0 | 10 | 20 | 30
+    }[]
+    readonly restart_route?: boolean
     readonly reason: string
   }
   request_diversion: { readonly plan: DiversionPlan; readonly reason: string }
@@ -154,7 +156,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'get_mission_brief', title: 'Read mission brief', readOnly: true,
-    description: 'Read the assigned route, takeoff data, cleared altitude and speed, deadline, aircraft procedures, and landing criteria. Submit the full route and flight targets with program_flight_plan before takeoff. Future conditions remain sealed.', inputSchema: emptySchema,
+    description: 'Read the assigned route, published command points with nominal crossing altitude, speed, runway distance, and capture heading, takeoff data, deadline, aircraft procedures, and landing criteria. Submit the ordered exact command program before takeoff. Future conditions remain sealed.', inputSchema: emptySchema,
   },
   {
     name: 'get_flight_state', title: 'Read flight state', readOnly: true,
@@ -166,22 +168,47 @@ export const flightToolDefinitions = [
   },
   {
     name: 'program_flight_plan', title: 'Program flight plan', readOnly: false,
-    description: 'Make the complete flying decision in one call. Program the cleared route plus takeoff, climb, cruise, bank, approach, and landing targets. The aircraft then executes this program continuously at 60 Hz while you think or wait. Before takeoff, use the assigned route and published aircraft data. After an emergency, assess it, obtain and accept ATC clearance, then replace the program with the cleared route and targets. Programming never pauses or advances time artificially.',
+    description: 'Author the flight as 2-16 ordered exact commands. Each command persists until the next command trigger: choose one lateral mode (heading, track_fix, or bank), one vertical mode (pitch or altitude), one energy mode (throttle or airspeed), plus exact gear and flaps. The first trigger must be immediate; later triggers may use airspeed, altitude, active route waypoint, runway distance, or aircraft phase. Published command points include nominal crossing altitude, speed, runway distance, and capture heading so you can choose a complete vertical and lateral profile. Replacing commands preserves current route progress by default; set restart_route true only for a deliberate new circuit such as a go-around. The simulator only tracks declared setpoints at 60 Hz and does not invent route, configuration, flare, or rollout decisions. Use only command point IDs published in the mission brief or accepted ATC clearance. Replace the whole program after accepting a diversion clearance; the previous program keeps flying until then.',
     inputSchema: {
       type: 'object',
       properties: {
         plan: { type: 'string', enum: routePlans },
-        rotate_speed_kt: { type: 'number', minimum: 150, maximum: 160 },
-        climb_pitch_deg: { type: 'number', minimum: 8, maximum: 14 },
-        climb_speed_kt: { type: 'number', minimum: 165, maximum: 210 },
-        cruise_altitude_ft: { type: 'number', minimum: 2200, maximum: 5000 },
-        cruise_speed_kt: { type: 'number', minimum: 190, maximum: 250 },
-        max_bank_deg: { type: 'number', minimum: 15, maximum: 25 },
-        approach_speed_kt: { type: 'number', minimum: 140, maximum: 155 },
-        landing_flaps_deg: { type: 'number', enum: [20, 30] },
+        commands: {
+          type: 'array', minItems: 2, maxItems: 16,
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', minLength: 1 },
+              when: {
+                type: 'object',
+                properties: { type: { type: 'string', enum: ['immediate', 'airspeed_at_least', 'altitude_at_least', 'active_waypoint', 'distance_to_runway_at_most', 'aircraft_phase'] }, value: { type: ['number', 'string'] } },
+                required: ['type'], additionalProperties: false,
+              },
+              lateral: {
+                type: 'object',
+                properties: { mode: { type: 'string', enum: ['heading', 'track_fix', 'bank'] }, heading_deg: { type: 'number', minimum: 0, maximum: 359.999 }, waypoint_id: { type: 'string', minLength: 1 }, bank_deg: { type: 'number', minimum: -25, maximum: 25 } },
+                required: ['mode'], additionalProperties: false,
+              },
+              vertical: {
+                type: 'object',
+                properties: { mode: { type: 'string', enum: ['pitch', 'altitude'] }, pitch_deg: { type: 'number', minimum: -10, maximum: 15 }, altitude_ft: { type: 'number', minimum: 585, maximum: 6000 } },
+                required: ['mode'], additionalProperties: false,
+              },
+              energy: {
+                type: 'object',
+                properties: { mode: { type: 'string', enum: ['throttle', 'airspeed'] }, throttle: { type: 'number', minimum: 0, maximum: 1 }, airspeed_kt: { type: 'number', minimum: 120, maximum: 260 } },
+                required: ['mode'], additionalProperties: false,
+              },
+              gear_down: { type: 'boolean' },
+              flaps_deg: { type: 'number', enum: [0, 10, 20, 30] },
+            },
+            required: ['id', 'when', 'lateral', 'vertical', 'energy', 'gear_down', 'flaps_deg'], additionalProperties: false,
+          },
+        },
+        restart_route: { type: 'boolean', default: false },
         reason: { type: 'string', minLength: 1 },
       },
-      required: ['plan', 'rotate_speed_kt', 'climb_pitch_deg', 'climb_speed_kt', 'cruise_altitude_ft', 'cruise_speed_kt', 'max_bank_deg', 'approach_speed_kt', 'landing_flaps_deg', 'reason'],
+      required: ['plan', 'commands', 'reason'],
       additionalProperties: false,
     },
   },
@@ -192,7 +219,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'accept_clearance', title: 'Read back ATC clearance', readOnly: false,
-    description: 'Accept the current ATC clearance by copying its clearance.id and reading back its destination, runway, altitude, and initial heading. Then submit program_flight_plan with that route, altitude, speed, and your remaining flight targets.',
+    description: 'Accept the current ATC clearance by copying its clearance.id and reading back its destination, runway, altitude, and initial heading. The clearance publishes permitted command points and their nominal crossing targets; then replace the command program for that route.',
     inputSchema: { type: 'object', properties: { clearance_id: { type: 'string', minLength: 1 }, readback: { type: 'string', minLength: 1 } }, required: ['clearance_id', 'readback'], additionalProperties: false },
   },
   {
@@ -221,7 +248,7 @@ export const flightToolDefinitions = [
   },
   {
     name: 'wait_for_flight_event', title: 'Wait for flight event', readOnly: true,
-    description: 'Wait without polling for route, comfort, configuration, handoff, touchdown, completion, or failure events. Emergency and failure events preempt routine notices. If a base leg stops converging, ATC issues fresh, reachable arrival vectors before returning route_progress_stalled.',
+    description: 'Wait without polling for route, comfort, configuration, handoff, touchdown, completion, or failure events. Emergency and failure events preempt routine notices. The aircraft keeps executing the active command program for the entire wait.',
     inputSchema: { type: 'object', properties: { after_revision: { type: 'number', minimum: 0 }, events: { type: 'array', items: { type: 'string', enum: flightEventValues }, minItems: 1 }, timeout_ms: { type: 'number', minimum: 1000, maximum: 15000, default: 15000 } }, additionalProperties: false },
   },
   {

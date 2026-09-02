@@ -8,20 +8,41 @@ export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
 export interface FlightEvidence { readonly source: EvidenceSource; readonly headline: string; readonly detail: string; readonly reliability: EvidenceReliability }
 export type RoutePlan = 'unassigned' | 'continue_kmdw' | 'return_kstl'
 export type DiversionPlan = Exclude<RoutePlan, 'unassigned'>
+export type FlightCommandTrigger =
+  | { readonly type: 'immediate' }
+  | { readonly type: 'airspeed_at_least'; readonly value: number }
+  | { readonly type: 'altitude_at_least'; readonly value: number }
+  | { readonly type: 'active_waypoint'; readonly value: string }
+  | { readonly type: 'distance_to_runway_at_most'; readonly value: number }
+  | { readonly type: 'aircraft_phase'; readonly value: AircraftPhase }
+export type LateralCommand =
+  | { readonly mode: 'heading'; readonly headingDeg: number }
+  | { readonly mode: 'track_fix'; readonly waypointId: string }
+  | { readonly mode: 'bank'; readonly bankDeg: number }
+export type VerticalCommand =
+  | { readonly mode: 'pitch'; readonly pitchDeg: number }
+  | { readonly mode: 'altitude'; readonly altitudeFt: number }
+export type EnergyCommand =
+  | { readonly mode: 'throttle'; readonly throttle: number }
+  | { readonly mode: 'airspeed'; readonly airspeedKt: number }
+export interface FlightCommandStep {
+  readonly id: string
+  readonly when: FlightCommandTrigger
+  readonly lateral: LateralCommand
+  readonly vertical: VerticalCommand
+  readonly energy: EnergyCommand
+  readonly gearDown: boolean
+  readonly flapsDeg: 0 | 10 | 20 | 30
+}
 export interface FlightPlanProgram {
   readonly plan: DiversionPlan
-  readonly rotateSpeedKt: number
-  readonly climbPitchDeg: number
-  readonly climbSpeedKt: number
-  readonly cruiseAltitudeFt: number
-  readonly cruiseSpeedKt: number
-  readonly maxBankDeg: number
-  readonly approachSpeedKt: number
-  readonly landingFlapsDeg: 20 | 30
+  readonly commands: readonly FlightCommandStep[]
+  readonly restartRoute?: boolean
 }
 export interface AutopilotState {
   readonly engaged: boolean
   readonly program: FlightPlanProgram | null
+  readonly activeCommandIndex: number | null
   readonly programmedAtElapsedSeconds: number | null
 }
 export type MissionPhase = 'preflight' | 'takeoff' | 'planning' | 'enroute' | 'approach' | 'flare' | 'rollout' | 'complete' | 'failed'
@@ -45,6 +66,15 @@ export type ConfigurationStage = 'takeoff' | 'positive_rate' | 'climb_cleanup' |
 export interface ConfigurationProcedure { readonly stage: ConfigurationStage; readonly gearDown: boolean; readonly flapsDeg: 0 | 10 | 20 | 30; readonly compliant: boolean; readonly instruction: string }
 export type RouteWaypointKind = 'departure' | 'enroute' | 'base' | 'final' | 'touchdown'
 export interface RouteWaypoint { readonly id: string; readonly name: string; readonly kind: RouteWaypointKind; readonly lat: number; readonly lon: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly captureRadiusNm: number; readonly captureHeadingDeg?: number }
+export interface RouteCommandPoint {
+  readonly id: string
+  readonly name: string
+  readonly kind: RouteWaypointKind
+  readonly altitudeFt: number
+  readonly airspeedKt: number
+  readonly distanceToRunwayNm: number
+  readonly captureHeadingDeg?: number
+}
 export interface RouteState { readonly plan: RoutePlan; readonly destination: 'KMDW' | 'KSTL' | null; readonly runway: '31C' | '30L' | null; readonly waypoints: readonly RouteWaypoint[]; readonly activeWaypointIndex: number; readonly completedWaypointIds: readonly string[]; readonly activeLegOrigin: { readonly lat: number; readonly lon: number }; readonly reason: string | null }
 
 export interface AtcClearance {
@@ -59,6 +89,7 @@ export interface AtcClearance {
   readonly airspeedKt: number
   readonly approach: string
   readonly instruction: string
+  readonly commandPoints: readonly RouteCommandPoint[]
 }
 export interface AtcState {
   readonly status: 'none' | 'requested' | 'cleared' | 'accepted'
@@ -173,7 +204,7 @@ export interface MissionBrief {
   readonly deadlineSeconds: number
   readonly airports: readonly Airport[]
   readonly runways: readonly MissionRunway[]
-  readonly assignedRoute: { readonly plan: 'continue_kmdw'; readonly destination: 'KMDW'; readonly runway: '31C'; readonly altitudeFt: 3_000; readonly airspeedKt: 230 }
+  readonly assignedRoute: { readonly plan: 'continue_kmdw'; readonly destination: 'KMDW'; readonly runway: '31C'; readonly altitudeFt: 3_000; readonly airspeedKt: 230; readonly commandPoints: readonly RouteCommandPoint[] }
   readonly availablePlans: readonly RoutePlan[]
   readonly evidenceSources: readonly EvidenceSource[]
   readonly successConditions: readonly string[]

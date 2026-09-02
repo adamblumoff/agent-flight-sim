@@ -5,7 +5,7 @@ import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceF
 import { DREAMLINER_787_9_ENVELOPE, staticThrustAccelerationKtPerSecond } from '../src/sim/aircraftEnvelope.ts'
 import { KMDW_RUNWAY_31C, KSTL_DEPARTURE_START, KSTL_RUNWAY_12R, KSTL_RUNWAY_30L } from '../src/sim/airfields.ts'
 import { checkpointCaptureRadiusNm } from '../src/sim/checkpoints.ts'
-import { approachAssessmentFor, arrivalLegProgressed, autopilotCommandFor, deepensUnsafeBank, distanceNm, flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg, routeFor } from '../src/sim/flightSimulator.ts'
+import { approachAssessmentFor, arrivalLegProgressed, deepensUnsafeBank, distanceNm, flightCommandTargetsFor, flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg, routeFor } from '../src/sim/flightSimulator.ts'
 import type { ControlOwner, FlightPlanProgram, RouteWaypoint, TraceActor } from '../src/sim/types.ts'
 
 const weather = {
@@ -173,26 +173,43 @@ const started = await executeFlightTool('start_flight', {})
 assert.equal(started.ok, true)
 const brief = await executeFlightTool('get_mission_brief', {})
 assert.equal(brief.details.brief.deadlineSeconds, 480)
+assert.deepEqual(brief.details.brief.assignedRoute.commandPoints.map(({ id }) => id), ['KSTL_CLIMB', 'KSTL_DEPARTURE_CORRIDOR'])
+assert.deepEqual(
+  brief.details.brief.assignedRoute.commandPoints.map(({ altitudeFt, airspeedKt, captureHeadingDeg }) => ({ altitudeFt, airspeedKt, captureHeadingDeg })),
+  [
+    { altitudeFt: 1_200, airspeedKt: 190, captureHeadingDeg: 124 },
+    { altitudeFt: 3_000, airspeedKt: 235, captureHeadingDeg: 124 },
+  ],
+)
 const program: FlightPlanProgram = {
-  plan: 'continue_kmdw', rotateSpeedKt: 155, climbPitchDeg: 10, climbSpeedKt: 180,
-  cruiseAltitudeFt: 3_000, cruiseSpeedKt: 230, maxBankDeg: 22,
-  approachSpeedKt: 145, landingFlapsDeg: 30,
+  plan: 'continue_kmdw',
+  commands: [
+    { id: 'takeoff-roll', when: { type: 'immediate' }, lateral: { mode: 'heading', headingDeg: 124 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 1 }, gearDown: true, flapsDeg: 10 },
+    { id: 'rotate', when: { type: 'airspeed_at_least', value: 155 }, lateral: { mode: 'heading', headingDeg: 124 }, vertical: { mode: 'pitch', pitchDeg: 10 }, energy: { mode: 'throttle', throttle: 1 }, gearDown: true, flapsDeg: 10 },
+    { id: 'positive-rate', when: { type: 'aircraft_phase', value: 'airborne' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_CLIMB' }, vertical: { mode: 'pitch', pitchDeg: 8 }, energy: { mode: 'airspeed', airspeedKt: 180 }, gearDown: false, flapsDeg: 10 },
+    { id: 'climb-cleanup', when: { type: 'altitude_at_least', value: 1_600 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_DEPARTURE_CORRIDOR' }, vertical: { mode: 'altitude', altitudeFt: 3_000 }, energy: { mode: 'airspeed', airspeedKt: 230 }, gearDown: false, flapsDeg: 0 },
+  ],
 }
 const route = await executeFlightTool('program_flight_plan', {
   plan: program.plan,
-  rotate_speed_kt: program.rotateSpeedKt,
-  climb_pitch_deg: program.climbPitchDeg,
-  climb_speed_kt: program.climbSpeedKt,
-  cruise_altitude_ft: program.cruiseAltitudeFt,
-  cruise_speed_kt: program.cruiseSpeedKt,
-  max_bank_deg: program.maxBankDeg,
-  approach_speed_kt: program.approachSpeedKt,
-  landing_flaps_deg: program.landingFlapsDeg,
+  commands: program.commands.map((command) => ({
+    id: command.id,
+    when: { type: command.when.type, ...('value' in command.when ? { value: command.when.value } : {}) },
+    lateral: command.lateral.mode === 'heading' ? { mode: 'heading' as const, heading_deg: command.lateral.headingDeg }
+      : command.lateral.mode === 'track_fix' ? { mode: 'track_fix' as const, waypoint_id: command.lateral.waypointId }
+        : { mode: 'bank' as const, bank_deg: command.lateral.bankDeg },
+    vertical: command.vertical.mode === 'pitch' ? { mode: 'pitch' as const, pitch_deg: command.vertical.pitchDeg }
+      : { mode: 'altitude' as const, altitude_ft: command.vertical.altitudeFt },
+    energy: command.energy.mode === 'throttle' ? { mode: 'throttle' as const, throttle: command.energy.throttle }
+      : { mode: 'airspeed' as const, airspeed_kt: command.energy.airspeedKt },
+    gear_down: command.gearDown,
+    flaps_deg: command.flapsDeg,
+  })),
   reason: 'Program the assigned flight.',
 })
 assert.equal(route.ok, true)
 assert.equal(route.state.autopilot.engaged, true)
-const takeoffDirectorCommand = autopilotCommandFor(flightSimulator.getState(), program)
+const takeoffDirectorCommand = flightCommandTargetsFor(flightSimulator.getState(), program.commands[0])
 assert.equal(takeoffDirectorCommand.throttle, 1)
 assert.equal(takeoffDirectorCommand.flapsDeg, 10)
 const controls = await executeFlightTool('fly_control_window', { throttle: 1, pitchIntent: 0, bankIntent: 0, duration_ms: 250, reason: 'Start the takeoff roll.' })
@@ -224,23 +241,65 @@ for (const seed of [17, 42, 81] as const) {
   flightSimulator.advanceForTesting(5)
   const clearance = flightSimulator.getState().atc.clearance
   assert.ok(clearance, `Seed ${seed} must receive an ATC clearance`)
+  assert.deepEqual(clearance.commandPoints.map(({ id }) => id), ['KSTL_OUTBOUND', 'KSTL_COURSE_REVERSAL', 'KSTL_FINAL', 'KSTL_TOUCHDOWN'])
+  assert.ok(clearance.commandPoints.every(({ altitudeFt, airspeedKt, distanceToRunwayNm }) => altitudeFt > 0 && airspeedKt > 0 && distanceToRunwayNm >= 0))
   assert.equal(flightSimulator.acceptAtcClearance(
     clearance.id,
     `${clearance.destination} runway ${clearance.runway}, altitude ${clearance.altitudeFt}, heading ${Math.round(clearance.headingDeg)}`,
     'agent',
   ).accepted, true)
   const returnProgram: FlightPlanProgram = {
-    ...program,
     plan: 'return_kstl',
-    cruiseAltitudeFt: clearance.altitudeFt,
-    cruiseSpeedKt: clearance.airspeedKt,
+    commands: [
+      { id: 'cleared-outbound', when: { type: 'immediate' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_OUTBOUND' }, vertical: { mode: 'altitude', altitudeFt: clearance.altitudeFt }, energy: { mode: 'airspeed', airspeedKt: clearance.airspeedKt }, gearDown: false, flapsDeg: 0 },
+      { id: 'course-reversal', when: { type: 'active_waypoint', value: 'KSTL_COURSE_REVERSAL' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_COURSE_REVERSAL' }, vertical: { mode: 'altitude', altitudeFt: clearance.altitudeFt }, energy: { mode: 'airspeed', airspeedKt: clearance.airspeedKt }, gearDown: false, flapsDeg: 0 },
+      { id: 'final-intercept', when: { type: 'active_waypoint', value: 'KSTL_FINAL' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_FINAL' }, vertical: { mode: 'altitude', altitudeFt: 3_000 }, energy: { mode: 'airspeed', airspeedKt: 165 }, gearDown: true, flapsDeg: 20 },
+      { id: 'eight-mile-step', when: { type: 'distance_to_runway_at_most', value: 8 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_FINAL' }, vertical: { mode: 'altitude', altitudeFt: 2_000 }, energy: { mode: 'airspeed', airspeedKt: 160 }, gearDown: true, flapsDeg: 20 },
+      { id: 'six-mile-step', when: { type: 'distance_to_runway_at_most', value: 6 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_FINAL' }, vertical: { mode: 'altitude', altitudeFt: 1_400 }, energy: { mode: 'airspeed', airspeedKt: 155 }, gearDown: true, flapsDeg: 20 },
+      { id: 'four-mile-step', when: { type: 'distance_to_runway_at_most', value: 4 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_FINAL' }, vertical: { mode: 'altitude', altitudeFt: 900 }, energy: { mode: 'airspeed', airspeedKt: 150 }, gearDown: true, flapsDeg: 20 },
+      { id: 'landing-descent', when: { type: 'active_waypoint', value: 'KSTL_TOUCHDOWN' }, lateral: { mode: 'track_fix', waypointId: 'KSTL_TOUCHDOWN' }, vertical: { mode: 'altitude', altitudeFt: 700 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+      { id: 'short-final', when: { type: 'distance_to_runway_at_most', value: 1 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_TOUCHDOWN' }, vertical: { mode: 'pitch', pitchDeg: 3.5 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+      { id: 'flare', when: { type: 'distance_to_runway_at_most', value: 0.35 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_TOUCHDOWN' }, vertical: { mode: 'pitch', pitchDeg: 7.2 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+      { id: 'decrab', when: { type: 'distance_to_runway_at_most', value: 0.05 }, lateral: { mode: 'heading', headingDeg: 299 }, vertical: { mode: 'pitch', pitchDeg: 7.2 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+      { id: 'rollout', when: { type: 'aircraft_phase', value: 'landing_roll' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 0 }, gearDown: true, flapsDeg: 30 },
+    ],
   }
   assert.equal(flightSimulator.programFlightPlan(returnProgram, 'Program the cleared emergency return.', 'agent').accepted, true)
+  if (seed === 17) {
+    while (flightSimulator.getState().route.activeWaypointIndex === 0 && flightSimulator.getState().mission.outcome === 'in_progress') {
+      flightSimulator.advanceForTesting(1)
+    }
+    const progressBeforeReplacement = flightSimulator.getState().route
+    const resumedCommands = returnProgram.commands.slice(progressBeforeReplacement.activeWaypointIndex).map((command, index) => index === 0
+      ? Object.freeze({ ...command, when: Object.freeze({ type: 'immediate' as const }) })
+      : command)
+    assert.equal(flightSimulator.programFlightPlan(
+      { ...returnProgram, commands: resumedCommands },
+      'Refine exact commands without restarting the cleared route.',
+      'agent',
+    ).accepted, true)
+    assert.equal(flightSimulator.getState().route.activeWaypointIndex, progressBeforeReplacement.activeWaypointIndex)
+    assert.deepEqual(flightSimulator.getState().route.completedWaypointIds, progressBeforeReplacement.completedWaypointIds)
+  }
   while (flightSimulator.getState().mission.outcome === 'in_progress' && flightSimulator.getState().elapsedSeconds < 900) {
     flightSimulator.advanceForTesting(1)
   }
   const terminal = flightSimulator.getState()
   assert.equal(terminal.mission.outcome, 'landed', `Seed ${seed} autopilot ended as ${terminal.mission.outcome}`)
 }
+
+flightSimulator.reset(17)
+flightSimulator.transferControl('agent', 'agent', 'No-rescue diagnostic')
+const unsafeProgram: FlightPlanProgram = {
+  plan: 'continue_kmdw',
+  commands: [
+    { id: 'never-rotate', when: { type: 'immediate' }, lateral: { mode: 'heading', headingDeg: 124 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 1 }, gearDown: true, flapsDeg: 10 },
+    { id: 'unreachable-climb', when: { type: 'altitude_at_least', value: 6_000 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_CLIMB' }, vertical: { mode: 'pitch', pitchDeg: 10 }, energy: { mode: 'throttle', throttle: 1 }, gearDown: false, flapsDeg: 10 },
+  ],
+}
+assert.equal(flightSimulator.programFlightPlan(unsafeProgram, 'Deliberately unsafe no-rotation program.', 'agent').accepted, true)
+flightSimulator.advanceForTesting(180)
+assert.notEqual(flightSimulator.getState().mission.outcome, 'landed', 'The simulator must not rescue an unsafe command program')
+assert.equal(flightSimulator.getState().autopilot.activeCommandIndex, 0)
 
 console.log('simulation diagnostics passed')
