@@ -1,10 +1,11 @@
 import { COMFORT_BANK_WARNING_DEG, flightSimulator } from '../sim/flightSimulator.ts'
-import type { AircraftPhase, CheckrideSeed, FlightCommandStep, FlightPlanProgram, FlightState, RoutePlan } from '../sim/types.ts'
+import type { AircraftPhase, FlightCommandStep, FlightPlanProgram, FlightState, RoutePlan } from '../sim/types.ts'
 import {
-  checkrideSeeds, flightEventValues, routePlans,
+  flightEventValues, routePlans,
   type AgentFlightState, type FlightToolArguments, type FlightToolGuidance, type FlightToolName, type FlightToolResults,
   type ToolReceiptTone,
 } from './flightTools.ts'
+import { randomCheckrideSeed } from '../sim/missionProfiles.ts'
 
 const routeSet = new Set<string>(routePlans)
 const eventSet = new Set<string>(flightEventValues)
@@ -94,13 +95,6 @@ const action = (result: ReturnType<typeof flightSimulator.setRoute>) => ({
   guidance: guidanceFor(result.state),
 })
 
-const randomScenarioSeed = (): CheckrideSeed => {
-  const randomIndex = typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function'
-    ? crypto.getRandomValues(new Uint32Array(1))[0] % checkrideSeeds.length
-    : Math.floor(Math.random() * checkrideSeeds.length)
-  return checkrideSeeds[randomIndex]
-}
-
 const boundedTimeout = (value: unknown) => {
   if (value === undefined) return 15_000
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError('timeout_ms must be a finite number')
@@ -170,7 +164,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
       && current.route.plan === 'unassigned'
       && current.elapsedSeconds === 0
     const state = current.flightMode === 'unselected'
-      ? flightSimulator.startFlight('agent', randomScenarioSeed())
+      ? flightSimulator.startFlight('agent', randomCheckrideSeed())
       : pristineAgentSelection
         ? current
         : null

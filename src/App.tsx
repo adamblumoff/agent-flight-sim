@@ -15,6 +15,7 @@ import { FlightCompass } from './components/flight-compass'
 import { DREAMLINER_787_9_ENVELOPE } from './sim/aircraftEnvelope'
 import { DEFAULT_ENVIRONMENT_VOLUME, DEFAULT_RADIO_VOLUME, flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
+import { randomCheckrideSeed } from './sim/missionProfiles'
 import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
 import { createFlightRunExport } from './webmcp/runExport'
@@ -350,7 +351,7 @@ export default function App() {
   }, [])
 
   const startAgentFlight = useCallback(() => {
-    if (!flightSimulator.startFlight('agent')) return
+    if (!flightSimulator.startFlight('agent', randomCheckrideSeed())) return
     setShowTakeoffBrief(false)
   }, [])
 

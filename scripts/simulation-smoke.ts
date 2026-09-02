@@ -6,6 +6,7 @@ import { DREAMLINER_787_9_ENVELOPE, staticThrustAccelerationKtPerSecond } from '
 import { KMDW_RUNWAY_31C, KSTL_DEPARTURE_START, KSTL_RUNWAY_12R, KSTL_RUNWAY_30L } from '../src/sim/airfields.ts'
 import { checkpointCaptureRadiusNm } from '../src/sim/checkpoints.ts'
 import { approachAssessmentFor, arrivalLegProgressed, deepensUnsafeBank, distanceNm, flightCommandTargetsFor, flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg, routeFor } from '../src/sim/flightSimulator.ts'
+import { CHECKRIDE_SEEDS, randomCheckrideSeed } from '../src/sim/missionProfiles.ts'
 import type { FlightCommandStep, FlightMode, FlightPlanProgram, RouteCommandPoint, RouteWaypoint, TraceActor } from '../src/sim/types.ts'
 
 const weather = {
@@ -168,6 +169,7 @@ assert.equal(agentResult.throttle, 1)
 flightSimulator.reset(17)
 assert.equal(flightSimulator.getState().flightMode, 'unselected')
 assert.equal(flightSimulator.setThrottle(1, 'human', 'Blocked before selection').accepted, false)
+assert.ok(CHECKRIDE_SEEDS.includes(randomCheckrideSeed()), 'Randomized starts must use a sealed checkride scenario')
 assert.ok(flightSimulator.startFlight('human'))
 assert.equal(flightSimulator.startFlight('agent'), null, 'A selected mode cannot change during the run')
 await assert.rejects(() => executeFlightTool('start_flight', {}), /already started/, 'WebMCP cannot replace an active manual run')

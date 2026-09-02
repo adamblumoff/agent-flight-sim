@@ -1,8 +1,9 @@
 import type {
-  CheckrideSeed, ConfigurationProcedure, DiversionPlan,
+  ConfigurationProcedure, DiversionPlan,
   EmergencyDecisionContext, FlightEventType, FlightState, MissionBrief,
   MissionPhase, RoutePlan,
 } from '../sim/types.ts'
+export { CHECKRIDE_SEEDS as checkrideSeeds } from '../sim/missionProfiles.ts'
 
 type JsonSchema = Readonly<Record<string, unknown>>
 export type ToolReceiptTone = 'neutral' | 'success' | 'warning' | 'critical' | 'automation'
@@ -30,7 +31,6 @@ export interface FlightToolReceipt<T> {
   readonly details: T
 }
 
-export const checkrideSeeds = [17, 42, 81] as const satisfies readonly CheckrideSeed[]
 export const routePlans = ['continue_kmdw', 'return_kstl'] as const satisfies readonly RoutePlan[]
 export const flightEventValues = ['emergency_detected', 'decision_timer_expired', 'atc_clearance_received', 'atc_clearance_accepted', 'plan_updated', 'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching', 'passenger_safety_update', 'stall_warning', 'configuration_required', 'configuration_confirmed', 'go_around_required', 'approach_stable', 'touchdown', 'mission_complete', 'mission_failed'] as const satisfies readonly FlightEventType[]
 
