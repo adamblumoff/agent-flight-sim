@@ -53,7 +53,7 @@ assert.deepEqual(diversion, {
   speaker: 'copilot',
   speakerLabel: 'Copilot',
   priority: 'high',
-  text: 'Approach, Flightdeck one seven requests St. Louis Lambert. Falling thrust and urgent passenger.',
+  text: 'Approach, Agent Flight one seven requests St. Louis Lambert. Falling thrust and urgent passenger.',
   payloadRef: { traceId: 1, action: 'atc_diversion_requested' },
 })
 
@@ -75,7 +75,7 @@ const clearanceEvent = trace(2, 'atc_clearance_issued', 'clearance', {
 const clearance = buildRadioCue(clearanceEvent, state)
 assert.equal(clearance?.speaker, 'atc')
 assert.equal(clearance?.priority, 'interrupt')
-assert.equal(clearance?.text, 'Flightdeck one seven, radar vectors St. Louis Lambert. Fly heading zero four zero, maintain one thousand five hundred feet and two hundred thirty knots. Expect runway three zero left.')
+assert.equal(clearance?.text, 'Agent Flight one seven, radar vectors St. Louis Lambert. Fly heading zero four zero, maintain one thousand five hundred feet and two hundred thirty knots. Expect runway three zero left.')
 
 const readback = buildRadioCue(trace(3, 'atc_clearance_readback', 'KSTL runway 30L, maintain 1500 feet, initial heading 040.', {}), state)
 assert.equal(readback?.text, 'KSTL runway 30L, maintain 1500 feet, initial heading 040.')
@@ -91,7 +91,7 @@ const checkpoint = buildRadioCue(trace(5, 'checkpoint_reached', 'Lambert base', 
 assert.equal(checkpoint?.text, 'Lambert base captured. Next, Lambert final.')
 
 const approach = buildRadioCue(trace(6, 'approach_stable', 'KSTL 30L approach is stable', { runway: 'KSTL 30L' }), state)
-assert.equal(approach?.text, 'Flightdeck one seven, runway three zero left, cleared to land.')
+assert.equal(approach?.text, 'Agent Flight one seven, runway three zero left, cleared to land.')
 
 const touchdown = buildRadioCue(trace(7, 'touchdown', 'Touchdown on KSTL 30L', {
   runway: 'KSTL 30L',
@@ -121,7 +121,7 @@ const audibleKinds = [
   'landing-clearance',
 ] as const
 assert.equal(radioVoicePackCovers(audibleKinds), true, 'every ATC cue kind needs a deterministic clip')
-assert.deepEqual([...new Set(RADIO_VOICE_PACK.map(({ voice }) => voice))], ['af_heart'], 'the radio pack must use exactly one ATC voice')
+assert.deepEqual([...new Set(RADIO_VOICE_PACK.map(({ voice }) => voice))], ['ms_zira'], 'the radio pack must use exactly one ATC voice')
 assert.ok(RADIO_VOICE_PACK.every((clip) => clip.speaker === 'atc'), 'non-ATC cues must never enter the voice pack')
 assert.equal(radioVoiceClipFor(clearance!)?.key, 'clearance-issued-kstl-30l')
 assert.equal(radioVoiceClipFor(approach!)?.key, 'landing-clearance-30l')

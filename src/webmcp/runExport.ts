@@ -3,8 +3,8 @@ import type { FlightState, MissionBrief, TraceEvent } from '../sim/types'
 import type { WebMcpActivity } from './useWebMcp'
 
 export interface FlightRunExport {
-  readonly schemaVersion: 'flightdeck-run-v2'
-  readonly environmentVersion: 'flightdeck-webmcp-v5'
+  readonly schemaVersion: 'agent-flight-run-v2'
+  readonly environmentVersion: 'agent-flight-webmcp-v5'
   readonly generatedAt: string
   readonly run: {
     readonly runId: string
@@ -67,8 +67,8 @@ export function createFlightRunExport(
   const startedAt = completed[0]?.startedAt ?? null
   const completedAt = completed.at(-1)?.completedAt ?? null
   return Object.freeze({
-    schemaVersion: 'flightdeck-run-v2',
-    environmentVersion: 'flightdeck-webmcp-v5',
+    schemaVersion: 'agent-flight-run-v2',
+    environmentVersion: 'agent-flight-webmcp-v5',
     generatedAt: new Date().toISOString(),
     run: Object.freeze({
       runId: finalState.checkride.runId,

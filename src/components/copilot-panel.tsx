@@ -157,7 +157,7 @@ function MissionDebrief({
           <Button
             variant="outline"
             nativeButton={false}
-            render={<a href={runExportHref} download={`flightdeck-run-${runExport?.run.runId ?? 'export'}.json`} />}
+            render={<a href={runExportHref} download={`agent-flight-run-${runExport?.run.runId ?? 'export'}.json`} />}
           >
             <Download data-icon="inline-start" /> Export JSON
           </Button>

@@ -99,7 +99,7 @@ const airportName = (code: string) => {
   return code
 }
 
-const callSign = (state: FlightState) => `Flightdeck ${String(state.checkride.seed).split('').map((digit) => digitWords[Number(digit)]).join(' ')}`
+const callSign = (state: FlightState) => `Agent Flight ${String(state.checkride.seed).split('').map((digit) => digitWords[Number(digit)]).join(' ')}`
 
 const cue = (
   event: TraceEvent,

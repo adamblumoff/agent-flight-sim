@@ -1,6 +1,6 @@
 import type { FlightRunExport } from './runExport'
 
-const INDEX_KEY = 'flightdeck:evaluations:index'
+const INDEX_KEY = 'agent-flight:evaluations:index'
 const MAX_ARCHIVED_RUNS = 12
 
 export interface EvidencePersistenceResult {
@@ -10,10 +10,10 @@ export interface EvidencePersistenceResult {
 export async function persistEvaluationEvidence(run: FlightRunExport): Promise<EvidencePersistenceResult> {
   if (typeof window === 'undefined') return { serverPath: null }
 
-  const key = `flightdeck:evaluation:${run.run.runId}`
+  const key = `agent-flight:evaluation:${run.run.runId}`
   try {
     const summary = {
-      schemaVersion: 'flightdeck-evaluation-archive-v3',
+      schemaVersion: 'agent-flight-evaluation-archive-v3',
       runId: run.run.runId,
       buildId: run.run.buildId,
       profileId: run.run.profileId,
@@ -33,7 +33,7 @@ export async function persistEvaluationEvidence(run: FlightRunExport): Promise<E
   }
 
   try {
-    const response = await fetch('/__flightdeck/evidence', {
+    const response = await fetch('/__agent-flight/evidence', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(run),

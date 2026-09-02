@@ -9,9 +9,9 @@ const MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
 
 function evidenceArchive(): Plugin {
   return {
-    name: 'flightdeck-evidence-archive',
+    name: 'agent-flight-evidence-archive',
     configureServer(server) {
-      server.middlewares.use('/__flightdeck/evidence', (request, response) => {
+      server.middlewares.use('/__agent-flight/evidence', (request, response) => {
         if (request.method !== 'POST') {
           response.statusCode = 405
           response.end()
@@ -37,7 +37,7 @@ function evidenceArchive(): Plugin {
             const run = payload.run
             if (!run) throw new Error('Missing run metadata')
 
-            const runDirectory = join(process.cwd(), '.flightdeck', 'runs', runId)
+            const runDirectory = join(process.cwd(), '.agent-flight', 'runs', runId)
             await mkdir(runDirectory, { recursive: true })
             const callNumber = String(payload.calls.length).padStart(4, '0')
             const tool = String(payload.calls.at(-1)?.tool ?? 'start').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)

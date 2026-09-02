@@ -562,7 +562,7 @@ export default function App() {
         <div className="flight-brand">
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
-            <strong>Flightdeck</strong>
+            <strong>Can an Agent Be a Pilot?</strong>
             <span>N90FD · Wide-body twinjet</span>
           </div>
         </div>
