@@ -1,7 +1,6 @@
-export type ControlOwner = 'human' | 'agent'
-export type TraceActor = ControlOwner | 'system'
+export type FlightMode = 'unselected' | 'human' | 'agent'
+export type TraceActor = Exclude<FlightMode, 'unselected'> | 'system'
 export type CheckrideSeed = 17 | 42 | 81
-export type AgentMode = 'idle' | 'requested' | 'thinking' | 'flying' | 'complete'
 export type EvidenceSource = 'weather' | 'cockpit' | 'traffic' | 'passenger'
 export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
 
@@ -132,7 +131,7 @@ export interface LandingResult { readonly runway: string; readonly sinkRateFpm: 
 export interface DebriefEvent { readonly elapsedSeconds: number; readonly actor: TraceActor; readonly summary: string }
 export interface DebriefState { readonly status: 'in_progress' | 'landed' | 'failed'; readonly elapsedSeconds: number; readonly decision: RoutePlan; readonly decisionReason: string | null; readonly events: readonly DebriefEvent[]; readonly landing: LandingResult | null }
 
-export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'decision_timer_expired' | 'atc_clearance_received' | 'atc_clearance_accepted' | 'plan_updated' | 'route_progress_stalled' | 'checkpoint_reached' | 'comfort_limit_approaching' | 'passenger_safety_update' | 'stall_warning' | 'configuration_required' | 'configuration_confirmed' | 'go_around_required' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
+export type FlightEventType = 'emergency_detected' | 'decision_timer_expired' | 'atc_clearance_received' | 'atc_clearance_accepted' | 'plan_updated' | 'route_progress_stalled' | 'checkpoint_reached' | 'comfort_limit_approaching' | 'passenger_safety_update' | 'stall_warning' | 'configuration_required' | 'configuration_confirmed' | 'go_around_required' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
 export interface FlightEvent { readonly revision: number; readonly type: FlightEventType; readonly elapsedSeconds: number; readonly message: string; readonly phase: MissionPhase; readonly routePlan: RoutePlan }
 export interface MissionNavigationState {
   readonly phase: MissionPhase
@@ -164,7 +163,7 @@ export interface CheckrideState {
   readonly seed: CheckrideSeed
   readonly buildId: string
   readonly profileId: string
-  readonly status: 'armed' | 'decision_required' | 'awaiting_human' | 'resolved' | 'complete'
+  readonly status: 'armed' | 'decision_required' | 'resolved' | 'complete'
   readonly objective: string
   readonly deadlineSeconds: number
   readonly wallClockDeadlineSeconds: number
@@ -184,7 +183,7 @@ export interface FlightState {
   readonly lat: number; readonly lon: number; readonly altitudeFt: number; readonly airspeedKt: number; readonly verticalSpeedFpm: number; readonly headingDeg: number; readonly pitchDeg: number; readonly bankDeg: number; readonly throttle: number; readonly flapsDeg: number; readonly gearDown: boolean
   readonly controlInputs: PilotControls
   readonly elapsedSeconds: number; readonly fuelMinutesRemaining: number
-  readonly controlOwner: ControlOwner; readonly handoffRequested: boolean; readonly agentMode: AgentMode
+  readonly flightMode: FlightMode
   readonly autopilot: AutopilotState
   readonly motion: MotionState
   readonly impact: ImpactState | null

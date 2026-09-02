@@ -6,7 +6,7 @@ import { DREAMLINER_787_9_ENVELOPE, staticThrustAccelerationKtPerSecond } from '
 import { KMDW_RUNWAY_31C, KSTL_DEPARTURE_START, KSTL_RUNWAY_12R, KSTL_RUNWAY_30L } from '../src/sim/airfields.ts'
 import { checkpointCaptureRadiusNm } from '../src/sim/checkpoints.ts'
 import { approachAssessmentFor, arrivalLegProgressed, deepensUnsafeBank, distanceNm, flightCommandTargetsFor, flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg, routeFor } from '../src/sim/flightSimulator.ts'
-import type { ControlOwner, FlightCommandStep, FlightPlanProgram, RouteCommandPoint, RouteWaypoint, TraceActor } from '../src/sim/types.ts'
+import type { FlightCommandStep, FlightMode, FlightPlanProgram, RouteCommandPoint, RouteWaypoint, TraceActor } from '../src/sim/types.ts'
 
 const weather = {
   visibilityMiles: 10,
@@ -141,10 +141,10 @@ const safeGoAroundClimb = approachAssessmentFor({
 })
 assert.equal(safeGoAroundClimb.goAroundRequired, false)
 
-const runSharedCommands = (owner: ControlOwner) => {
-  const actor: TraceActor = owner
+const runSharedCommands = (mode: Exclude<FlightMode, 'unselected'>) => {
+  const actor: TraceActor = mode
   flightSimulator.reset(17)
-  if (owner === 'agent') flightSimulator.transferControl('agent', 'agent', 'Diagnostic handoff')
+  assert.ok(flightSimulator.startFlight(mode))
   assert.equal(flightSimulator.setRoute('continue_kmdw', 'File the assigned route.', actor).accepted, true)
   assert.equal(flightSimulator.setFlightControls({ throttle: 1, pitchIntent: 0.35, bankIntent: 0, reason: 'Shared command diagnostic' }, actor).accepted, true)
   flightSimulator.advanceForTesting(4)
@@ -166,9 +166,24 @@ assert.equal(agentResult.phase, 'takeoff')
 assert.equal(agentResult.throttle, 1)
 
 flightSimulator.reset(17)
-flightSimulator.transferControl('agent', 'agent', 'WebMCP diagnostic')
+assert.equal(flightSimulator.getState().flightMode, 'unselected')
+assert.equal(flightSimulator.setThrottle(1, 'human', 'Blocked before selection').accepted, false)
+assert.ok(flightSimulator.startFlight('human'))
+assert.equal(flightSimulator.startFlight('agent'), null, 'A selected mode cannot change during the run')
+await assert.rejects(() => executeFlightTool('start_flight', {}), /already started/, 'WebMCP cannot replace an active manual run')
+await assert.rejects(
+  () => executeFlightTool('wait_for_flight_event', { timeout_ms: 1_000 }),
+  /not in agent mode/,
+  'WebMCP event waits are unavailable during a manual run',
+)
+assert.equal(flightSimulator.setThrottle(1, 'agent', 'Blocked cross-mode input').accepted, false)
+assert.equal(flightSimulator.setThrottle(1, 'human', 'Allowed manual input').accepted, true)
+flightSimulator.reset(17)
+assert.equal(flightSimulator.getState().flightMode, 'unselected', 'Reset must restore mode selection')
 const started = await executeFlightTool('start_flight', {})
 assert.equal(started.ok, true)
+assert.equal(started.details.state.flightMode, 'agent')
+assert.equal(flightSimulator.setThrottle(0, 'human', 'Blocked manual input in agent mode').accepted, false)
 assert.equal(started.details.brief.deadlineSeconds, 480)
 assert.deepEqual(started.details.brief.assignedRoute.commandPoints.map(({ id }) => id), ['KSTL_CLIMB', 'KSTL_DEPARTURE_CORRIDOR'])
 assert.deepEqual(
@@ -221,7 +236,7 @@ assert.equal(emergency.state.checkride.decisionContextRead, true)
 
 for (const seed of [17, 42, 81] as const) {
   flightSimulator.reset(seed)
-  flightSimulator.transferControl('agent', 'agent', 'Autopilot diagnostic')
+  assert.ok(flightSimulator.startFlight('agent'))
   assert.equal(flightSimulator.programFlightPlan(program, 'Program the assigned departure.', 'agent').accepted, true)
   while (flightSimulator.getState().checkride.status !== 'decision_required' && flightSimulator.getState().elapsedSeconds < 180) {
     flightSimulator.advanceForTesting(1)
@@ -288,7 +303,7 @@ for (const seed of [17, 42, 81] as const) {
 }
 
 flightSimulator.reset(17)
-flightSimulator.transferControl('agent', 'agent', 'No-rescue diagnostic')
+assert.ok(flightSimulator.startFlight('agent'))
 const unsafeProgram: FlightPlanProgram = {
   plan: 'continue_kmdw',
   commands: [

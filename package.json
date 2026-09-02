@@ -37,5 +37,5 @@
     "vite": "^8.2.2",
     "webmcp-types": "^0.1.3"
   },
-  "description": "A shared-cockpit flight simulator for a human pilot and browser agent using WebMCP"
+  "description": "A flight simulator with separate manual and WebMCP agent modes"
 }

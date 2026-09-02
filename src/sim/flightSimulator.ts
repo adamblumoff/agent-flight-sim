@@ -1,9 +1,9 @@
 import type {
   ActionReceipt, AircraftConfigurationInput, AtcClearance,
-  CheckrideSeed, ConfigurationProcedure, ControlOwner, DebriefEvent, EvidenceSource, FlightEvent,
+  CheckrideSeed, ConfigurationProcedure, DebriefEvent, EvidenceSource, FlightEvent,
   FlightEventType, FlightEventWaitInput, FlightEventWaitResult, FlightEvidence,
   DiversionPlan, FlightCommandStep, FlightCommandTrigger, FlightPlanProgram, FlightState, FlightStateListener, EmergencyDecisionContext, MissionBrief, MissionOutcome, MissionPhase,
-  PilotControls, RouteCommandPoint, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
+  FlightMode, PilotControls, RouteCommandPoint, RoutePlan, RouteState, RouteWaypoint, ScenarioConditions, TraceActor,
   TraceEvent,
 } from './types'
 import type { FlightControlInput } from './flightCommands.ts'
@@ -678,8 +678,8 @@ const initialState = (seed: CheckrideSeed): FlightState => {
     ...start, altitudeFt: KSTL_RUNWAY_12R.elevationFt, airspeedKt: 0, verticalSpeedFpm: 0, headingDeg: KSTL_RUNWAY_12R.headingDeg,
     pitchDeg: 0, bankDeg: 0, throttle: 0, flapsDeg: envelope.takeoffFlapsDeg, gearDown: true,
     controlInputs: Object.freeze({ pitchAxis: 0, bankAxis: 0 }),
-    elapsedSeconds: 0, fuelMinutesRemaining: fuel, controlOwner: 'human', handoffRequested: false,
-    agentMode: 'idle', autopilot: Object.freeze({ engaged: false, program: null, activeCommandIndex: null, programmedAtElapsedSeconds: null }), route: initialRoute(), atc: Object.freeze({ status: 'none', requestedPlan: null, requestReason: null, clearance: null }), scenario,
+    elapsedSeconds: 0, fuelMinutesRemaining: fuel, flightMode: 'unselected',
+    autopilot: Object.freeze({ engaged: false, program: null, activeCommandIndex: null, programmedAtElapsedSeconds: null }), route: initialRoute(), atc: Object.freeze({ status: 'none', requestedPlan: null, requestReason: null, clearance: null }), scenario,
     motion: Object.freeze({ longitudinalAccelerationKtPerSecond: 0, verticalAccelerationFpmPerSecond: 0, turnRateDegPerSecond: 0, groundSpeedKt: 0, trackDeg: KSTL_RUNWAY_12R.headingDeg, headwindKt: NORMAL_DEPARTURE_SCENARIO.weather.windSpeedKt, crosswindKt: 0, angleOfAttackDeg: 0, stalled: false, turbulenceLevel: 'none' }),
     impact: null,
     aircraftPhase: 'takeoff_roll',
@@ -807,7 +807,19 @@ class FlightSimulator {
     this.publish(this.state)
   }
 
+  startFlight = (flightMode: Exclude<FlightMode, 'unselected'>, seed: CheckrideSeed = this.state.checkride.seed) => {
+    if (this.state.flightMode !== 'unselected') return null
+    this.reset(seed)
+    this.state = Object.freeze({ ...this.state, flightMode })
+    this.record(flightMode, 'flight_mode_selected', `${flightMode === 'human' ? 'Manual' : 'Agent'} flight selected`, { flightMode })
+    this.addDebrief(flightMode, `${flightMode === 'human' ? 'Manual' : 'Agent'} flight selected`)
+    this.previousState = this.state
+    this.publish(this.state)
+    return this.state
+  }
+
   inspectEvidence = (source: EvidenceSource, actor: TraceActor = 'agent'): FlightEvidence => {
+    this.assertActorMode(actor)
     if (this.emergencyTriggered) this.decisionTimerRunning = true
     const baseReport = evidenceFor(this.state.scenario)[source]
     const report = source === 'passenger'
@@ -822,6 +834,7 @@ class FlightSimulator {
   }
 
   getDecisionContext = (actor: TraceActor = 'agent'): EmergencyDecisionContext => {
+    this.assertActorMode(actor)
     if (!this.emergencyTriggered) throw new Error('Decision context is sealed until emergency_detected.')
     this.decisionTimerRunning = true
     this.state = Object.freeze({ ...this.state, checkride: Object.freeze({ ...this.state.checkride, decisionContextRead: true }) })
@@ -844,43 +857,12 @@ class FlightSimulator {
     })
   }
 
-  requestAgentHandoff = (actor: TraceActor = 'human', reason = 'Pilot requested copilot') => {
-    if (this.state.controlOwner !== 'human' || this.state.handoffRequested) return
-    this.state = Object.freeze({ ...this.state, handoffRequested: true, agentMode: 'requested' })
-    this.record(actor, 'handoff_requested', reason, {})
-    this.queueEvent('handoff_requested', 'The pilot is asking the copilot to take control.')
-    this.publish(this.state)
-  }
-
-  cancelAgentHandoff = (actor: TraceActor = 'human', reason = 'Pilot canceled handoff') => {
-    if (!this.state.handoffRequested) return
-    this.state = Object.freeze({ ...this.state, handoffRequested: false, agentMode: 'idle' })
-    this.record(actor, 'handoff_canceled', reason, {})
-    this.publish(this.state)
-  }
-
-  transferControl = (owner: ControlOwner, actor: TraceActor = owner, reason = `${owner} took control`) => {
-    this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
-    this.smoothedPilotControls = { pitchAxis: 0, bankAxis: 0 }
-    this.manualAttitudeTarget = { pitchDeg: this.state.pitchDeg, bankDeg: this.state.bankDeg }
-    this.state = Object.freeze({
-      ...this.state,
-      controlInputs: this.pilotControls,
-      controlOwner: owner,
-      handoffRequested: false,
-      agentMode: owner === 'agent' ? 'thinking' : 'idle',
-      autopilot: owner === 'human' ? Object.freeze({ ...this.state.autopilot, engaged: false }) : this.state.autopilot,
-    })
-    this.record(actor, 'control_transferred', reason, { owner })
-    this.addDebrief(actor, owner === 'agent' ? 'Copilot took control' : 'Pilot took control')
-    this.publish(this.state)
-  }
-
   setPilotControls = (input: PilotControls, actor: TraceActor = 'human', reason = 'Pilot controls') => {
-    this.setFlightControls({ pitchIntent: input.pitchAxis, bankIntent: input.bankAxis, reason }, actor)
+    return this.setFlightControls({ pitchIntent: input.pitchAxis, bankIntent: input.bankAxis, reason }, actor)
   }
 
-  releasePilotControls = () => {
+  releasePilotControls = (actor: TraceActor = 'human') => {
+    if (this.modeRejection(actor)) return
     this.pilotControls = Object.freeze({ pitchAxis: 0, bankAxis: 0 })
     if (this.state.controlInputs.pitchAxis === 0 && this.state.controlInputs.bankAxis === 0) return
     this.state = Object.freeze({ ...this.state, controlInputs: this.pilotControls })
@@ -888,16 +870,14 @@ class FlightSimulator {
   }
 
   levelPilotAttitude = (actor: TraceActor = 'human', reason = 'Pilot leveled the aircraft'): ActionReceipt => {
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const modeRejection = this.modeRejection(actor)
+    if (modeRejection) return modeRejection
     if (this.state.mission.outcome !== 'in_progress') return this.receipt(false, 'The flight has already ended.')
-    if (actor === 'human') this.takePilotControl(reason)
-    this.releasePilotControls()
+    this.releasePilotControls(actor)
     const activeKind = this.state.route.waypoints[this.state.route.activeWaypointIndex]?.kind
     const pitchDeg = activeKind === 'final' || activeKind === 'touchdown' ? 5 : 0
     this.manualAttitudeTarget = { pitchDeg, bankDeg: 0 }
-    if (actor === 'agent' && this.state.autopilot.engaged) {
-      this.state = Object.freeze({ ...this.state, autopilot: Object.freeze({ ...this.state.autopilot, engaged: false }), agentMode: 'thinking' })
-    }
+    if (actor === 'agent' && this.state.autopilot.engaged) this.state = Object.freeze({ ...this.state, autopilot: Object.freeze({ ...this.state.autopilot, engaged: false }) })
     this.record(actor, 'pilot_attitude_target', reason, { pitchDeg, bankDeg: 0 })
     this.publish(this.state)
     return this.receipt(true, `Bank target set to wings level and pitch target set to ${pitchDeg}°${pitchDeg === 5 ? ' for the 3° approach path' : ''}. Throttle and configuration are unchanged.`)
@@ -916,13 +896,13 @@ class FlightSimulator {
   }
 
   setThrottle = (value: number, actor: TraceActor = 'human', reason = 'Set throttle') => {
-    this.setFlightControls({ throttle: value, reason }, actor)
+    return this.setFlightControls({ throttle: value, reason }, actor)
   }
 
   setFlightControls = (input: FlightControlInput, actor: TraceActor = 'agent'): ActionReceipt => {
     const reason = input.reason?.trim() || `${actor} flight controls`
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
-    if (actor === 'human') this.takePilotControl(reason)
+    const modeRejection = this.modeRejection(actor)
+    if (modeRejection) return modeRejection
     const requestedBank = input.bankIntent ?? 0
     const nextThrottle = input.throttle ?? this.state.throttle
     const activeWaypoint = this.state.route.waypoints[this.state.route.activeWaypointIndex]
@@ -969,7 +949,6 @@ class FlightSimulator {
       ...this.state,
       controlInputs: this.pilotControls,
       throttle,
-      agentMode: actor === 'agent' ? 'flying' : this.state.agentMode,
       autopilot: actor === 'agent' && this.state.autopilot.engaged
         ? Object.freeze({ ...this.state.autopilot, engaged: false })
         : this.state.autopilot,
@@ -992,7 +971,8 @@ class FlightSimulator {
   setFlaps = (degrees: number, actor: TraceActor = 'human', reason = 'Set flaps') => this.configureAircraft({ flapsDeg: clamp(degrees, 0, 30) as 0 | 10 | 20 | 30, reason }, actor)
   setGear = (down: boolean, actor: TraceActor = 'human', reason = 'Set gear') => this.configureAircraft({ gearDown: down, reason }, actor)
   programFlightPlan = (program: FlightPlanProgram, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const modeRejection = this.modeRejection(actor)
+    if (modeRejection) return modeRejection
     if (this.state.mission.outcome !== 'in_progress') return this.receipt(false, 'The flight has already ended.')
     const filingPreflight = this.state.mission.phase === 'preflight'
     if (filingPreflight && program.plan !== 'continue_kmdw') return this.receipt(false, 'The assigned preflight route is continue_kmdw.')
@@ -1051,7 +1031,6 @@ class FlightSimulator {
       gearDown: firstTargets.gearDown,
       flapsDeg: firstTargets.flapsDeg,
       autopilot: Object.freeze({ engaged: true, program: frozenProgram, activeCommandIndex: 0, programmedAtElapsedSeconds: this.state.elapsedSeconds }),
-      agentMode: 'flying',
     })
     this.record(actor, 'flight_plan_programmed', reason, { plan: program.plan, commands: frozenCommands })
     this.record(actor, 'flight_command_activated', frozenCommands[0].id, { commandIndex: 0, command: frozenCommands[0] })
@@ -1063,7 +1042,8 @@ class FlightSimulator {
 
   setRoute = (plan: RoutePlan, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
     if (plan === 'unassigned') return this.receipt(false, 'Choose the assigned preflight route.')
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const modeRejection = this.modeRejection(actor)
+    if (modeRejection) return modeRejection
     const filingPreflight = this.state.mission.phase === 'preflight'
     if (filingPreflight && plan !== 'continue_kmdw') return this.receipt(false, 'The preflight route is continue_kmdw to Chicago Midway runway 31C.')
     if (!filingPreflight) {
@@ -1076,7 +1056,8 @@ class FlightSimulator {
   }
 
   requestDiversion = (plan: DiversionPlan, reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const modeRejection = this.modeRejection(actor)
+    if (modeRejection) return modeRejection
     if (!this.emergencyTriggered || this.state.checkride.status !== 'decision_required') return this.receipt(false, 'No emergency diversion decision is active.')
     if (!this.state.checkride.decisionContextRead) return this.receipt(false, 'Wait for emergency_detected and review its decisionContext before requesting a diversion.')
     if (this.state.atc.status !== 'none') return this.receipt(false, `ATC is already ${this.state.atc.status}; continue the current clearance flow.`)
@@ -1096,7 +1077,8 @@ class FlightSimulator {
   }
 
   acceptAtcClearance = (clearanceId: string, readback: string, actor: TraceActor = 'agent'): ActionReceipt => {
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const modeRejection = this.modeRejection(actor)
+    if (modeRejection) return modeRejection
     const clearance = this.state.atc.clearance
     if (this.state.atc.status !== 'cleared' || !clearance) return this.receipt(false, 'No ATC clearance is ready for readback.')
     if (clearance.id !== clearanceId) return this.receipt(false, 'The clearance_id does not match the current ATC clearance.')
@@ -1121,7 +1103,8 @@ class FlightSimulator {
   }
 
   initiateGoAround = (reason: string, actor: TraceActor = 'agent'): ActionReceipt => {
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const modeRejection = this.modeRejection(actor)
+    if (modeRejection) return modeRejection
     if (this.state.mission.outcome !== 'in_progress') return this.receipt(false, 'The flight has already ended.')
     if (this.state.aircraftPhase !== 'airborne' || this.state.route.destination !== 'KSTL' || this.state.checkride.status !== 'resolved') {
       return this.receipt(false, 'A go-around is available only while airborne on the cleared KSTL arrival.')
@@ -1190,7 +1173,6 @@ class FlightSimulator {
     if (this.emergencyTriggered) this.decisionTimerRunning = false
     this.state = Object.freeze({
       ...this.state, route,
-      agentMode: actor === 'agent' ? (filingPreflight ? 'thinking' : 'flying') : this.state.agentMode,
       mission: Object.freeze({
         ...this.state.mission,
         phase: filingPreflight ? 'preflight' : 'enroute',
@@ -1216,9 +1198,9 @@ class FlightSimulator {
   }
 
   configureAircraft = (input: AircraftConfigurationInput, actor: TraceActor = 'agent'): ActionReceipt => {
-    if (actor === 'agent' && this.state.controlOwner !== 'agent') return this.receipt(false, 'The copilot does not have control.')
+    const modeRejection = this.modeRejection(actor)
+    if (modeRejection) return modeRejection
     const required = configurationProcedureFor(this.state)
-    if (actor === 'human') this.takePilotControl(input.reason ?? 'Pilot changed configuration')
     const configured = { ...this.state, gearDown: input.gearDown ?? this.state.gearDown, flapsDeg: input.flapsDeg ?? this.state.flapsDeg }
     const procedure = configurationProcedureFor(configured)
     const incorrectConfiguration = actor !== 'system'
@@ -1280,7 +1262,7 @@ class FlightSimulator {
 
   private readonly advanceClock = (timeMs: number) => {
     if (this.lastFrameMs === null) this.lastFrameMs = timeMs
-    const maxFrame = this.state.controlOwner === 'agent' ? MAX_AGENT_FRAME : MAX_FRAME
+    const maxFrame = this.state.flightMode === 'agent' ? MAX_AGENT_FRAME : MAX_FRAME
     this.accumulator += Math.min((timeMs - this.lastFrameMs) / 1_000, maxFrame) * MISSION_PROFILE.simulationRate
     this.lastFrameMs = timeMs
     while (this.accumulator >= STEP) {
@@ -1309,7 +1291,7 @@ class FlightSimulator {
     if (this.state.mission.outcome !== 'in_progress') return
     if (this.state.mission.phase === 'preflight') return
     let programmedGroundHeadingDeg: number | null = null
-    if (this.state.controlOwner === 'agent' && this.state.autopilot.engaged && this.state.autopilot.program) {
+    if (this.state.flightMode === 'agent' && this.state.autopilot.engaged && this.state.autopilot.program) {
       const program = this.state.autopilot.program
       let activeCommandIndex = this.state.autopilot.activeCommandIndex ?? 0
       const nextCommand = program.commands[activeCommandIndex + 1]
@@ -1639,7 +1621,6 @@ class FlightSimulator {
       mission, passengerSafety,
       checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, wallClockSecondsRemaining, decisionSecondsRemaining, status: status === 'in_progress' ? this.state.checkride.status : 'complete', score }),
       debrief: Object.freeze({ ...this.state.debrief, status, elapsedSeconds, landing }),
-      agentMode: status === 'in_progress' ? this.state.agentMode : 'complete',
     })
     for (const deduction of newDeductions) this.addDebrief('system', `−${deduction.points} points: ${deduction.reason}`)
     const departureEstablished = routeUpdate.route.completedWaypointIds.includes('KSTL_CLIMB')
@@ -1699,13 +1680,13 @@ class FlightSimulator {
       const nextMessage = routeUpdate.next && routeUpdate.next.id !== routeUpdate.reached.id
         ? ` Next checkpoint: ${routeUpdate.next.name}.`
         : ' Final route checkpoint captured.'
-      this.record(this.state.controlOwner, 'checkpoint_reached', routeUpdate.reached.name, {
+      this.record(this.activeFlightActor(), 'checkpoint_reached', routeUpdate.reached.name, {
         waypointId: routeUpdate.reached.id,
         waypointName: routeUpdate.reached.name,
         nextFix: routeUpdate.next?.name ?? null,
         final: routeUpdate.next === null,
       })
-      this.addDebrief(this.state.controlOwner, `Reached ${routeUpdate.reached.name}`)
+      this.addDebrief(this.activeFlightActor(), `Reached ${routeUpdate.reached.name}`)
       this.queueEvent('checkpoint_reached', `Reached checkpoint ${routeUpdate.reached.name}.${nextMessage}`)
     }
     if (passengerStatusChanged && (passengerSafety.status === 'distressed' || passengerSafety.status === 'injured')) {
@@ -1732,7 +1713,7 @@ class FlightSimulator {
       this.record('system', 'approach_stable', `${runway.id} approach is stable`, { runway: runway.id })
       this.queueEvent('approach_stable', `${runway.id} approach is stable.`)
     }
-    if (departedJustNow) this.addDebrief(this.state.controlOwner, `Departed ${KSTL_RUNWAY_12R.id}`)
+    if (departedJustNow) this.addDebrief(this.activeFlightActor(), `Departed ${KSTL_RUNWAY_12R.id}`)
     if (touchdownJustOccurred && landing) {
       this.record('system', 'touchdown', `Touchdown on ${runway.id}`, { ...landing })
       this.queueEvent('touchdown', `Touchdown on ${runway.id}.`)
@@ -1791,7 +1772,6 @@ class FlightSimulator {
       mission,
       checkride: Object.freeze({ ...this.state.checkride, fuelMinutesRemaining, status: 'complete' }),
       debrief: Object.freeze({ ...this.state.debrief, status, elapsedSeconds }),
-      agentMode: 'complete',
     })
     if (finished) {
       this.crashDynamics = null
@@ -1966,20 +1946,6 @@ class FlightSimulator {
     this.queueEvent(success ? 'mission_complete' : 'mission_failed', success ? 'Aircraft stopped safely.' : `Mission failed: ${outcome.replaceAll('_', ' ')}.`)
   }
 
-  private takePilotControl(reason: string) {
-    if (this.state.controlOwner === 'human') return
-    this.releasePilotControls()
-    this.manualAttitudeTarget = { pitchDeg: this.state.pitchDeg, bankDeg: this.state.bankDeg }
-    this.state = Object.freeze({
-      ...this.state,
-      controlOwner: 'human',
-      agentMode: 'idle',
-      autopilot: Object.freeze({ ...this.state.autopilot, engaged: false }),
-    })
-    this.addDebrief('human', 'Pilot overrode the copilot')
-    this.record('human', 'human_override', reason, {})
-  }
-
   private issueAtcClearance() {
     const plan = this.state.atc.requestedPlan
     if (this.state.atc.status !== 'requested' || !plan) return
@@ -2023,6 +1989,27 @@ class FlightSimulator {
     })
     this.addDebrief('system', `ATC issued ${clearance.id}`)
     this.queueEvent('atc_clearance_received', `${clearance.instruction} Read back clearance ${clearance.id} with destination, runway, altitude, and initial heading.`)
+  }
+
+  private activeFlightActor(): TraceActor {
+    return this.state.flightMode === 'unselected' ? 'system' : this.state.flightMode
+  }
+
+  private assertActorMode(actor: TraceActor) {
+    if (actor === 'system') return
+    if (this.state.flightMode === 'unselected') throw new Error('Choose a manual or agent flight before continuing.')
+    if (this.state.flightMode !== actor) throw new Error(`This run is locked to ${this.state.flightMode} control. Start a new flight to change modes.`)
+  }
+
+  private modeRejection(actor: TraceActor): ActionReceipt | null {
+    if (actor === 'system') return null
+    if (this.state.flightMode === 'unselected') {
+      return this.receipt(false, 'Choose a manual or agent flight before using the controls.')
+    }
+    if (this.state.flightMode !== actor) {
+      return this.receipt(false, `This run is locked to ${this.state.flightMode} control. Start a new flight to change modes.`)
+    }
+    return null
   }
 
   private addDebrief(actor: TraceActor, summary: string) {

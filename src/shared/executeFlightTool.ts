@@ -31,7 +31,7 @@ const hazardsFor = (state: FlightState): readonly string[] => {
 }
 
 const availableActionsFor = (state: FlightState): readonly FlightToolName[] => {
-  if (state.mission.outcome !== 'in_progress' || state.controlOwner === 'human') return Object.freeze([])
+  if (state.mission.outcome !== 'in_progress' || state.flightMode !== 'agent') return Object.freeze([])
   const actions: FlightToolName[] = ['wait_for_flight_event']
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'none') actions.push('request_diversion')
@@ -47,9 +47,8 @@ const availableActionsFor = (state: FlightState): readonly FlightToolName[] => {
 
 const objectiveFor = (state: FlightState) => {
   if (state.mission.outcome !== 'in_progress') return 'Review the completed flight and its debrief.'
-  if (state.controlOwner === 'human') return state.handoffRequested
-    ? 'A handoff is available; control remains with the pilot until it is accepted.'
-    : 'Monitor the flight until the pilot requests a handoff.'
+  if (state.flightMode === 'unselected') return 'Start a new agent flight before issuing flight commands.'
+  if (state.flightMode === 'human') return 'This run is locked to manual control. Reset before starting an agent flight.'
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned'
     ? 'Review the assignment, file the preflight route, and prepare the aircraft for departure.'
     : 'Conduct a safe departure on the filed route.'
@@ -61,7 +60,7 @@ const objectiveFor = (state: FlightState) => {
 }
 
 const controlCueFor = (state: FlightState) => {
-  if (state.controlOwner !== 'agent' || state.mission.outcome !== 'in_progress' || !state.mission.nextFix) return null
+  if (state.flightMode !== 'agent' || state.mission.outcome !== 'in_progress' || !state.mission.nextFix) return null
   if (state.motion.stalled) return 'STALL: program throttle 0.85 or higher, negative pitch, gear up, flaps 0° or 10°, and bank toward wings level.'
   if (state.mission.goAroundRequired) return 'GO AROUND: replace the return_kstl program with restart_route true. The immediate command must use positive pitch and high throttle with gear up and no more than 10° flaps before altitude hold.'
   if (state.autopilot.engaged && state.autopilot.program && state.autopilot.activeCommandIndex !== null) {
@@ -165,9 +164,17 @@ const flightPlanProgram = (input: FlightToolArguments['program_flight_plan']): F
 const executors: { readonly [Name in FlightToolName]: (input: FlightToolArguments[Name]) => Promise<FlightToolResults[Name]> } = {
   start_flight: async (input) => {
     if (Object.keys(input).length > 0) throw new TypeError('start_flight takes no arguments; the scenario is selected by the environment')
-    flightSimulator.reset(randomScenarioSeed())
-    flightSimulator.transferControl('agent', 'agent', 'Agent started the assigned flight')
-    const state = flightSimulator.getState()
+    const current = flightSimulator.getState()
+    const pristineAgentSelection = current.flightMode === 'agent'
+      && current.mission.phase === 'preflight'
+      && current.route.plan === 'unassigned'
+      && current.elapsedSeconds === 0
+    const state = current.flightMode === 'unselected'
+      ? flightSimulator.startFlight('agent', randomScenarioSeed())
+      : pristineAgentSelection
+        ? current
+        : null
+    if (!state) throw new Error('The current run has already started. Reset the flight before choosing agent control.')
     return receipt('Flight is ready at St. Louis Lambert. Program the assigned route before moving.', 'automation', {
       runId: state.checkride.runId,
       state: agentState(state),
@@ -189,6 +196,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     return action(flightSimulator.acceptAtcClearance(input.clearance_id.trim(), input.readback.trim(), 'agent'))
   },
   wait_for_flight_event: async (input) => {
+    if (flightSimulator.getState().flightMode !== 'agent') throw new Error('This run is not in agent mode. Reset the flight before using WebMCP flight tools.')
     if (input.after_revision !== undefined && (typeof input.after_revision !== 'number' || !Number.isFinite(input.after_revision))) throw new TypeError('after_revision must be a finite number')
     if (input.events !== undefined && (!Array.isArray(input.events) || input.events.length === 0 || input.events.some((event) => !eventSet.has(event)))) throw new TypeError('events contains an unsupported flight event')
     const result = await flightSimulator.waitForFlightEvent({ afterRevision: input.after_revision ?? flightSimulator.getEventRevision(), events: input.events ?? flightEventValues, timeoutMs: boundedTimeout(input.timeout_ms) })

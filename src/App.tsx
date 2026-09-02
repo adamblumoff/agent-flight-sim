@@ -7,10 +7,7 @@ import {
   type CopilotDebrief,
   type CopilotObservation,
 } from './components/copilot-panel'
-import {
-  OwnershipControl,
-  type OwnershipMode,
-} from './components/ownership-control'
+import { FlightModeBadge } from './components/flight-mode-badge'
 import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
@@ -18,7 +15,6 @@ import { FlightCompass } from './components/flight-compass'
 import { DREAMLINER_787_9_ENVELOPE } from './sim/aircraftEnvelope'
 import { DEFAULT_ENVIRONMENT_VOLUME, DEFAULT_RADIO_VOLUME, flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
-import { MISSION_PROFILE } from './sim/missionProfiles'
 import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
 import { createFlightRunExport } from './webmcp/runExport'
@@ -108,7 +104,7 @@ function deriveRecommendation(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned'
     ? 'File the Chicago Midway runway 31C route before beginning the takeoff roll.'
     : 'The Chicago Midway route is filed. Apply power when you are ready to begin the takeoff roll.'
-  if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then decide who flies the arrival.'
+  if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then continue on the assigned departure.'
   if (state.mission.goAroundRequired) return 'Go around now. Climb away from the ground before trying another approach.'
   if (!state.procedure.compliant) return state.procedure.instruction
   if (state.mission.routeStatus === 'stalled') return 'ATC has issued fresh arrival vectors. Follow the updated route guidance.'
@@ -118,11 +114,11 @@ function deriveRecommendation(state: FlightState): string {
     if (state.atc.status === 'cleared') return `Read back and accept clearance ${state.atc.clearance?.id ?? ''} before changing course.`
     return 'Review the emergency evidence, choose a diversion, and request clearance from ATC.'
   }
-  if (state.controlOwner === 'human' && state.route.plan === 'return_kstl') {
+  if (state.flightMode === 'human' && state.route.plan === 'return_kstl') {
     return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KSTL runway 30L.'
   }
   if (state.route.reason) return state.route.reason
-  if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
+  if (state.flightMode === 'agent' && !state.autopilot.engaged) {
     return 'Check the current conditions before changing the route or aircraft configuration.'
   }
   if (state.scenario.engine.health === 'failing' || state.scenario.passenger.condition === 'critical') {
@@ -209,17 +205,17 @@ function deriveAction(state: FlightState): string {
     return 'Assessing the emergency before requesting a diversion clearance.'
   }
   if (state.mission.routeStatus === 'stalled') return 'ATC issued fresh vectors. Following the updated next fix.'
-  if (state.controlOwner === 'human' && state.route.plan === 'return_kstl') {
+  if (state.flightMode === 'human' && state.route.plan === 'return_kstl') {
     const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
     return waypoint
       ? `You are flying. Follow the active route to ${waypoint.name}.`
       : 'You are flying the emergency return to KSTL runway 30L.'
   }
-  if (state.agentMode === 'requested' || state.agentMode === 'thinking') {
+  if (state.flightMode === 'agent' && !state.autopilot.engaged) {
     return 'Reading the emergency context and comparing the available routes.'
   }
   if (!state.procedure.compliant) return state.procedure.instruction
-  if (state.controlOwner === 'agent') return 'The agent has the flight controls and is selecting its next input.'
+  if (state.flightMode === 'agent') return 'The agent is selecting its next flight input.'
   return 'Monitoring the aircraft and emergency conditions while you fly.'
 }
 
@@ -233,8 +229,8 @@ function deriveHeadline(state: FlightState): string {
     if (state.atc.status === 'cleared') return 'ATC clearance received'
     return 'Diversion decision required'
   }
-  if (state.agentMode === 'requested' || state.agentMode === 'thinking') return 'Assessing the emergency'
-  if (state.agentMode === 'flying') {
+  if (state.flightMode === 'agent' && !state.autopilot.engaged) return 'Assessing the emergency'
+  if (state.flightMode === 'agent') {
     return state.route.destination ? `Flying to ${state.route.destination}` : 'Managing the flight'
   }
   return state.scenario.engine.health === 'normal' ? 'Ready when you are' : 'Emergency in progress'
@@ -265,15 +261,6 @@ function deriveDebrief(state: FlightState): CopilotDebrief | null {
       reason: deduction.reason,
     })),
   }
-}
-
-function deriveOwnershipMode(state: FlightState, webMcpReady: boolean): OwnershipMode {
-  if (state.controlOwner === 'agent') {
-    if (state.agentMode === 'complete') return 'complete'
-    return state.agentMode === 'thinking' ? 'thinking' : 'flying'
-  }
-  if (state.handoffRequested || state.agentMode === 'requested') return 'handoff_pending'
-  return webMcpReady ? 'human' : 'unavailable'
 }
 
 function InstrumentStat({
@@ -333,17 +320,6 @@ export default function App() {
     }
   }, [])
 
-  const toggleHandoff = useCallback(() => {
-    const current = flightSimulator.getState()
-    if (current.controlOwner === 'agent') {
-      flightSimulator.transferControl('human', 'human', 'Pilot took back control')
-    } else if (current.handoffRequested) {
-      flightSimulator.cancelAgentHandoff('human', 'Pilot canceled the copilot handoff')
-    } else {
-      flightSimulator.requestAgentHandoff('human', 'Pilot asked the copilot to take control')
-    }
-  }, [])
-
   const resetScenario = useCallback(() => {
     flightSimulator.reset()
     clearWebMcpActivities()
@@ -367,8 +343,14 @@ export default function App() {
     flightAudio.setMuted(muted)
   }, [])
 
-  const filePreflightRoute = useCallback(() => {
+  const startManualFlight = useCallback(() => {
+    if (!flightSimulator.startFlight('human')) return
     flightSimulator.setRoute('continue_kmdw', 'Pilot filed the normal route to Chicago Midway runway 31C before departure.', 'human')
+    setShowTakeoffBrief(false)
+  }, [])
+
+  const startAgentFlight = useCallback(() => {
+    if (!flightSimulator.startFlight('agent')) return
     setShowTakeoffBrief(false)
   }, [])
 
@@ -401,14 +383,14 @@ export default function App() {
   }, [state.mission.phase])
 
   useEffect(() => {
-    if (state.controlOwner === 'agent') setShowTakeoffBrief(false)
-  }, [state.controlOwner])
+    if (state.flightMode === 'agent') setShowTakeoffBrief(false)
+  }, [state.flightMode])
 
   useEffect(() => {
     const heldFlightKeys = new Set<string>()
 
     const updatePilotControls = () => {
-      if (flightSimulator.getState().controlOwner !== 'human') {
+      if (flightSimulator.getState().flightMode !== 'human') {
         heldFlightKeys.clear()
         flightSimulator.releasePilotControls()
         return
@@ -426,9 +408,9 @@ export default function App() {
 
       const current = flightSimulator.getState()
       const key = event.key.toLowerCase()
-      if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'f', 'g', 't', 'x'].includes(key)) event.preventDefault()
+      if (['arrowup', 'arrowdown', 'w', 'a', 's', 'd', 'f', 'g', 'x'].includes(key)) event.preventDefault()
 
-      if (current.controlOwner === 'human') {
+      if (current.flightMode === 'human') {
         if (['w', 'a', 's', 'd'].includes(key) && !event.repeat) {
           heldFlightKeys.add(key)
           updatePilotControls()
@@ -443,7 +425,6 @@ export default function App() {
         if (key === 'x') flightSimulator.levelPilotAttitude('human', 'Pilot pressed the level-flight shortcut')
       }
 
-      if (key === 't' && (current.controlOwner === 'agent' || webMcpStatus === 'ready')) toggleHandoff()
     }
 
     function handleKeyUp(event: KeyboardEvent) {
@@ -472,7 +453,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', releaseHiddenControls)
       flightSimulator.releasePilotControls()
     }
-  }, [showTakeoffBrief, toggleHandoff, webMcpStatus])
+  }, [showTakeoffBrief])
 
   const webMcpLabels = {
     registering: 'Connecting',
@@ -480,7 +461,6 @@ export default function App() {
     unsupported: 'Unavailable',
     error: 'Connection failed',
   } as const
-  const ownershipMode = deriveOwnershipMode(state, webMcpStatus === 'ready')
   const destination = state.route.destination ?? 'Route pending'
   const routeDetail = state.route.destination === null
     ? 'Decision needed'
@@ -498,7 +478,7 @@ export default function App() {
     ? `${Math.round(state.motion.headwindKt)} kt headwind`
     : `${Math.round(Math.abs(state.motion.headwindKt))} kt tailwind`
   const windTitle = `Wind from ${windDirection}° at ${state.scenario.weather.windSpeedKt} kt · ${longitudinalWind} · ${Math.round(Math.abs(state.motion.crosswindKt))} kt crosswind${state.motion.turbulenceLevel === 'none' ? '' : ` · ${state.motion.turbulenceLevel} turbulence`}`
-  const crewActions = state.controlOwner !== 'human'
+  const crewActions = state.flightMode !== 'human'
     ? []
     : state.mission.goAroundRequired
       ? [{
@@ -532,7 +512,7 @@ export default function App() {
             onSelect: acceptHumanClearance,
           }]
         : []
-  const crewActionStatus = state.controlOwner !== 'human' || state.mission.goAroundRequired || state.checkride.status !== 'decision_required'
+  const crewActionStatus = state.flightMode !== 'human' || state.mission.goAroundRequired || state.checkride.status !== 'decision_required'
     ? null
     : state.atc.status === 'requested'
       ? 'Diversion requested. Maintain control while ATC prepares the clearance.'
@@ -557,9 +537,9 @@ export default function App() {
         >
           <div className="takeoff-briefing-card">
             <p>Flight briefing</p>
-            <h1 id="takeoff-briefing-title">Fly the St. Louis Lambert departure.</h1>
+            <h1 id="takeoff-briefing-title">Choose who flies this run.</h1>
             <p id="takeoff-briefing-copy">
-              You are lined up on St. Louis Lambert runway 12R for Chicago Midway runway 31C. File that route before departure.
+              The aircraft is lined up on St. Louis Lambert runway 12R for Chicago Midway runway 31C. The selected pilot keeps control until the run ends.
             </p>
             <ol>
               <li><kbd>↑</kbd><span>Advance both GEnx engines to takeoff thrust; flaps 10° are already set.</span></li>
@@ -567,8 +547,11 @@ export default function App() {
               <li><kbd>G</kbd><span>Retract gear after positive rate. Use <kbd>F</kbd> to retract flaps on schedule and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
-              <span>{MISSION_PROFILE.label}. Filing arms the departure; apply power when ready.</span>
-              <Button autoFocus onClick={filePreflightRoute}>Fly route</Button>
+              <span>{webMcpStatus === 'ready' ? 'Choose once for this run. Reset the flight to change pilots.' : 'WebMCP is unavailable here, but manual flight still works.'}</span>
+              <div>
+                <Button variant="outline" disabled={webMcpStatus !== 'ready'} onClick={startAgentFlight}>Use agent</Button>
+                <Button autoFocus onClick={startManualFlight}>Fly manually</Button>
+              </div>
             </div>
           </div>
         </section>
@@ -591,7 +574,7 @@ export default function App() {
           <span>{formatLabel(state.mission.phase)}</span>
         </div>
 
-        <OwnershipControl mode={ownershipMode} onClick={toggleHandoff} />
+        <FlightModeBadge mode={state.flightMode} />
       </header>
 
       <div className="flight-status-strip">
@@ -667,7 +650,7 @@ export default function App() {
           <Button
             variant="outline"
             size="sm"
-            disabled={state.controlOwner === 'agent'}
+            disabled={state.flightMode !== 'human'}
             aria-keyshortcuts="G"
             onClick={() => flightSimulator.setGear(!state.gearDown, 'human', 'Cockpit gear control')}
           >
@@ -677,7 +660,7 @@ export default function App() {
           <Button
             variant="outline"
             size="sm"
-            disabled={state.controlOwner === 'agent'}
+            disabled={state.flightMode !== 'human'}
             aria-keyshortcuts="F"
             onClick={() => {
               const index = flapSettings.indexOf(state.flapsDeg as (typeof flapSettings)[number])
@@ -695,7 +678,7 @@ export default function App() {
               max={100}
               step={1}
               value={[state.throttle * 100]}
-              disabled={state.controlOwner === 'agent'}
+              disabled={state.flightMode !== 'human'}
               onValueChange={(value) =>
                 flightSimulator.setThrottle(
                   (typeof value === 'number' ? value : value[0]) / 100,

@@ -17,7 +17,7 @@ The agent may use only tools published by the page's WebMCP context. It may not 
 
 The evaluator may watch the visible app and record results but must not steer the flight.
 
-The agent receives the same decision-relevant cockpit state as the human pilot, except rendered scene pixels. Human and WebMCP commands must pass through the same simulator command path. Control ownership must not alter physics, checkpoint capture, collision handling, score deductions, or route acceptance.
+The agent receives the same decision-relevant cockpit state as the human pilot, except rendered scene pixels. Human and WebMCP commands must pass through the same simulator command path. The run stays in agent mode from `start_flight` through termination, and flight mode must not alter physics, checkpoint capture, collision handling, score deductions, or route acceptance.
 
 ## Pass criteria
 

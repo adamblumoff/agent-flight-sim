@@ -93,7 +93,7 @@ const emptySchema = { type: 'object', properties: {}, additionalProperties: fals
 export const flightToolDefinitions = [
   {
     name: 'start_flight', title: 'Start flight', readOnly: false,
-    description: 'Start a fresh flight, take aircraft control, and receive the full mission brief and current state. The brief publishes route checkpoints and exact crossing targets; it does not prescribe controls. The environment privately selects a reproducible scenario, and no future condition is disclosed before its flight event. Submit the ordered exact command program before takeoff.',
+    description: 'Select agent mode for a fresh flight and receive the full mission brief and current state. The selected mode stays locked until the run is reset. The brief publishes route checkpoints and exact crossing targets; it does not prescribe controls. The environment privately selects a reproducible scenario, and no future condition is disclosed before its flight event. Submit the ordered exact command program before takeoff.',
     inputSchema: emptySchema,
   },
   {

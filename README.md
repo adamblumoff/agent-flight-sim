@@ -28,7 +28,7 @@ flowchart LR
   Agent --> Trace[WebMCP trajectory]
 ```
 
-Keyboard, cockpit controls, and WebMCP all reach the same flight-command layer. A human supplies direct inputs; an agent declares exact, ordered heading or bank, pitch or altitude, throttle or airspeed, gear, and flap commands with activation triggers. The simulator executes those commands at 60 Hz and applies the same actuator limits, aircraft physics, checkpoints, collision rules, and score deductions regardless of who authored them. Caller identity exists for handoff and audit history, not for physics.
+Keyboard, cockpit controls, and WebMCP all reach the same flight-command layer. Each run starts in either manual or agent mode, and that choice stays fixed until reset. A human supplies direct inputs; an agent declares exact, ordered heading or bank, pitch or altitude, throttle or airspeed, gear, and flap commands with activation triggers. The simulator executes those commands at 60 Hz and applies the same actuator limits, aircraft physics, checkpoints, collision rules, and score deductions in both modes.
 
 WebMCP reports every value that can change a cockpit decision: position, attitude, speed, vertical motion, wind, configuration, route geometry, active checkpoint, aircraft limits, passenger condition, hazards, score, event revision, and terminal state. It does not reveal the sealed event before the simulator triggers it. It also does not prescribe the next tool call or silently turn a dangerous input into a safe maneuver.
 
@@ -38,7 +38,7 @@ The WebMCP adapter is optional. Browsers without `document.modelContext` retain 
 
 | Tool | Purpose |
 | --- | --- |
-| `start_flight` | Start a fresh flight, take agent control, and receive the mission brief and initial state. |
+| `start_flight` | Select agent mode for a fresh flight and receive the mission brief and initial state. |
 | `program_flight_plan` | Declare 2–16 exact control commands and the flight conditions that activate them. |
 | `request_diversion` | Ask ATC for one of the routes in the current decision context. |
 | `accept_clearance` | Read back and accept the issued diversion clearance. |
@@ -67,7 +67,7 @@ npm install
 npm run dev
 ```
 
-Open the root local URL in a WebMCP-capable browser. Manual controls are `W/S` pitch, `A/D` bank, arrow keys power, `F` flaps, `G` gear, `X` level attitude, and `T` request, cancel, or reclaim agent control. Direct human input immediately reclaims the shared controls.
+Open the root local URL and choose manual or agent flight. Manual controls are `W/S` pitch, `A/D` bank, arrow keys power, `F` flaps, `G` gear, and `X` level attitude. The selected pilot keeps control until the flight is reset. Browsers without WebMCP can still run the complete manual flight.
 
 ## Development diagnostics
 
