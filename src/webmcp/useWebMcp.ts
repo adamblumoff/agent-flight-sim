@@ -3,6 +3,8 @@ import { executeFlightToolFromUnknown } from '../shared/executeFlightTool'
 import { flightSimulator } from '../sim/flightSimulator'
 import type { FlightState } from '../sim/types'
 import { buildRadioCue, type RadioCue } from '../audio/radioCues'
+import { persistEvaluationEvidence } from './evaluationArchive'
+import { createFlightRunExport } from './runExport'
 import {
   flightToolDefinitions,
   type FlightToolDefinition,
@@ -37,8 +39,13 @@ export interface WebMcpActivity {
   readonly traceStartId: number
 }
 
-type BeginActivity = (activity: Pick<WebMcpActivity, 'tool' | 'title' | 'arguments'>) => number
-type CompleteActivity = (id: number, result: WebMcpRecordedResult, failed?: boolean) => void
+interface BeginActivityOptions {
+  readonly observation?: FlightState
+  readonly startedAt?: number
+  readonly resetSequence?: boolean
+}
+type BeginActivity = (activity: Pick<WebMcpActivity, 'tool' | 'title' | 'arguments'>, options?: BeginActivityOptions) => number
+type CompleteActivity = (id: number, result: WebMcpRecordedResult, failed?: boolean) => Promise<void>
 
 function createFlightTools(definitions: readonly FlightToolDefinition[], beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
   return definitions.map((definition) => ({
@@ -48,14 +55,22 @@ function createFlightTools(definitions: readonly FlightToolDefinition[], beginAc
     inputSchema: definition.inputSchema,
     annotations: { readOnlyHint: definition.readOnly },
     execute: async (input: Record<string, unknown>) => {
-      const activityId = beginActivity({ tool: definition.name, title: definition.title, arguments: input })
+      const activity = { tool: definition.name, title: definition.title, arguments: input }
+      const startedAt = Date.now()
+      let activityId = definition.name === 'start_flight' ? null : beginActivity(activity, { startedAt })
       try {
         const result = await executeFlightToolFromUnknown(definition.name, input)
-        completeActivity(activityId, result, !result.ok)
+        activityId ??= beginActivity(activity, {
+          observation: flightSimulator.getState(),
+          startedAt,
+          resetSequence: true,
+        })
+        await completeActivity(activityId, result, !result.ok)
         return result
       } catch (error) {
+        activityId ??= beginActivity(activity, { startedAt })
         const message = error instanceof Error ? error.message : 'Tool call failed'
-        completeActivity(activityId, {
+        await completeActivity(activityId, {
           ok: false,
           summary: message,
           error: { name: error instanceof Error ? error.name : 'Error', message },
@@ -69,8 +84,13 @@ function createFlightTools(definitions: readonly FlightToolDefinition[], beginAc
 export function useWebMcp() {
   const [status, setStatus] = useState<WebMcpStatus>('registering')
   const [activities, setActivities] = useState<readonly WebMcpActivity[]>([])
+  const activitiesRef = useRef<readonly WebMcpActivity[]>([])
   const nextActivityId = useRef(1)
-  const clearActivities = useCallback(() => setActivities([]), [])
+  const clearActivities = useCallback(() => {
+    nextActivityId.current = 1
+    activitiesRef.current = []
+    setActivities([])
+  }, [])
 
   useEffect(() => {
     if (!document.modelContext) {
@@ -79,15 +99,16 @@ export function useWebMcp() {
     }
     const modelContext = document.modelContext
     const controller = new AbortController()
-    const beginActivity: BeginActivity = (activity) => {
-      const observation = flightSimulator.getState()
+    const beginActivity: BeginActivity = (activity, options = {}) => {
+      if (options.resetSequence) nextActivityId.current = 1
+      const observation = options.observation ?? flightSimulator.getState()
       const id = nextActivityId.current++
       const event = {
         ...activity,
         id,
         status: 'running' as const,
         summary: 'In progress',
-        startedAt: Date.now(),
+        startedAt: options.startedAt ?? Date.now(),
         completedAt: null,
         latencyMs: null,
         scoreBefore: observation.checkride.score.total,
@@ -99,13 +120,15 @@ export function useWebMcp() {
         radioCues: Object.freeze([]),
         traceStartId: activity.tool === 'start_flight' ? 0 : (flightSimulator.getTrace().at(-1)?.id ?? 0),
       }
-      setActivities((current) => activity.tool === 'start_flight' ? [event] : [...current, event])
+      const nextActivities = activity.tool === 'start_flight' ? [event] : [...activitiesRef.current, event]
+      activitiesRef.current = nextActivities
+      setActivities(nextActivities)
       return id
     }
-    const completeActivity: CompleteActivity = (id, result, failed = false) => {
+    const completeActivity: CompleteActivity = async (id, result, failed = false) => {
       const nextObservation = flightSimulator.getState()
       const completedAt = Date.now()
-      setActivities((current) => current.map((activity) => {
+      const nextActivities: readonly WebMcpActivity[] = activitiesRef.current.map((activity) => {
         if (activity.id !== id) return activity
         const radioCues = flightSimulator.getTrace()
           .filter((event) => event.id > activity.traceStartId)
@@ -113,7 +136,7 @@ export function useWebMcp() {
           .filter((cue): cue is RadioCue => cue !== null)
         return {
           ...activity,
-          status: failed ? 'failed' : 'completed',
+          status: failed ? 'failed' as const : 'completed' as const,
           summary: result.summary,
           completedAt,
           latencyMs: completedAt - activity.startedAt,
@@ -123,7 +146,15 @@ export function useWebMcp() {
           result,
           radioCues: Object.freeze(radioCues),
         }
-      }))
+      })
+      activitiesRef.current = nextActivities
+      setActivities(nextActivities)
+      await persistEvaluationEvidence(createFlightRunExport(
+        nextActivities,
+        nextObservation,
+        flightSimulator.getMissionBrief(),
+        flightSimulator.getTrace(),
+      ))
     }
 
     async function registerTools() {

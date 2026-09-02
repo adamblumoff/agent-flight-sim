@@ -1,32 +1,47 @@
-import type { FlightState } from '../sim/types'
-import type { WebMcpActivity } from './useWebMcp'
+import type { FlightRunExport } from './runExport'
 
 const INDEX_KEY = 'flightdeck:evaluations:index'
 const MAX_ARCHIVED_RUNS = 12
 
-export function persistEvaluationEvidence(activities: readonly WebMcpActivity[], state: FlightState) {
-  if (typeof window === 'undefined' || activities.length === 0) return
-  const key = `flightdeck:evaluation:${state.checkride.runId}`
-  const terminal = state.mission.outcome !== 'in_progress'
-  const payload = {
-    schemaVersion: 'flightdeck-evaluation-archive-v2',
-    runId: state.checkride.runId,
-    buildId: state.checkride.buildId,
-    profileId: state.checkride.profileId,
-    updatedAt: new Date().toISOString(),
-    terminal,
-    outcome: state.mission.outcome,
-    score: state.checkride.score.total,
-    seed: terminal ? state.checkride.seed : null,
-    activities,
-  }
+export interface EvidencePersistenceResult {
+  readonly serverPath: string | null
+}
+
+export async function persistEvaluationEvidence(run: FlightRunExport): Promise<EvidencePersistenceResult> {
+  if (typeof window === 'undefined') return { serverPath: null }
+
+  const key = `flightdeck:evaluation:${run.run.runId}`
   try {
-    window.localStorage.setItem(key, JSON.stringify(payload))
+    const summary = {
+      schemaVersion: 'flightdeck-evaluation-archive-v3',
+      runId: run.run.runId,
+      buildId: run.run.buildId,
+      profileId: run.run.profileId,
+      updatedAt: run.generatedAt,
+      terminal: run.run.outcome !== 'in_progress',
+      outcome: run.run.outcome,
+      score: run.run.score.total,
+      calls: run.calls.length,
+    }
+    window.localStorage.setItem(key, JSON.stringify(summary))
     const currentIndex = JSON.parse(window.localStorage.getItem(INDEX_KEY) ?? '[]') as string[]
     const nextIndex = [key, ...currentIndex.filter((candidate) => candidate !== key)].slice(0, MAX_ARCHIVED_RUNS)
     window.localStorage.setItem(INDEX_KEY, JSON.stringify(nextIndex))
     for (const staleKey of currentIndex.filter((candidate) => !nextIndex.includes(candidate))) window.localStorage.removeItem(staleKey)
   } catch {
-    // The terminal in-page exports remain authoritative when storage is unavailable.
+    // The filesystem archive is the durable source when browser storage is unavailable.
+  }
+
+  try {
+    const response = await fetch('/__flightdeck/evidence', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(run),
+    })
+    if (!response.ok) return { serverPath: null }
+    const result = await response.json() as { readonly path?: unknown }
+    return { serverPath: typeof result.path === 'string' ? result.path : null }
+  } catch {
+    return { serverPath: null }
   }
 }

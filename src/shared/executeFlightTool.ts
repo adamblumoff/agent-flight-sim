@@ -1,6 +1,6 @@
-import { flightSimulator } from '../sim/flightSimulator.ts'
+import { COMFORT_BANK_WARNING_DEG, flightSimulator } from '../sim/flightSimulator.ts'
 import type { FlightControlInput } from '../sim/flightCommands.ts'
-import type { CheckrideSeed, FlightEventType, FlightState, RoutePlan } from '../sim/types.ts'
+import type { CheckrideSeed, FlightEventType, FlightPlanProgram, FlightState, RoutePlan } from '../sim/types.ts'
 import {
   checkrideSeeds, flightEventValues, routePlans,
   type AgentFlightState, type FlightToolArguments, type FlightToolGuidance, type FlightToolName, type FlightToolResults,
@@ -12,8 +12,8 @@ const routeSet = new Set<string>(routePlans)
 const eventSet = new Set<string>(flightEventValues)
 const controlWindowInterruptEvents = new Set<FlightEventType>([
   'emergency_detected', 'decision_timer_expired', 'atc_clearance_received',
-  'route_progress_stalled', 'checkpoint_reached', 'comfort_limit_approaching',
-  'passenger_safety_update', 'approach_stable', 'touchdown',
+  'route_progress_stalled', 'checkpoint_reached', 'stall_warning',
+  'go_around_required', 'approach_stable', 'touchdown',
   'mission_complete', 'mission_failed',
 ])
 
@@ -28,8 +28,12 @@ const observationActions = ['get_flight_state', 'wait_for_flight_event'] as cons
 const hazardsFor = (state: FlightState): readonly string[] => {
   const hazards: string[] = []
   if (state.checkride.alert) hazards.push(state.checkride.alert)
-  if (state.motion.stalled) hazards.push('Aerodynamic stall detected.')
+  if (state.motion.stalled) hazards.push('Aerodynamic stall detected. Lower the nose, use at least 85% power, keep gear up and flaps at 10° or less, and roll toward wings level.')
+  if (state.aircraftPhase === 'airborne' && Math.abs(state.pitchDeg) >= 12) hazards.push(`Pitch is ${state.pitchDeg.toFixed(1)}°. Use level_attitude before commanding more ${state.pitchDeg > 0 ? 'nose-up' : 'nose-down'} input.`)
+  if (state.aircraftPhase === 'airborne' && (state.mission.airspeedErrorToNextFixKt ?? 0) > 30) hazards.push(`Low energy: airspeed is ${state.mission.airspeedErrorToNextFixKt!.toFixed(0)} kt below the active target. Increase throttle toward 1.00 and avoid climbing until speed recovers.`)
+  if (Math.abs(state.bankDeg) >= COMFORT_BANK_WARNING_DEG) hazards.push(`Bank is ${state.bankDeg.toFixed(1)}°. Do not deepen this turn; command bankIntent with the opposite sign to roll toward wings level.`)
   if (state.mission.routeStatus === 'stalled') hazards.push('The active route leg is no longer converging.')
+  if (state.mission.goAroundRequired) hazards.push('The approach is unsafe. Initiate a go-around and climb before trying another approach.')
   if (!state.procedure.compliant) hazards.push(state.procedure.instruction)
   if (state.passengerSafety.status !== 'comfortable') hazards.push(state.passengerSafety.summary)
   if (state.fuelMinutesRemaining <= 3) hazards.push(`${state.fuelMinutesRemaining.toFixed(1)} minutes of fuel endurance remain.`)
@@ -44,13 +48,17 @@ const availableActionsFor = (state: FlightState): readonly FlightToolName[] => {
     if (state.handoffRequested) actions.push('transfer_control')
     return Object.freeze(actions)
   }
-  actions.push('fly_control_window', 'transfer_control')
-  if (state.mission.phase === 'preflight') actions.push('get_mission_brief', 'set_route')
   if (state.checkride.status === 'decision_required') {
-    actions.push('get_decision_context')
-    if (state.checkride.decisionContextRead && state.atc.status === 'none') actions.push('request_diversion')
-    if (state.atc.status === 'cleared') actions.push('accept_clearance')
+    if (!state.checkride.decisionContextRead) actions.push('get_decision_context')
+    else if (state.atc.status === 'none') actions.push('request_diversion')
+    else if (state.atc.status === 'cleared') actions.push('accept_clearance')
+    else if (state.atc.status === 'accepted') actions.push('program_flight_plan')
+    return Object.freeze(actions)
   }
+  actions.push('transfer_control')
+  if (!state.autopilot.engaged && state.motion.stalled) actions.push('fly_control_window', 'level_attitude', 'program_flight_plan')
+  if (state.mission.goAroundRequired) actions.push('program_flight_plan')
+  if (state.mission.phase === 'preflight') actions.push('get_mission_brief', 'program_flight_plan')
   return Object.freeze(actions)
 }
 
@@ -63,19 +71,34 @@ const objectiveFor = (state: FlightState) => {
     ? 'Review the assignment, file the preflight route, and prepare the aircraft for departure.'
     : 'Conduct a safe departure on the filed route.'
   if (state.checkride.status === 'decision_required') return 'Maintain control while assessing the new condition and coordinating any route change with ATC.'
+  if (state.motion.stalled) return 'Recover the stall now with high power, nose-down input, clean configuration, and wings-level bank correction.'
   if (state.mission.routeStatus === 'stalled') return 'Stabilize the aircraft and recover progress toward the active route leg.'
+  if (state.mission.goAroundRequired) return 'Initiate a go-around now, climb away from the ground, and follow the rebuilt arrival.'
   return 'Fly the active route, manage aircraft configuration, and land safely within the published limits.'
 }
 
-const guidanceFor = (state = flightSimulator.getState()): FlightToolGuidance => ({
-  phase: state.mission.phase,
-  objective: objectiveFor(state),
-  procedure: state.procedure,
-  hazards: hazardsFor(state),
-  availableActions: availableActionsFor(state),
-  eventRevision: state.mission.eventRevision,
-  decisionSecondsRemaining: state.checkride.decisionSecondsRemaining,
-})
+const controlCueFor = (state: FlightState) => {
+  if (state.controlOwner !== 'agent' || state.mission.outcome !== 'in_progress' || !state.mission.nextFix) return null
+  if (state.motion.stalled) return 'STALL: use throttle 0.85 or higher, negative pitchIntent, gear up, flaps 0° or 10°, and bankIntent toward wings level.'
+  if (state.mission.goAroundRequired) return 'The approach is unsafe. Submit a new return_kstl flight program to go around and rebuild the arrival.'
+  if (state.autopilot.engaged) return `The programmed autopilot is continuously tracking ${state.mission.nextFix}. Wait for the next flight event.`
+  return 'The autopilot is disengaged. Use manual controls only to recover, then submit the complete flight plan again.'
+}
+
+const guidanceFor = (state = flightSimulator.getState()): FlightToolGuidance => {
+  const missionWallSecondsRemaining = state.checkride.wallClockSecondsRemaining ?? state.checkride.wallClockDeadlineSeconds
+  return {
+    phase: state.mission.phase,
+    objective: objectiveFor(state),
+    controlCue: controlCueFor(state),
+    procedure: state.procedure,
+    hazards: hazardsFor(state),
+    availableActions: availableActionsFor(state),
+    eventRevision: state.mission.eventRevision,
+    decisionSecondsRemaining: state.checkride.decisionSecondsRemaining,
+    missionWallSecondsRemaining,
+  }
+}
 
 const receipt = <T>(summary: string, tone: ToolReceiptTone, details: T, guidance = guidanceFor()) => ({ ok: true as const, summary, tone, guidance, details })
 const action = (result: ReturnType<typeof flightSimulator.setRoute>) => ({
@@ -104,6 +127,28 @@ const boundedWindowNumber = (value: unknown, name: string, fallback: number, min
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError(`${name} must be a finite number`)
   if (value < minimum || value > maximum) throw new RangeError(`${name} must be between ${minimum} and ${maximum}`)
   return Math.floor(value)
+}
+
+const requiredProgramNumber = (value: unknown, name: string, minimum: number, maximum: number) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError(`${name} must be a finite number`)
+  if (value < minimum || value > maximum) throw new RangeError(`${name} must be between ${minimum} and ${maximum}`)
+  return value
+}
+
+const flightPlanProgram = (input: FlightToolArguments['program_flight_plan']): FlightPlanProgram => {
+  if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_kmdw or return_kstl')
+  if (input.landing_flaps_deg !== 20 && input.landing_flaps_deg !== 30) throw new RangeError('landing_flaps_deg must be 20 or 30')
+  return Object.freeze({
+    plan: input.plan,
+    rotateSpeedKt: requiredProgramNumber(input.rotate_speed_kt, 'rotate_speed_kt', 150, 160),
+    climbPitchDeg: requiredProgramNumber(input.climb_pitch_deg, 'climb_pitch_deg', 8, 14),
+    climbSpeedKt: requiredProgramNumber(input.climb_speed_kt, 'climb_speed_kt', 165, 210),
+    cruiseAltitudeFt: requiredProgramNumber(input.cruise_altitude_ft, 'cruise_altitude_ft', 2_200, 5_000),
+    cruiseSpeedKt: requiredProgramNumber(input.cruise_speed_kt, 'cruise_speed_kt', 190, 250),
+    maxBankDeg: requiredProgramNumber(input.max_bank_deg, 'max_bank_deg', 15, 25),
+    approachSpeedKt: requiredProgramNumber(input.approach_speed_kt, 'approach_speed_kt', 140, 155),
+    landingFlapsDeg: input.landing_flaps_deg,
+  })
 }
 
 const flightControlInput = (input: FlightControlInput): FlightControlInput => {
@@ -152,8 +197,44 @@ const telemetrySample = (state: FlightState): FlightTelemetrySample => Object.fr
 })
 
 const flyControlWindow = async (input: FlightToolArguments['fly_control_window']): Promise<FlightToolResults['fly_control_window']> => {
-  const durationMs = boundedWindowNumber(input.duration_ms, 'duration_ms', 1_000, 250, 10_000)
+  const stateBeforeWindow = flightSimulator.getState()
+  const maneuvering = Math.abs(input.pitchIntent) > 0.05 || Math.abs(input.bankIntent) > 0.05
+  const aggressivePitch = Math.abs(input.pitchIntent) >= 0.3
+  const maxDurationMs = stateBeforeWindow.aircraftPhase !== 'airborne'
+    ? 6_000
+    : aggressivePitch
+      ? 5_000
+      : maneuvering
+        ? 10_000
+        : 30_000
+  const requestedDurationMs = boundedWindowNumber(input.duration_ms, 'duration_ms', 3_000, 250, 30_000)
+  const durationMs = Math.min(requestedDurationMs, maxDurationMs)
   const sampleIntervalMs = boundedWindowNumber(input.sample_interval_ms, 'sample_interval_ms', 250, 100, 500)
+  const currentState = stateBeforeWindow
+  if (currentState.checkride.status === 'decision_required') {
+    const requiredAction = !currentState.checkride.decisionContextRead
+      ? 'get_decision_context'
+      : currentState.atc.status === 'none'
+        ? 'request_diversion'
+        : currentState.atc.status === 'cleared'
+          ? 'accept_clearance'
+          : 'wait_for_flight_event'
+    return {
+      accepted: false,
+      ok: false,
+      summary: `Emergency checklist active. Call ${requiredAction} before another control window.`,
+      eventRevision: currentState.mission.eventRevision,
+      state: agentState(currentState),
+      tone: 'warning',
+      guidance: guidanceFor(currentState),
+      requestedDurationMs,
+      actualDurationMs: 0,
+      sampleIntervalMs,
+      stopReason: 'command_rejected',
+      interruptedBy: null,
+      samples: Object.freeze([telemetrySample(currentState)]),
+    }
+  }
   const controls = flightControlInput({
     throttle: input.throttle,
     pitchIntent: input.pitchIntent,
@@ -170,7 +251,7 @@ const flyControlWindow = async (input: FlightToolArguments['fly_control_window']
   if (!command.accepted) {
     return {
       ...action(command),
-      requestedDurationMs: durationMs,
+      requestedDurationMs,
       actualDurationMs: 0,
       sampleIntervalMs,
       stopReason: 'command_rejected',
@@ -190,10 +271,10 @@ const flyControlWindow = async (input: FlightToolArguments['fly_control_window']
       unsubscribe()
       resolve(reason)
     }
-    const capture = () => {
+    const capture = (recordSample = false) => {
       const state = flightSimulator.getState()
       const previous = samples.at(-1)
-      if (!previous || state.elapsedSeconds !== previous.elapsedSeconds || state.mission.eventRevision !== previous.eventRevision) samples.push(telemetrySample(state))
+      if (!previous || recordSample || state.mission.eventRevision !== previous.eventRevision) samples.push(telemetrySample(state))
       if (state.controlOwner !== 'agent') finish('control_transferred')
       else if (state.mission.outcome !== 'in_progress') finish('terminal_state')
       else if (state.mission.eventRevision !== startRevision) {
@@ -204,12 +285,12 @@ const flyControlWindow = async (input: FlightToolArguments['fly_control_window']
         }
       }
     }
-    const unsubscribe = flightSimulator.subscribe(capture)
-    const interval = setInterval(capture, sampleIntervalMs)
+    const unsubscribe = flightSimulator.subscribe(() => capture())
+    const interval = setInterval(() => capture(true), sampleIntervalMs)
     const timeout = setTimeout(() => finish('window_complete'), durationMs)
   })
 
-  flightSimulator.setFlightControls({ pitchIntent: 0, bankIntent: 0, reason: 'Finite control window complete; stick neutralized' }, 'agent')
+  flightSimulator.setFlightControls({ pitchIntent: 0, bankIntent: 0, reason: 'Finite control window complete; stick neutralized' }, 'system')
   const finalState = flightSimulator.getState()
   const finalSample = telemetrySample(finalState)
   if (samples.at(-1)?.elapsedSeconds !== finalSample.elapsedSeconds || samples.at(-1)?.pitchIntent !== 0 || samples.at(-1)?.bankIntent !== 0) samples.push(finalSample)
@@ -217,12 +298,12 @@ const flyControlWindow = async (input: FlightToolArguments['fly_control_window']
   return {
     accepted,
     ok: accepted,
-    summary: `${command.summary} Observed ${samples.length} telemetry samples; stick neutralized after ${Date.now() - startedAt} ms (${interruptedBy ?? stopReason.replaceAll('_', ' ')}).`,
+    summary: `${command.summary}${requestedDurationMs > durationMs ? ` ${stateBeforeWindow.aircraftPhase === 'airborne' ? 'Maneuvering' : 'Ground'} window safely capped at ${durationMs} ms.` : ''} Observed ${samples.length} telemetry samples; stick neutralized after ${Date.now() - startedAt} ms (${interruptedBy ?? stopReason.replaceAll('_', ' ')}).`,
     eventRevision: finalState.mission.eventRevision,
     state: agentState(finalState),
     tone: finalState.mission.outcome === 'in_progress' ? 'automation' : 'warning',
     guidance: guidanceFor(finalState),
-    requestedDurationMs: durationMs,
+    requestedDurationMs,
     actualDurationMs: Date.now() - startedAt,
     sampleIntervalMs,
     stopReason,
@@ -249,10 +330,9 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
   get_decision_context: async () => flightSimulator.getState().checkride.status === 'decision_required'
     ? receipt('New flight condition assessed.', 'neutral', { available: true, context: flightSimulator.getDecisionContext() })
     : receipt('Decision context is sealed until emergency_detected. Continue the assigned flight.', 'warning', { available: false, context: null }),
-  set_route: async (input) => {
-    if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_kmdw or return_kstl')
+  program_flight_plan: async (input) => {
     if (typeof input.reason !== 'string' || !input.reason.trim()) throw new TypeError('reason is required')
-    return action(flightSimulator.setRoute(input.plan as RoutePlan, input.reason.trim(), 'agent'))
+    return action(flightSimulator.programFlightPlan(flightPlanProgram(input), input.reason.trim(), 'agent'))
   },
   request_diversion: async (input) => {
     if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_kmdw or return_kstl')
@@ -264,6 +344,7 @@ const executors: { readonly [Name in FlightToolName]: (input: FlightToolArgument
     if (typeof input.readback !== 'string' || !input.readback.trim()) throw new TypeError('readback is required')
     return action(flightSimulator.acceptAtcClearance(input.clearance_id.trim(), input.readback.trim(), 'agent'))
   },
+  level_attitude: async (input) => action(flightSimulator.levelPilotAttitude('agent', reasonInput(input, 'Agent selected wings level'))),
   fly_control_window: flyControlWindow,
   wait_for_flight_event: async (input) => {
     if (input.after_revision !== undefined && (typeof input.after_revision !== 'number' || !Number.isFinite(input.after_revision))) throw new TypeError('after_revision must be a finite number')

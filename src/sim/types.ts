@@ -8,6 +8,22 @@ export type EvidenceReliability = 'current' | 'stale' | 'unreliable'
 export interface FlightEvidence { readonly source: EvidenceSource; readonly headline: string; readonly detail: string; readonly reliability: EvidenceReliability }
 export type RoutePlan = 'unassigned' | 'continue_kmdw' | 'return_kstl'
 export type DiversionPlan = Exclude<RoutePlan, 'unassigned'>
+export interface FlightPlanProgram {
+  readonly plan: DiversionPlan
+  readonly rotateSpeedKt: number
+  readonly climbPitchDeg: number
+  readonly climbSpeedKt: number
+  readonly cruiseAltitudeFt: number
+  readonly cruiseSpeedKt: number
+  readonly maxBankDeg: number
+  readonly approachSpeedKt: number
+  readonly landingFlapsDeg: 20 | 30
+}
+export interface AutopilotState {
+  readonly engaged: boolean
+  readonly program: FlightPlanProgram | null
+  readonly programmedAtElapsedSeconds: number | null
+}
 export type MissionPhase = 'preflight' | 'takeoff' | 'planning' | 'enroute' | 'approach' | 'flare' | 'rollout' | 'complete' | 'failed'
 export type MissionOutcome = 'in_progress' | 'landed' | 'unsafe_touchdown' | 'fuel_exhausted' | 'crashed' | 'timed_out'
 export type AircraftPhase = 'takeoff_roll' | 'airborne' | 'landing_roll' | 'stopped' | 'crash_slide'
@@ -83,7 +99,7 @@ export interface LandingResult { readonly runway: string; readonly sinkRateFpm: 
 export interface DebriefEvent { readonly elapsedSeconds: number; readonly actor: TraceActor; readonly summary: string }
 export interface DebriefState { readonly status: 'in_progress' | 'landed' | 'failed'; readonly elapsedSeconds: number; readonly decision: RoutePlan; readonly decisionReason: string | null; readonly events: readonly DebriefEvent[]; readonly landing: LandingResult | null }
 
-export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'decision_timer_expired' | 'atc_clearance_received' | 'atc_clearance_accepted' | 'plan_updated' | 'route_progress_stalled' | 'checkpoint_reached' | 'comfort_limit_approaching' | 'passenger_safety_update' | 'configuration_required' | 'configuration_confirmed' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
+export type FlightEventType = 'handoff_requested' | 'emergency_detected' | 'decision_timer_expired' | 'atc_clearance_received' | 'atc_clearance_accepted' | 'plan_updated' | 'route_progress_stalled' | 'checkpoint_reached' | 'comfort_limit_approaching' | 'passenger_safety_update' | 'stall_warning' | 'configuration_required' | 'configuration_confirmed' | 'go_around_required' | 'approach_stable' | 'touchdown' | 'mission_complete' | 'mission_failed'
 export interface FlightEvent { readonly revision: number; readonly type: FlightEventType; readonly elapsedSeconds: number; readonly message: string; readonly phase: MissionPhase; readonly routePlan: RoutePlan }
 export interface MissionNavigationState {
   readonly phase: MissionPhase
@@ -105,6 +121,7 @@ export interface MissionNavigationState {
   readonly centerlineErrorNm: number
   readonly glidepathErrorFt: number
   readonly stableApproach: boolean
+  readonly goAroundRequired: boolean
   readonly eventRevision: number
 }
 
@@ -118,6 +135,7 @@ export interface CheckrideState {
   readonly objective: string
   readonly deadlineSeconds: number
   readonly wallClockDeadlineSeconds: number
+  readonly wallClockSecondsRemaining: number | null
   readonly simulationRate: number
   readonly decisionSecondsRemaining: number | null
   readonly emergencyStartedAtSeconds: number | null
@@ -134,6 +152,7 @@ export interface FlightState {
   readonly controlInputs: PilotControls
   readonly elapsedSeconds: number; readonly fuelMinutesRemaining: number
   readonly controlOwner: ControlOwner; readonly handoffRequested: boolean; readonly agentMode: AgentMode
+  readonly autopilot: AutopilotState
   readonly motion: MotionState
   readonly impact: ImpactState | null
   readonly aircraftPhase: AircraftPhase
@@ -154,7 +173,7 @@ export interface MissionBrief {
   readonly deadlineSeconds: number
   readonly airports: readonly Airport[]
   readonly runways: readonly MissionRunway[]
-  readonly assignedRoute: { readonly plan: 'continue_kmdw'; readonly destination: 'KMDW'; readonly runway: '31C' }
+  readonly assignedRoute: { readonly plan: 'continue_kmdw'; readonly destination: 'KMDW'; readonly runway: '31C'; readonly altitudeFt: 3_000; readonly airspeedKt: 230 }
   readonly availablePlans: readonly RoutePlan[]
   readonly evidenceSources: readonly EvidenceSource[]
   readonly successConditions: readonly string[]
