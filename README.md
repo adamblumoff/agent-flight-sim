@@ -1,6 +1,6 @@
 # Flightdeck
 
-Flightdeck is a browser-native emergency-flight simulator built to test whether an agent can observe a changing world, fly over time, and recover when its original plan stops working. A human and a browser agent operate the same Boeing 787-9 Dreamliner through one command path. WebMCP gives the agent the same decision-relevant cockpit information shown to the human, except for rendered scene pixels.
+Flightdeck is a browser-native emergency-flight simulator built to test whether an agent can observe a changing world, fly over time, and recover when its original plan stops working. A human and a browser agent operate the same wide-body twinjet through one command path. WebMCP gives the agent the same decision-relevant cockpit information shown to the human, except for rendered scene pixels.
 
 **Live app:** [agent-flight-sim-production.up.railway.app](https://agent-flight-sim-production.up.railway.app/)
 
@@ -8,11 +8,11 @@ The simulator runs locally in a deterministic 60 Hz fixed-step loop. Three.js re
 
 ## The flight
 
-The root URL starts one short, real-time 787-9 flight. The assigned preflight plan departs St. Louis Lambert for Chicago Midway. A sealed in-flight event may force the pilot to reconsider that plan and coordinate a return to Lambert. Every run uses the same aircraft profile, route builder, world clock, checkpoint rule, and scoring model.
+The root URL starts one short, real-time wide-body flight. The assigned preflight plan departs St. Louis Lambert for Chicago Midway. A sealed in-flight event may force the pilot to reconsider that plan and coordinate a return to Lambert. Every run uses the same aircraft profile, route builder, world clock, checkpoint rule, and scoring model.
 
-The model represents a 787-9 at a 190,000 kg short-sector dispatch mass, below its design landing-weight limit. It uses a 62.8 m fuselage, 60.1 m span, twin 74,100 lbf-class engines, 377 m² lifting area, conventional high-lift devices, and a calculated sea-level lift model. For the modeled dry KSTL departure with light headwind, the representative card calls V1 at 145 kt, VR at 155 kt, and V2 at 165 kt with flaps 10°. Arrival guidance sequences flaps 10° on base, gear down/flaps 20° on final, and flaps 30° near a 145 kt approach target.
+The model represents a large twin-engine transport at a 190,000 kg short-sector dispatch mass, below its modeled landing-weight limit. It uses a 62.8 m fuselage, 60.1 m span, twin 74,100 lbf-class engines, 377 m² lifting area, conventional high-lift devices, and a calculated sea-level lift model. For the modeled dry KSTL departure with light headwind, the representative card calls V1 at 145 kt, VR at 155 kt, and V2 at 165 kt with flaps 10°. Arrival guidance sequences flaps 10° on base, gear down/flaps 20° on final, and flaps 30° near a 145 kt approach target.
 
-Dimensions, masses, engine families, and airport-planning performance come from Boeing's [787 technical specifications](https://www.boeing.com/commercial/787), [787 Airplane Characteristics for Airport Planning](https://www.boeing.com/commercial/airports/plan-manuals), and [787-9 three-view drawing](https://www.boeing.com/commercial/airports/3-view). Certified limits are cross-checked against [EASA type-certificate data sheet IM.A.115](https://www.easa.europa.eu/en/document-library/type-certificates/aircraft-cs-25-cs-22-cs-23-cs-vla-cs-lsa/easaima115-boeing-787). Exact V-speeds are load-, runway-, weather-, and configuration-dependent and would be calculated from approved operator data; the simulator's card is a representative value set for its declared dispatch condition, not dispatch data.
+Dimensions, mass, thrust, wing area, and representative speeds are simulator inputs chosen for a large twin-engine transport aircraft. Exact V-speeds are load-, runway-, weather-, and configuration-dependent and would be calculated from approved operator data; the simulator's card is a representative value set for its declared dispatch condition, not dispatch data.
 
 ## One control contract
 

@@ -12,7 +12,7 @@ import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
 import { FlightMinimap } from './components/flight-minimap'
 import { FlightCompass } from './components/flight-compass'
-import { DREAMLINER_787_9_ENVELOPE } from './sim/aircraftEnvelope'
+import { WIDE_BODY_TWINJET_ENVELOPE } from './sim/aircraftEnvelope'
 import { DEFAULT_ENVIRONMENT_VOLUME, DEFAULT_RADIO_VOLUME, flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
 import { randomCheckrideSeed } from './sim/missionProfiles'
@@ -196,7 +196,7 @@ function derivePlan(state: FlightState): readonly string[] {
 function deriveAction(state: FlightState): string {
   if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
   if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') {
-    return `Accelerating on Lambert runway 12R. At ${DREAMLINER_787_9_ENVELOPE.rotateSpeedKt} knots, rotate toward ${DREAMLINER_787_9_ENVELOPE.initialClimbPitchDeg}°.`
+    return `Accelerating on Lambert runway 12R. At ${WIDE_BODY_TWINJET_ENVELOPE.rotateSpeedKt} knots, rotate toward ${WIDE_BODY_TWINJET_ENVELOPE.initialClimbPitchDeg}°.`
   }
   if (state.mission.goAroundRequired) return 'The approach is unsafe. Abandon the landing and climb.'
   if (state.checkride.status === 'armed') return 'Normal departure. Monitoring the aircraft and surrounding conditions.'
@@ -543,8 +543,8 @@ export default function App() {
               The aircraft is lined up on St. Louis Lambert runway 12R for Chicago Midway runway 31C. The selected pilot keeps control until the run ends.
             </p>
             <ol>
-              <li><kbd>↑</kbd><span>Advance both GEnx engines to takeoff thrust; flaps 10° are already set.</span></li>
-              <li><kbd>W</kbd><span>At {DREAMLINER_787_9_ENVELOPE.rotateSpeedKt} knots, rotate at about {DREAMLINER_787_9_ENVELOPE.rotationRateDegPerSecond}°/s toward {DREAMLINER_787_9_ENVELOPE.initialClimbPitchDeg}°. Rotation is guidance; the aircraft lifts off only when its aerodynamic lift exceeds its weight.</span></li>
+              <li><kbd>↑</kbd><span>Advance both engines to takeoff thrust; flaps 10° are already set.</span></li>
+              <li><kbd>W</kbd><span>At {WIDE_BODY_TWINJET_ENVELOPE.rotateSpeedKt} knots, rotate at about {WIDE_BODY_TWINJET_ENVELOPE.rotationRateDegPerSecond}°/s toward {WIDE_BODY_TWINJET_ENVELOPE.initialClimbPitchDeg}°. Rotation is guidance; the aircraft lifts off only when its aerodynamic lift exceeds its weight.</span></li>
               <li><kbd>G</kbd><span>Retract gear after positive rate. Use <kbd>F</kbd> to retract flaps on schedule and <kbd>X</kbd> to level.</span></li>
             </ol>
             <div className="takeoff-briefing-actions">
@@ -563,7 +563,7 @@ export default function App() {
           <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
           <div>
             <strong>Flightdeck</strong>
-            <span>N787FD · Boeing 787-9</span>
+            <span>N90FD · Wide-body twinjet</span>
           </div>
         </div>
 

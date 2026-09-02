@@ -20,7 +20,7 @@ export const randomCheckrideSeed = (): CheckrideSeed => {
 }
 
 export const MISSION_PROFILE = Object.freeze({
-  id: 'dreamliner-787-9-emergency-v1',
+  id: 'wide-body-twinjet-emergency-v1',
   label: '8-minute flight',
   deadlineSeconds: 8 * 60 * 2,
   wallClockDeadlineSeconds: 8 * 60,

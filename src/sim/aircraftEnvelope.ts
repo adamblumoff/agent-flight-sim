@@ -38,8 +38,8 @@ export interface AircraftEnvelope {
   readonly landingFlapsDeg: 0 | 30
 }
 
-export const DREAMLINER_787_9_ENVELOPE: AircraftEnvelope = Object.freeze({
-  name: 'Boeing 787-9 Dreamliner',
+export const WIDE_BODY_TWINJET_ENVELOPE: AircraftEnvelope = Object.freeze({
+  name: 'Wide-body twinjet',
   maximumTakeoffMassKg: 259_220,
   // A short STL-MDW sector is dispatched below the 192,776 kg design landing
   // mass. That makes the local return plausible without fuel dumping.

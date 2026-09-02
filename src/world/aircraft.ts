@@ -43,7 +43,7 @@ export interface AircraftViewProfile {
   readonly speedCameraDropMeters: number
 }
 
-const dreamlinerView = Object.freeze({
+const wideBodyTwinjetView = Object.freeze({
   chaseOffset: Object.freeze([0, 24, 90] as const),
   chaseLookAhead: Object.freeze([0, -5, -155] as const),
   cockpitOffset: Object.freeze([0, 7.5, -25.5] as const),
@@ -188,7 +188,7 @@ function bogie(name: string, x: number, z: number, axleCount: number, topY: numb
   return assembly
 }
 
-function dreamlinerWindows() {
+function wideBodyTwinjetWindows() {
   const zPositions = Array.from({ length: 53 }, (_, index) => -21.5 + index * 0.86)
   const windows = new InstancedMesh(new PlaneGeometry(0.28, 0.19), windowMaterial, zPositions.length * 2)
   const transform = new Object3D()
@@ -206,7 +206,7 @@ function dreamlinerWindows() {
   return windows
 }
 
-function dreamlinerWing(side: -1 | 1, flaps: Group[]) {
+function wideBodyTwinjetWing(side: -1 | 1, flaps: Group[]) {
   const assembly = new Group()
   assembly.name = side < 0 ? 'Left swept wing' : 'Right swept wing'
   assembly.position.y = 5.5
@@ -237,7 +237,7 @@ function dreamlinerWing(side: -1 | 1, flaps: Group[]) {
   return assembly
 }
 
-function dreamlinerTailplane(side: -1 | 1) {
+function wideBodyTwinjetTailplane(side: -1 | 1) {
   const assembly = new Group()
   assembly.name = side < 0 ? 'Left horizontal stabilizer' : 'Right horizontal stabilizer'
   assembly.position.y = 7.1
@@ -250,9 +250,9 @@ function dreamlinerTailplane(side: -1 | 1) {
   return assembly
 }
 
-function dreamlinerFin() {
+function wideBodyTwinjetFin() {
   const assembly = new Group()
-  assembly.name = 'Dreamliner vertical stabilizer'
+  assembly.name = 'Wide-body twinjet vertical stabilizer'
   assembly.position.set(0, 6.2, 21.5)
   assembly.add(
     mesh(verticalSlabGeometry([
@@ -271,11 +271,11 @@ function dreamlinerFin() {
   return assembly
 }
 
-function dreamlinerEngine(name: AircraftBreakawayPart['name'], x: number) {
+function wideBodyTwinjetEngine(name: AircraftBreakawayPart['name'], x: number) {
   const assembly = new Group()
   assembly.name = name
-  // The GEnx-1B fan is 111.1 in (2.82 m) across. The nacelle is wider than
-  // the fan but remains far smaller than the 787's 5.8 m-wide fuselage.
+  // The representative fan is 2.82 m across. The nacelle is wider than the fan
+  // but remains far smaller than the aircraft's 5.8 m-wide fuselage.
   assembly.position.set(x, 2.45, -0.5)
   const nacelle = mesh(new CylinderGeometry(1.48, 1.78, 5.75, 36, 1, true), bodyMaterial)
   nacelle.rotation.x = Math.PI / 2
@@ -293,18 +293,18 @@ function dreamlinerEngine(name: AircraftBreakawayPart['name'], x: number) {
   return assembly
 }
 
-function createDreamlinerAircraft(): AircraftRig {
+function createWideBodyTwinjetAircraft(): AircraftRig {
   const aircraft = new Group()
-  aircraft.name = 'N787FD'
+  aircraft.name = 'N90FD'
   const flaps: Group[] = []
-  const leftWing = dreamlinerWing(-1, flaps)
-  const rightWing = dreamlinerWing(1, flaps)
-  const leftTail = dreamlinerTailplane(-1)
-  const rightTail = dreamlinerTailplane(1)
-  const finAssembly = dreamlinerFin()
+  const leftWing = wideBodyTwinjetWing(-1, flaps)
+  const rightWing = wideBodyTwinjetWing(1, flaps)
+  const leftTail = wideBodyTwinjetTailplane(-1)
+  const rightTail = wideBodyTwinjetTailplane(1)
+  const finAssembly = wideBodyTwinjetFin()
   const engines = [
-    dreamlinerEngine('left-engine', -9.6),
-    dreamlinerEngine('right-engine', 9.6),
+    wideBodyTwinjetEngine('left-engine', -9.6),
+    wideBodyTwinjetEngine('right-engine', 9.6),
   ]
   const landingGearAssemblies = [
     bogie('Nose gear', 0, -22.2, 1, 4.65, 0.46),
@@ -325,8 +325,8 @@ function createDreamlinerAircraft(): AircraftRig {
   fuselage.position.y = 6.1
 
   const details = new Group()
-  details.name = 'Dreamliner fuselage details'
-  details.add(dreamlinerWindows())
+  details.name = 'Wide-body twinjet fuselage details'
+  details.add(wideBodyTwinjetWindows())
   for (const side of [-1, 1] as const) {
     details.add(sidePanel(51, 0.18, 2.89, 5.72, -0.5, side, liveryMaterial))
     for (const z of [-20.5, -11.5, 8.5, 17.5]) details.add(sidePanel(1.15, 2.25, 2.91, 6.05, z, side, doorMaterial))
@@ -343,7 +343,7 @@ function createDreamlinerAircraft(): AircraftRig {
     root: aircraft,
     landingGear: landingGearAssemblies,
     flaps,
-    view: dreamlinerView,
+    view: wideBodyTwinjetView,
     breakawayParts: [
       { name: 'left-wing', root: leftWing },
       { name: 'right-wing', root: rightWing },
@@ -357,7 +357,7 @@ function createDreamlinerAircraft(): AircraftRig {
 }
 
 export function createAircraft(): AircraftRig {
-  return createDreamlinerAircraft()
+  return createWideBodyTwinjetAircraft()
 }
 
 function seededRandom(seed: number) {

@@ -1,5 +1,5 @@
 import type { CheckrideSeed, ScenarioConditions } from './types'
-import { DREAMLINER_787_9_ENVELOPE } from './aircraftEnvelope.ts'
+import { WIDE_BODY_TWINJET_ENVELOPE } from './aircraftEnvelope.ts'
 
 const radians = (degrees: number) => degrees * Math.PI / 180
 const degrees = (value: number) => value * 180 / Math.PI
@@ -161,15 +161,15 @@ export function stallResponseFor(
   const flightPathDeg = degrees(Math.atan2(verticalSpeedKt, Math.max(airspeedKt, 1)))
   const angleOfAttackDeg = pitchDeg - flightPathDeg
   const maximumLiftCoefficient = flapsDeg >= 30
-    ? DREAMLINER_787_9_ENVELOPE.landingMaximumLiftCoefficient
+    ? WIDE_BODY_TWINJET_ENVELOPE.landingMaximumLiftCoefficient
     : flapsDeg >= 10
-      ? DREAMLINER_787_9_ENVELOPE.takeoffMaximumLiftCoefficient
-      : DREAMLINER_787_9_ENVELOPE.cleanMaximumLiftCoefficient
-  const weightNewtons = DREAMLINER_787_9_ENVELOPE.dispatchMassKg * 9.80665
+      ? WIDE_BODY_TWINJET_ENVELOPE.takeoffMaximumLiftCoefficient
+      : WIDE_BODY_TWINJET_ENVELOPE.cleanMaximumLiftCoefficient
+  const weightNewtons = WIDE_BODY_TWINJET_ENVELOPE.dispatchMassKg * 9.80665
   const seaLevelDensityKgPerM3 = 1.225
   const baseStallMetersPerSecond = Math.sqrt(
     2 * weightNewtons
-    / (seaLevelDensityKgPerM3 * DREAMLINER_787_9_ENVELOPE.wingAreaM2 * maximumLiftCoefficient),
+    / (seaLevelDensityKgPerM3 * WIDE_BODY_TWINJET_ENVELOPE.wingAreaM2 * maximumLiftCoefficient),
   )
   const baseStallSpeedKt = baseStallMetersPerSecond * 1.943_844_492_4
   const bankLoadFactor = 1 / Math.max(0.5, Math.cos(radians(Math.min(60, Math.abs(bankDeg)))))
