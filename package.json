@@ -37,5 +37,5 @@
     "vite": "^8.2.2",
     "webmcp-types": "^0.1.3"
   },
-  "description": "A real-time WebMCP flight simulator for testing emergency decision-making"
+  "description": "A real-time WebMCP flight simulator where an agent programs and flies an aircraft through a sealed emergency"
 }
