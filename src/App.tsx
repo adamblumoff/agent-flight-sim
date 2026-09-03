@@ -414,7 +414,7 @@ export default function App() {
         </button>
       </nav>
 
-      <section className={cn(flightPanel, 'absolute bottom-5 left-5 right-[380px] z-10 flex min-h-[76px] overflow-hidden rounded-xl max-xl:right-[350px] max-[760px]:bottom-auto max-[760px]:left-3 max-[760px]:right-auto max-[760px]:top-[66px] max-[760px]:min-h-[78px] max-[760px]:w-[min(520px,calc(100%-172px))] max-[480px]:w-[calc(100%-72px)]')} aria-label="Flight instruments and controls">
+      <section className={cn(flightPanel, 'absolute bottom-5 left-5 right-[380px] z-[7] flex min-h-[76px] overflow-hidden rounded-xl max-xl:right-[350px] max-[760px]:bottom-auto max-[760px]:left-3 max-[760px]:right-auto max-[760px]:top-[66px] max-[760px]:min-h-[78px] max-[760px]:w-[min(520px,calc(100%-172px))] max-[480px]:w-[calc(100%-72px)]')} aria-label="Flight instruments and controls">
         <div className="grid min-w-0 flex-1 grid-cols-6 max-lg:grid-cols-3 max-[760px]:grid-cols-2">
           <InstrumentStat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
           <InstrumentStat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
