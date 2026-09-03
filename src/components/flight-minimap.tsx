@@ -63,7 +63,7 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
     <aside
       className={cn(
         flightPanel,
-        'pointer-events-none absolute left-5 top-[132px] z-[8] w-[min(440px,calc(100vw-16px))] rounded-[13px] bg-[linear-gradient(145deg,rgb(28_31_26/88%),rgb(15_18_15/82%))] p-1.5 shadow-[0_16px_44px_rgb(0_0_0/28%)] max-[760px]:left-3 max-[760px]:top-[158px] max-[760px]:w-[min(520px,calc(100vw-24px))] max-[480px]:top-[154px]',
+        'pointer-events-none absolute left-5 top-[76px] z-[8] w-[min(440px,calc(100vw-16px))] rounded-[13px] bg-[linear-gradient(145deg,rgb(28_31_26/88%),rgb(15_18_15/82%))] p-1.5 shadow-[0_16px_44px_rgb(0_0_0/28%)] max-[760px]:left-3 max-[760px]:top-[158px] max-[760px]:w-[min(520px,calc(100vw-24px))] max-[480px]:top-[154px]',
         collapsed && 'size-11! p-0',
       )}
       aria-label={`Route map. ${status}. ${routeProgress}.`}

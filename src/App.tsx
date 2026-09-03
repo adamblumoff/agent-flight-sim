@@ -1,7 +1,7 @@
 import '@fontsource-variable/atkinson-hyperlegible-next'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Volume2, VolumeX, Wind } from 'lucide-react'
+import { Eye, Glasses, MapPin, Orbit, Timer, Trophy, Volume2, VolumeX, Wind } from 'lucide-react'
 import { CopilotPanel } from './components/copilot-panel'
 import { FlightModeBadge } from './components/flight-mode-badge'
 import { Button } from './components/ui/button'
@@ -335,19 +335,11 @@ export default function App() {
         </section>
       ) : null}
 
-      <header className="pointer-events-none absolute left-5 right-5 top-4 z-10 flex min-h-11 items-center gap-4 max-[760px]:left-3 max-[760px]:right-3 max-[760px]:top-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-[#f4efde]/15 bg-[#171815]/85 text-[#8bc49b] backdrop-blur-xl [&_svg]:size-4" aria-hidden="true"><Plane /></span>
-          <div className="grid min-w-0">
-            <strong className="truncate text-sm font-semibold tracking-[-0.02em]">Can an Agent Be a Pilot?</strong>
-            <span className="font-mono text-[7px] uppercase tracking-[0.11em] text-[#b9b3a3] max-sm:hidden">N90FD · Wide-body twinjet</span>
-          </div>
-        </div>
-
-        <div className="ml-auto flex min-w-0 items-center gap-2 rounded-lg border border-[#f4efde]/12 bg-[#171815]/80 px-3 py-2 text-[9px] backdrop-blur-xl max-sm:hidden" aria-label={`Route ${destination}, ${routeDetail}`}>
+      <header className="pointer-events-none absolute right-5 top-4 z-10 flex min-h-11 items-center gap-2 max-[760px]:right-3 max-[760px]:top-3">
+        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-[#f4efde]/12 bg-[#171815]/80 px-3 py-2 text-[9px] backdrop-blur-xl max-sm:hidden" aria-label={`Route ${destination}, ${routeDetail}`}>
           <MapPin className="size-3.5 shrink-0 text-[#8bc49b]" aria-hidden="true" />
           <strong className="truncate font-semibold text-[#f4efde]">{destination}</strong>
-          <span className="max-w-48 truncate text-[#b9b3a3]">{routeDetail}</span>
+          <span className="max-w-48 truncate text-[#b9b3a3] max-lg:hidden">{routeDetail}</span>
           <i className="h-4 w-px bg-[#f4efde]/12" aria-hidden="true" />
           <span className="font-mono uppercase tracking-[0.1em] text-[#b9b3a3]">{formatLabel(state.mission.phase)}</span>
         </div>
@@ -355,7 +347,7 @@ export default function App() {
         <FlightModeBadge mode={state.flightMode} />
       </header>
 
-      <div className="absolute left-5 top-[76px] z-10 flex items-stretch gap-2 max-[760px]:left-3 max-[760px]:top-28 max-[760px]:max-w-[calc(100vw-24px)]">
+      <div className="absolute left-5 top-4 z-10 flex items-stretch gap-2 max-[760px]:left-3 max-[760px]:top-28 max-[760px]:max-w-[calc(100vw-24px)]">
         <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3] data-[urgent=true]:border-[#e78068]/45 data-[urgent=true]:text-[#e78068]')} data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(missionElapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
           <Timer className="size-3.5 text-[#8bc49b]" aria-hidden="true" />
           <span className="max-sm:hidden">Elapsed</span>
@@ -370,7 +362,7 @@ export default function App() {
           <strong className="font-mono text-sm tabular-nums">{state.checkride.score.total}</strong>
           {lastDeduction ? <small className="font-mono text-[7px] uppercase text-[#e78068] max-lg:hidden">−{lastDeduction.points} {deductionLabel(lastDeduction.id)}</small> : null}
         </div>
-        <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 max-sm:hidden data-[turbulence=moderate]:border-[#e2b76f]/45')} title={windTitle} aria-label={windTitle} data-turbulence={state.motion.turbulenceLevel}>
+        <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 max-lg:hidden data-[turbulence=moderate]:border-[#e2b76f]/45')} title={windTitle} aria-label={windTitle} data-turbulence={state.motion.turbulenceLevel}>
           <Wind className="size-3.5 text-sky-300" aria-hidden="true" />
           <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3]">Wind</span>
           <strong className="font-mono text-[10px] tabular-nums">{windDirection}° / {state.scenario.weather.windSpeedKt} kt</strong>
