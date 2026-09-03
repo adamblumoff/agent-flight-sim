@@ -56,7 +56,7 @@ function InstrumentStat({
   readonly unit: string
 }) {
   return (
-    <div className="min-w-0 border-r border-[#f4efde]/10 px-3 py-2 last:border-r-0 max-lg:[&:nth-child(n+5)]:hidden">
+    <div className="min-w-0 border-r border-[#f4efde]/10 px-3 py-2 last:border-r-0 max-md:[&:nth-child(n+5)]:hidden">
       <span className="font-mono text-[7px] font-semibold uppercase tracking-[0.12em] text-[#b9b3a3]">{label}</span>
       <div className="mt-0.5 flex items-baseline gap-1">
         <strong className="font-mono text-lg font-medium tabular-nums text-[#f4efde]">{value}</strong>
@@ -415,7 +415,7 @@ export default function App() {
       </nav>
 
       <section className={cn(flightPanel, 'absolute bottom-5 left-5 right-[380px] z-10 flex min-h-[76px] overflow-hidden rounded-xl max-xl:right-[350px] max-md:bottom-auto max-md:left-3 max-md:right-auto max-md:top-[66px] max-md:min-h-[78px] max-md:w-[min(520px,calc(100%-172px))]')} aria-label="Flight instruments and controls">
-        <div className="grid min-w-0 flex-1 grid-cols-6 max-lg:grid-cols-4 max-md:grid-cols-2">
+        <div className="grid min-w-0 flex-1 grid-cols-6 max-lg:grid-cols-3 max-md:grid-cols-2">
           <InstrumentStat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
           <InstrumentStat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
           <InstrumentStat label="Pitch" value={formatAngleMagnitude(state.pitchDeg)} unit={pitchDirection(state.pitchDeg)} />
