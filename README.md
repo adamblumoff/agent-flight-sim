@@ -53,4 +53,6 @@ npm run diagnostic:radio
 
 A product evaluation uses a fresh visible app and a fresh agent given only the mission objective. The agent must use the page-published WebMCP tools. A run passes when the aircraft lands and the exported trajectory contains the complete interaction. Release readiness requires three consecutive passing blind runs.
 
+See the [three blind production evaluations](evaluation-runs/README.md): all three passed with a mean score of 100/100.
+
 This is an interactive research prototype, not a certified aviation-training device.
