@@ -270,7 +270,7 @@ export function CopilotPanel({
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-2.5 font-mono text-[8px] font-semibold uppercase tracking-[0.1em] hover:text-[#f4efde] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#f4efde] [&::-webkit-details-marker]:hidden">
           <CircleAlert className="size-3" aria-hidden="true" />
           Diagnostics
-          <ChevronDown className="ml-auto size-3 transition-transform group-open:rotate-180" aria-hidden="true" />
+          <ChevronDown className="ml-auto size-3 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
         </summary>
         <dl className="grid gap-1 px-4 pb-3 font-mono text-[8px] [&>div]:grid [&>div]:grid-cols-[62px_1fr] [&_dt]:uppercase [&_dt]:tracking-[0.06em] [&_dd]:overflow-hidden [&_dd]:text-ellipsis [&_dd]:text-[#f4efde]/65">
           <div><dt>World</dt><dd>{diagnostics.world}</dd></div>

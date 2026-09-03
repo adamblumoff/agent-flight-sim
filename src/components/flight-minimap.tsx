@@ -63,7 +63,7 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
     <aside
       className={cn(
         flightPanel,
-        'absolute left-5 top-[132px] z-[8] w-[min(440px,calc(100vw-16px))] rounded-[13px] bg-[linear-gradient(145deg,rgb(28_31_26/88%),rgb(15_18_15/82%))] p-1.5 shadow-[0_16px_44px_rgb(0_0_0/28%)] max-md:left-3 max-md:top-[116px] max-md:w-[min(440px,calc(100vw-24px))]',
+        'absolute left-5 top-[132px] z-[8] w-[min(440px,calc(100vw-16px))] rounded-[13px] bg-[linear-gradient(145deg,rgb(28_31_26/88%),rgb(15_18_15/82%))] p-1.5 shadow-[0_16px_44px_rgb(0_0_0/28%)] max-md:left-3 max-md:top-[158px] max-md:w-[min(520px,calc(100vw-24px))] max-[480px]:top-[154px]',
         collapsed && 'size-11 p-0',
       )}
       aria-label={`Route map. ${status}. ${routeProgress}.`}
@@ -71,7 +71,7 @@ export function FlightMinimap({ state }: { readonly state: FlightState }) {
       <button
         type="button"
         className={cn(
-          'absolute left-3 top-3 z-[2] grid size-[30px] cursor-pointer place-items-center rounded-lg border border-[#f4efde]/12 bg-[#090d0a]/75 text-[#f4efde]/75 backdrop-blur-lg transition hover:bg-[#f4efde]/10 hover:text-[#f4efde] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f4efde] [&_svg]:size-4',
+          'absolute left-3 top-3 z-[2] grid size-[30px] cursor-pointer place-items-center rounded-lg border border-[#f4efde]/12 bg-[#090d0a]/75 text-[#f4efde]/75 backdrop-blur-lg transition hover:bg-[#f4efde]/10 hover:text-[#f4efde] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f4efde] motion-reduce:transition-none [&_svg]:size-4',
           collapsed && 'left-1.5 top-1.5',
         )}
         aria-label={collapsed ? 'Expand route map' : 'Collapse route map'}

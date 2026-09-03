@@ -56,7 +56,7 @@ function InstrumentStat({
   readonly unit: string
 }) {
   return (
-    <div className="min-w-0 border-r border-[#f4efde]/10 px-3 py-2 last:border-r-0 max-lg:[&:nth-child(n+5)]:hidden max-sm:[&:nth-child(n+4)]:hidden">
+    <div className="min-w-0 border-r border-[#f4efde]/10 px-3 py-2 last:border-r-0 max-lg:[&:nth-child(n+5)]:hidden">
       <span className="font-mono text-[7px] font-semibold uppercase tracking-[0.12em] text-[#b9b3a3]">{label}</span>
       <div className="mt-0.5 flex items-baseline gap-1">
         <strong className="font-mono text-lg font-medium tabular-nums text-[#f4efde]">{value}</strong>
@@ -307,13 +307,13 @@ export default function App() {
 
       {showTakeoffBrief && state.mission.phase === 'preflight' ? (
         <section
-          className="absolute inset-0 z-20 grid place-items-center bg-[#080a08]/65 p-6 backdrop-blur-[7px]"
+          className="absolute inset-0 z-20 grid place-items-center overflow-y-auto bg-[#080a08]/65 p-6 backdrop-blur-[7px] max-[480px]:p-3"
           role="dialog"
           aria-modal="true"
           aria-labelledby="takeoff-briefing-title"
           aria-describedby="takeoff-briefing-copy"
         >
-          <div className={cn(flightPanel, 'w-full max-w-[520px] rounded-[18px] bg-[#171815]/96 p-7 shadow-[0_28px_90px_rgb(0_0_0/46%)]')}>
+          <div className={cn(flightPanel, 'max-h-[calc(100dvh-48px)] w-full max-w-[520px] overflow-y-auto rounded-[18px] bg-[#171815]/96 p-7 shadow-[0_28px_90px_rgb(0_0_0/46%)] max-[480px]:max-h-[calc(100dvh-24px)] max-[480px]:p-[21px_18px]')}>
             <p className={eyebrow}>Flight briefing</p>
             <h1 className="my-2 text-[clamp(24px,4vw,34px)] font-semibold tracking-[-0.045em]" id="takeoff-briefing-title">Choose who flies this run.</h1>
             <p className="text-xs leading-relaxed text-[#b9b3a3]" id="takeoff-briefing-copy">
@@ -355,7 +355,7 @@ export default function App() {
         <FlightModeBadge mode={state.flightMode} />
       </header>
 
-      <div className="absolute left-5 top-[76px] z-10 flex items-stretch gap-2 max-md:left-3 max-md:top-[68px]">
+      <div className="absolute left-5 top-[76px] z-10 flex items-stretch gap-2 max-md:left-3 max-md:top-28 max-md:max-w-[calc(100vw-24px)]">
         <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3] data-[urgent=true]:border-[#e78068]/45 data-[urgent=true]:text-[#e78068]')} data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(missionElapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
           <Timer className="size-3.5 text-[#8bc49b]" aria-hidden="true" />
           <span className="max-sm:hidden">Elapsed</span>
@@ -377,7 +377,7 @@ export default function App() {
           {state.motion.turbulenceLevel !== 'none' ? <small className="font-mono text-[7px] uppercase text-[#e2b76f]">{state.motion.turbulenceLevel}</small> : null}
         </div>
         {state.checkride.decisionSecondsRemaining !== null ? (
-          <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg border-[#e78068]/35 px-3 py-2 text-[#e78068] data-[urgent=true]:animate-pulse')} data-urgent={state.checkride.decisionSecondsRemaining <= 30} role="timer" aria-live="polite">
+          <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg border-[#e78068]/35 px-3 py-2 text-[#e78068] data-[urgent=true]:animate-pulse motion-reduce:animate-none')} data-urgent={state.checkride.decisionSecondsRemaining <= 30} role="timer" aria-live="polite">
             <Timer className="size-3.5" aria-hidden="true" />
             <span className="font-mono text-[8px] uppercase tracking-[0.1em] max-lg:hidden">Route decision</span>
             <strong className="font-mono text-xs tabular-nums">{formatElapsed(Math.ceil(state.checkride.decisionSecondsRemaining))}</strong>
@@ -387,7 +387,7 @@ export default function App() {
 
       <FlightMinimap state={state} />
       <FlightCompass ref={compassRef} />
-      <nav className={cn(flightPanel, 'absolute bottom-[112px] left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-lg p-1 max-md:bottom-[104px]')} aria-label="Camera view">
+      <nav className={cn(flightPanel, 'absolute bottom-[112px] left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-lg p-1 max-md:bottom-auto max-md:left-auto max-md:right-3 max-md:top-[66px] max-md:translate-x-0')} aria-label="Camera view">
         {cameraOptions.map(({ mode, label, icon: Icon }) => (
           <button
             key={mode}
@@ -401,7 +401,7 @@ export default function App() {
             <Icon aria-hidden="true" />
           </button>
         ))}
-        <span className="mx-1 h-5 w-px bg-[#f4efde]/12" aria-hidden="true" />
+        <span className="mx-1 h-5 w-px bg-[#f4efde]/12 max-md:hidden" aria-hidden="true" />
         <button
           type="button"
           className={iconButton}
@@ -414,8 +414,8 @@ export default function App() {
         </button>
       </nav>
 
-      <section className={cn(flightPanel, 'absolute bottom-5 left-5 right-[380px] z-10 flex min-h-[76px] overflow-hidden rounded-xl max-xl:right-[350px] max-md:bottom-3 max-md:left-3 max-md:right-3')} aria-label="Flight instruments and controls">
-        <div className="grid min-w-0 flex-1 grid-cols-6 max-lg:grid-cols-4 max-sm:grid-cols-3">
+      <section className={cn(flightPanel, 'absolute bottom-5 left-5 right-[380px] z-10 flex min-h-[76px] overflow-hidden rounded-xl max-xl:right-[350px] max-md:bottom-auto max-md:left-3 max-md:right-auto max-md:top-[66px] max-md:min-h-[78px] max-md:w-[min(520px,calc(100%-172px))]')} aria-label="Flight instruments and controls">
+        <div className="grid min-w-0 flex-1 grid-cols-6 max-lg:grid-cols-4 max-md:grid-cols-2">
           <InstrumentStat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
           <InstrumentStat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
           <InstrumentStat label="Pitch" value={formatAngleMagnitude(state.pitchDeg)} unit={pitchDirection(state.pitchDeg)} />
