@@ -169,7 +169,7 @@ export function CopilotPanel({
   onReset,
 }: CopilotPanelProps) {
   return (
-    <aside className={cn(flightPanel, 'absolute bottom-5 right-5 top-[76px] z-[9] flex w-[340px] flex-col overflow-hidden rounded-2xl max-xl:w-[310px] max-md:bottom-3 max-md:left-3 max-md:right-3 max-md:top-auto max-md:h-[min(49vh,430px)] max-md:w-auto max-[480px]:h-[min(52vh,440px)]')} aria-label="Flight copilot">
+    <aside className={cn(flightPanel, 'absolute bottom-5 right-5 top-[76px] z-[9] flex w-[340px] flex-col overflow-hidden rounded-2xl max-xl:w-[310px] max-[760px]:bottom-3 max-[760px]:left-3 max-[760px]:right-3 max-[760px]:top-auto max-[760px]:h-[min(49vh,430px)] max-[760px]:w-auto max-[480px]:h-[min(52vh,440px)]')} aria-label="Flight copilot">
       <header className="grid min-h-[64px] grid-cols-[34px_1fr_auto] items-center gap-2.5 border-b border-[#f4efde]/12 px-3.5 py-3 max-[480px]:min-h-[58px] max-[480px]:py-2">
         <span className="grid size-[34px] place-items-center rounded-lg bg-[#8bc49b]/15 text-[#8bc49b] [&_svg]:size-4" aria-hidden="true"><Bot /></span>
         <div className="min-w-0">

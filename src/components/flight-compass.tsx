@@ -4,7 +4,7 @@ import { cn } from '../lib/utils'
 
 export const FlightCompass = forwardRef<HTMLDivElement>(function FlightCompass(_, ref) {
   return (
-    <section className={cn(flightPanel, 'pointer-events-none absolute bottom-32 left-5 z-[8] grid min-h-[116px] w-[286px] grid-cols-[96px_1fr] gap-x-3 gap-y-2.5 rounded-[15px] bg-[linear-gradient(145deg,rgb(20_24_20/91%),rgb(11_15_12/86%))] p-2.5 max-md:bottom-[calc(49vh+24px)] max-md:left-3 max-[480px]:bottom-[calc(52vh+24px)] max-[480px]:w-[min(286px,calc(100vw-24px))]')} ref={ref} aria-label="Flight compass. Route pending.">
+    <section className={cn(flightPanel, 'pointer-events-none absolute bottom-32 left-5 z-[8] grid min-h-[116px] w-[286px] grid-cols-[96px_1fr] gap-x-3 gap-y-2.5 rounded-[15px] bg-[linear-gradient(145deg,rgb(20_24_20/91%),rgb(11_15_12/86%))] p-2.5 max-[760px]:bottom-[calc(49vh+24px)] max-[760px]:left-3 max-[480px]:bottom-[calc(52vh+24px)] max-[480px]:w-[min(286px,calc(100vw-24px))]')} ref={ref} aria-label="Flight compass. Route pending.">
       <div className="relative size-24 overflow-hidden rounded-full border border-[#f4efde]/15 bg-[radial-gradient(circle_at_center,rgb(16_21_17/94%)_0_55%,transparent_56%),repeating-conic-gradient(from_-1deg,rgb(244_239_222/30%)_0_1deg,transparent_1deg_15deg),#0a0f0c] shadow-[inset_0_0_0_5px_rgb(244_239_222/3%),inset_0_0_24px_rgb(0_0_0/52%)]" aria-hidden="true">
         <div className="absolute inset-0 will-change-transform [&_span]:absolute [&_span]:font-mono [&_span]:text-[8px] [&_span]:font-semibold [&_span]:text-[#f4efde]/75" data-compass-card>
           <span className="left-1/2 top-2 -translate-x-1/2 text-[#8bc49b]!">N</span>

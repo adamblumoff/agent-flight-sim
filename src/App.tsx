@@ -56,7 +56,7 @@ function InstrumentStat({
   readonly unit: string
 }) {
   return (
-    <div className="min-w-0 border-r border-[#f4efde]/10 px-3 py-2 last:border-r-0 max-md:[&:nth-child(n+5)]:hidden">
+    <div className="min-w-0 border-r border-[#f4efde]/10 px-3 py-2 last:border-r-0 max-[760px]:[&:nth-child(n+5)]:hidden">
       <span className="font-mono text-[7px] font-semibold uppercase tracking-[0.12em] text-[#b9b3a3]">{label}</span>
       <div className="mt-0.5 flex items-baseline gap-1">
         <strong className="font-mono text-lg font-medium tabular-nums text-[#f4efde]">{value}</strong>
@@ -335,7 +335,7 @@ export default function App() {
         </section>
       ) : null}
 
-      <header className="absolute left-5 right-5 top-4 z-10 flex min-h-11 items-center gap-4 max-md:left-3 max-md:right-3 max-md:top-3">
+      <header className="pointer-events-none absolute left-5 right-5 top-4 z-10 flex min-h-11 items-center gap-4 max-[760px]:left-3 max-[760px]:right-3 max-[760px]:top-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-[#f4efde]/15 bg-[#171815]/85 text-[#8bc49b] backdrop-blur-xl [&_svg]:size-4" aria-hidden="true"><Plane /></span>
           <div className="grid min-w-0">
@@ -355,7 +355,7 @@ export default function App() {
         <FlightModeBadge mode={state.flightMode} />
       </header>
 
-      <div className="absolute left-5 top-[76px] z-10 flex items-stretch gap-2 max-md:left-3 max-md:top-28 max-md:max-w-[calc(100vw-24px)]">
+      <div className="absolute left-5 top-[76px] z-10 flex items-stretch gap-2 max-[760px]:left-3 max-[760px]:top-28 max-[760px]:max-w-[calc(100vw-24px)]">
         <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3] data-[urgent=true]:border-[#e78068]/45 data-[urgent=true]:text-[#e78068]')} data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(missionElapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
           <Timer className="size-3.5 text-[#8bc49b]" aria-hidden="true" />
           <span className="max-sm:hidden">Elapsed</span>
@@ -387,7 +387,7 @@ export default function App() {
 
       <FlightMinimap state={state} />
       <FlightCompass ref={compassRef} />
-      <nav className={cn(flightPanel, 'absolute bottom-[112px] left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-lg p-1 max-md:bottom-auto max-md:left-auto max-md:right-3 max-md:top-[66px] max-md:translate-x-0')} aria-label="Camera view">
+      <nav className={cn(flightPanel, 'absolute bottom-[112px] left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-lg p-1 max-[760px]:bottom-auto max-[760px]:left-auto max-[760px]:right-3 max-[760px]:top-[66px] max-[760px]:translate-x-0')} aria-label="Camera view">
         {cameraOptions.map(({ mode, label, icon: Icon }) => (
           <button
             key={mode}
@@ -401,7 +401,7 @@ export default function App() {
             <Icon aria-hidden="true" />
           </button>
         ))}
-        <span className="mx-1 h-5 w-px bg-[#f4efde]/12 max-md:hidden" aria-hidden="true" />
+        <span className="mx-1 h-5 w-px bg-[#f4efde]/12 max-[760px]:hidden" aria-hidden="true" />
         <button
           type="button"
           className={iconButton}
@@ -414,8 +414,8 @@ export default function App() {
         </button>
       </nav>
 
-      <section className={cn(flightPanel, 'absolute bottom-5 left-5 right-[380px] z-10 flex min-h-[76px] overflow-hidden rounded-xl max-xl:right-[350px] max-md:bottom-auto max-md:left-3 max-md:right-auto max-md:top-[66px] max-md:min-h-[78px] max-md:w-[min(520px,calc(100%-172px))]')} aria-label="Flight instruments and controls">
-        <div className="grid min-w-0 flex-1 grid-cols-6 max-lg:grid-cols-3 max-md:grid-cols-2">
+      <section className={cn(flightPanel, 'absolute bottom-5 left-5 right-[380px] z-10 flex min-h-[76px] overflow-hidden rounded-xl max-xl:right-[350px] max-[760px]:bottom-auto max-[760px]:left-3 max-[760px]:right-auto max-[760px]:top-[66px] max-[760px]:min-h-[78px] max-[760px]:w-[min(520px,calc(100%-172px))] max-[480px]:w-[calc(100%-72px)]')} aria-label="Flight instruments and controls">
+        <div className="grid min-w-0 flex-1 grid-cols-6 max-lg:grid-cols-3 max-[760px]:grid-cols-2">
           <InstrumentStat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
           <InstrumentStat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
           <InstrumentStat label="Pitch" value={formatAngleMagnitude(state.pitchDeg)} unit={pitchDirection(state.pitchDeg)} />
@@ -424,7 +424,7 @@ export default function App() {
           <InstrumentStat label="Heading" value={Math.round(state.headingDeg).toString().padStart(3, '0')} unit="MAG" />
         </div>
 
-        <div className="grid w-[260px] shrink-0 grid-cols-2 gap-2 border-l border-[#f4efde]/10 p-3 max-xl:w-[190px] max-md:hidden">
+        <div className="grid w-[260px] shrink-0 grid-cols-2 gap-2 border-l border-[#f4efde]/10 p-3 max-xl:w-[190px] max-[760px]:w-[150px] max-[760px]:p-[9px] max-[480px]:hidden">
           <Button
             variant="outline"
             size="sm"
@@ -448,7 +448,7 @@ export default function App() {
             <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3]">Flaps <kbd className="text-[#8bc49b]">(F)</kbd></span>
             <span className="font-mono text-[9px] uppercase text-[#f4efde]">{state.flapsDeg}°</span>
           </Button>
-          <label className="col-span-2 grid grid-cols-[42px_1fr_32px] items-center gap-2 font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3]">
+          <label className="col-span-2 grid grid-cols-[42px_1fr_32px] items-center gap-2 font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3] max-[760px]:hidden">
             <span>Power</span>
             <Slider
               aria-label="Engine power"
