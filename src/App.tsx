@@ -339,7 +339,7 @@ export default function App() {
         <div className="flex min-w-0 items-center gap-2 rounded-lg border border-[#f4efde]/12 bg-[#171815]/80 px-3 py-2 text-[9px] backdrop-blur-xl max-sm:hidden" aria-label={`Route ${destination}, ${routeDetail}`}>
           <MapPin className="size-3.5 shrink-0 text-[#8bc49b]" aria-hidden="true" />
           <strong className="truncate font-semibold text-[#f4efde]">{destination}</strong>
-          <span className="max-w-48 truncate text-[#b9b3a3] max-lg:hidden">{routeDetail}</span>
+          <span className="max-w-48 truncate text-[#b9b3a3] max-xl:hidden">{routeDetail}</span>
           <i className="h-4 w-px bg-[#f4efde]/12" aria-hidden="true" />
           <span className="font-mono uppercase tracking-[0.1em] text-[#b9b3a3]">{formatLabel(state.mission.phase)}</span>
         </div>
@@ -360,9 +360,9 @@ export default function App() {
           <Trophy className="size-3.5 text-[#e2b76f]" aria-hidden="true" />
           <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3] max-sm:hidden">Score</span>
           <strong className="font-mono text-sm tabular-nums">{state.checkride.score.total}</strong>
-          {lastDeduction ? <small className="font-mono text-[7px] uppercase text-[#e78068] max-lg:hidden">−{lastDeduction.points} {deductionLabel(lastDeduction.id)}</small> : null}
+          {lastDeduction ? <small className="font-mono text-[7px] uppercase text-[#e78068] max-xl:hidden">−{lastDeduction.points} {deductionLabel(lastDeduction.id)}</small> : null}
         </div>
-        <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 max-lg:hidden data-[turbulence=moderate]:border-[#e2b76f]/45')} title={windTitle} aria-label={windTitle} data-turbulence={state.motion.turbulenceLevel}>
+        <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 max-xl:hidden data-[turbulence=moderate]:border-[#e2b76f]/45')} title={windTitle} aria-label={windTitle} data-turbulence={state.motion.turbulenceLevel}>
           <Wind className="size-3.5 text-sky-300" aria-hidden="true" />
           <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3]">Wind</span>
           <strong className="font-mono text-[10px] tabular-nums">{windDirection}° / {state.scenario.weather.windSpeedKt} kt</strong>
@@ -371,7 +371,7 @@ export default function App() {
         {state.checkride.decisionSecondsRemaining !== null ? (
           <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg border-[#e78068]/35 px-3 py-2 text-[#e78068] data-[urgent=true]:animate-pulse motion-reduce:animate-none')} data-urgent={state.checkride.decisionSecondsRemaining <= 30} role="timer" aria-live="polite">
             <Timer className="size-3.5" aria-hidden="true" />
-            <span className="font-mono text-[8px] uppercase tracking-[0.1em] max-lg:hidden">Route decision</span>
+            <span className="font-mono text-[8px] uppercase tracking-[0.1em] max-xl:hidden">Route decision</span>
             <strong className="font-mono text-xs tabular-nums">{formatElapsed(Math.ceil(state.checkride.decisionSecondsRemaining))}</strong>
           </div>
         ) : null}

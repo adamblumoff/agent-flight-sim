@@ -542,7 +542,7 @@ export const routeFor = (plan: RoutePlan, origin: { lat: number; lon: number; he
     const procedureTurnAltitudeFt = Math.round(Math.max(baseAltitudeFt + 300, originAltitudeFt - 200) / 100) * 100
     return Object.freeze({ plan, destination: 'KSTL', runway: '30L', reason: null, activeWaypointIndex: 0, completedWaypointIds: Object.freeze([]), activeLegOrigin: Object.freeze({ lat: origin.lat, lon: origin.lon }), waypoints: Object.freeze([
       waypoint('KSTL_OUTBOUND', 'Runway 30L outbound leg', 'enroute', outboundPosition, procedureTurnAltitudeFt, envelope.emergencyTurnSpeedKt, 1.2, outboundHeading),
-      waypoint('KSTL_COURSE_REVERSAL', 'Runway 30L course reversal', 'enroute', courseReversalPosition, procedureTurnAltitudeFt, envelope.emergencyTurnSpeedKt, 6, KSTL_RUNWAY_30L.headingDeg),
+      waypoint('KSTL_COURSE_REVERSAL', 'Runway 30L course reversal', 'enroute', courseReversalPosition, procedureTurnAltitudeFt, envelope.emergencyTurnSpeedKt, 0.6, KSTL_RUNWAY_30L.headingDeg),
       ...returnFinalLegs(),
     ]) })
   }

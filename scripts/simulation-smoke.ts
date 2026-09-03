@@ -67,7 +67,10 @@ const returnRoute = routeFor('return_kstl', returnOrigin)
 const [outboundEntry, courseReversal, finalEntry] = returnRoute.waypoints
 assert.ok(Math.abs(((navigationBearingDeg(returnOrigin, outboundEntry) - returnOrigin.headingDeg + 540) % 360) - 180) < 5, 'Outbound leg must begin on the aircraft current heading')
 assert.equal(courseReversal.captureHeadingDeg, 304, 'Course-reversal gate must publish the inbound runway heading')
-assert.ok(courseReversal.captureRadiusNm >= 6, 'Course-reversal heading gate must contain the full coordinated turn')
+assert.ok(
+  distanceNm(outboundEntry, courseReversal) > checkpointCaptureRadiusNm(outboundEntry) + checkpointCaptureRadiusNm(courseReversal),
+  'Sequential course-reversal checkpoints must not overlap',
+)
 assert.equal(courseReversal.altitudeFt, outboundEntry.altitudeFt, 'Course reversal must remain level before final intercept')
 assert.ok(distanceNm(courseReversal, finalEntry) >= 2.5, 'Course reversal must leave room to intercept final')
 
