@@ -1,12 +1,8 @@
 import '@fontsource-variable/atkinson-hyperlegible-next'
 import '@fontsource-variable/kode-mono'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Eye, Glasses, MapPin, Orbit, Plane, Timer, Trophy, Volume2, VolumeX, Wind } from 'lucide-react'
-import {
-  CopilotPanel,
-  type CopilotDebrief,
-  type CopilotObservation,
-} from './components/copilot-panel'
+import { Eye, Glasses, MapPin, Orbit, Timer, Trophy, Volume2, VolumeX, Wind } from 'lucide-react'
+import { CopilotPanel } from './components/copilot-panel'
 import { FlightModeBadge } from './components/flight-mode-badge'
 import { Button } from './components/ui/button'
 import { Slider } from './components/ui/slider'
@@ -16,10 +12,26 @@ import { WIDE_BODY_TWINJET_ENVELOPE } from './sim/aircraftEnvelope'
 import { DEFAULT_ENVIRONMENT_VOLUME, DEFAULT_RADIO_VOLUME, flightAudio } from './audio/flightAudio'
 import { flightSimulator } from './sim/flightSimulator'
 import { randomCheckrideSeed } from './sim/missionProfiles'
-import type { FlightState, RoutePlan } from './sim/types'
 import { useWebMcp } from './webmcp/useWebMcp'
 import { createFlightRunExport } from './webmcp/runExport'
 import type { FlightCameraMode, FlightWorldStatus } from './world/FlightWorld'
+import { cn } from './lib/utils'
+import { eyebrow, flightPanel, iconButton } from './components/flight-ui'
+import {
+  bankDirection,
+  deductionLabel,
+  deriveAction,
+  deriveDebrief,
+  deriveHeadline,
+  deriveObservations,
+  derivePlan,
+  deriveRecommendation,
+  formatAngleMagnitude,
+  formatElapsed,
+  formatLabel,
+  pitchDirection,
+  routePlanLabels,
+} from './presentation/flightPresentation'
 
 const FlightWorld = lazy(() => import('./world/FlightWorld'))
 const flapSettings = [0, 10, 20, 30] as const
@@ -34,236 +46,6 @@ const cameraOptions: ReadonlyArray<{
   { mode: 'free', label: 'Free camera', icon: Orbit },
 ]
 
-const routePlanLabels: Record<RoutePlan, string> = {
-  unassigned: 'Route pending',
-  continue_kmdw: 'Chicago Midway',
-  return_kstl: 'Return to KSTL',
-}
-
-const formatLabel = (value: string) =>
-  value.replaceAll('_', ' ').replace(/^\w/, (letter) => letter.toUpperCase())
-
-const formatElapsed = (seconds: number) => {
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = Math.floor(seconds % 60)
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
-}
-
-const formatAngleMagnitude = (degrees: number) => (Math.abs(degrees) < 0.05 ? 0 : Math.abs(degrees)).toFixed(1)
-
-const pitchDirection = (degrees: number) => degrees > 0.05 ? '° UP' : degrees < -0.05 ? '° DN' : '° LVL'
-const bankDirection = (degrees: number) => degrees > 0.05 ? '° R' : degrees < -0.05 ? '° L' : '° LVL'
-
-const deductionLabel = (id: string) => {
-  if (id === 'mission-timeout') return 'time limit'
-  if (id === 'decision-timeout') return 'late decision'
-  if (id.startsWith('configuration-')) return 'configuration'
-  if (id.startsWith('high-g-')) return 'high G'
-  if (id.startsWith('jerk-')) return 'abrupt input'
-  if (id === 'hard-landing') return 'hard landing'
-  if (id === 'off-center-landing') return 'off center'
-  return id.replaceAll('-', ' ')
-}
-
-function deriveObservations(state: FlightState): readonly CopilotObservation[] {
-  const { weather, engine, passenger, traffic } = state.scenario
-  const weatherTone = weather.visibilityMiles < 3 || weather.ceilingFt < 1_000
-    ? 'critical'
-    : weather.visibilityMiles < 5 || weather.ceilingFt < 2_000
-      ? 'caution'
-      : 'normal'
-
-  return [
-    {
-      label: 'Weather',
-      value: `${weather.summary} · ${weather.visibilityMiles} mi, ${weather.ceilingFt.toLocaleString()} ft ceiling · wind ${weather.windDirectionDeg.toString().padStart(3, '0')}° at ${weather.windSpeedKt} kt`,
-      tone: weatherTone,
-    },
-    {
-      label: 'Engine',
-      value: engine.summary,
-      tone: engine.health === 'failing' ? 'critical' : engine.health === 'rough' ? 'caution' : 'normal',
-    },
-    {
-      label: 'Passenger',
-      value: `${passenger.summary} ${state.passengerSafety.summary} · ${state.passengerSafety.loadFactorG.toFixed(2)} G · ${state.passengerSafety.jerkGPerSecond.toFixed(2)} G/s jerk`,
-      tone: state.passengerSafety.status === 'injured' || passenger.condition === 'critical'
-        ? 'critical'
-        : state.passengerSafety.status === 'distressed' || state.passengerSafety.status === 'uneasy' || passenger.condition === 'urgent'
-          ? 'caution'
-          : 'normal',
-    },
-    {
-      label: 'Traffic',
-      value: traffic.summary,
-      tone: traffic.delayMinutes >= 10 ? 'caution' : 'normal',
-    },
-  ]
-}
-
-function deriveRecommendation(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned'
-    ? 'File the Chicago Midway runway 31C route before beginning the takeoff roll.'
-    : 'The Chicago Midway route is filed. Apply power when you are ready to begin the takeoff roll.'
-  if (state.mission.phase === 'takeoff') return 'Climb through 1,000 feet, clean up the aircraft, then continue on the assigned departure.'
-  if (state.mission.goAroundRequired) return 'Go around now. Climb away from the ground before trying another approach.'
-  if (!state.procedure.compliant) return state.procedure.instruction
-  if (state.mission.routeStatus === 'stalled') return 'ATC has issued fresh arrival vectors. Follow the updated route guidance.'
-  if (state.checkride.status === 'armed') return 'Departure is normal. Maintain the climb and monitor for changes.'
-  if (state.checkride.status === 'decision_required') {
-    if (state.atc.status === 'requested') return 'Maintain the current hold while ATC prepares the diversion clearance.'
-    if (state.atc.status === 'cleared') return `Read back and accept clearance ${state.atc.clearance?.id ?? ''} before changing course.`
-    return 'Review the emergency evidence, choose a diversion, and request clearance from ATC.'
-  }
-  if (state.flightMode === 'human' && state.route.plan === 'return_kstl') {
-    return 'The safest emergency route was loaded automatically. Fly the active checkpoints to KSTL runway 30L.'
-  }
-  if (state.route.reason) return state.route.reason
-  if (state.flightMode === 'agent' && !state.autopilot.engaged) {
-    return 'Check the current conditions before changing the route or aircraft configuration.'
-  }
-  if (state.scenario.engine.health === 'failing' || state.scenario.passenger.condition === 'critical') {
-    return 'Commit to the nearby runway promptly and configure early for landing.'
-  }
-  return 'Verify that the nearby runway remains usable, then commit to the return.'
-}
-
-function derivePlan(state: FlightState): readonly string[] {
-  if (state.mission.phase === 'preflight') {
-    if (state.route.plan !== 'unassigned') return [
-      'Advance power for takeoff from runway 12R.',
-      'Rotate at 155 knots, climb through 1,000 feet, then clean up the aircraft.',
-    ]
-    return [
-      'File the Chicago Midway runway 31C route before departure.',
-      'Take off from St. Louis Lambert runway 12R, clean up the aircraft, and monitor for changes.',
-    ]
-  }
-  if (state.mission.phase === 'takeoff') return [
-    'Rotate at 155 knots and establish a positive climb rate.',
-    'Retract the gear, then clean up the aircraft above acceleration altitude.',
-  ]
-  if (state.mission.goAroundRequired) return [
-    'Initiate the go-around and command a positive climb.',
-    'Capture the climb-ahead point, then follow the outbound course reversal and final.',
-  ]
-  if (state.checkride.status === 'decision_required') {
-    if (state.atc.status === 'requested') return [
-      `ATC is evaluating the ${routePlanLabels[state.atc.requestedPlan ?? 'unassigned'].toLowerCase()} request.`,
-      'Maintain the current hold and wait for the clearance event.',
-    ]
-    if (state.atc.status === 'cleared' && state.atc.clearance) return [
-      state.atc.clearance.instruction,
-      `Read back clearance ${state.atc.clearance.id}; the FMS route loads only after acceptance.`,
-    ]
-    return [
-      'Read the combined emergency context and compare the two usable diversions.',
-      'Request one route from ATC; do not change course until it is cleared and read back.',
-    ]
-  }
-  if (state.route.plan === 'unassigned') {
-    if (state.checkride.status === 'armed') {
-      return [
-        'Complete the normal departure and clean up the aircraft.',
-        'Maintain the climb while monitoring for new conditions.',
-      ]
-    }
-    return [
-      'Read the combined emergency context and compare the two usable routes.',
-      'Commit to one route, then configure the aircraft for the selected runway.',
-    ]
-  }
-
-  if (!state.procedure.compliant) {
-    return [
-      state.procedure.instruction,
-      'Verify the configuration, then continue to the active route fix.',
-    ]
-  }
-
-  const remainingWaypoints = state.route.waypoints.slice(state.route.activeWaypointIndex)
-  if (remainingWaypoints.length > 0) {
-    return remainingWaypoints.slice(0, 3).map((waypoint) =>
-      `${waypoint.name} · ${waypoint.altitudeFt.toLocaleString()} ft · ${waypoint.airspeedKt} kt`
-    )
-  }
-
-  return [
-    `${routePlanLabels[state.route.plan]}${state.route.runway ? ` for runway ${state.route.runway}` : ''}.`,
-  ]
-}
-
-function deriveAction(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Waiting for the preflight route.' : 'Preflight route filed; ready for takeoff.'
-  if (state.mission.phase === 'takeoff' && state.aircraftPhase === 'takeoff_roll') {
-    return `Accelerating on Lambert runway 12R. At ${WIDE_BODY_TWINJET_ENVELOPE.rotateSpeedKt} knots, rotate toward ${WIDE_BODY_TWINJET_ENVELOPE.initialClimbPitchDeg}°.`
-  }
-  if (state.mission.goAroundRequired) return 'The approach is unsafe. Abandon the landing and climb.'
-  if (state.checkride.status === 'armed') return 'Normal departure. Monitoring the aircraft and surrounding conditions.'
-  if (state.checkride.status === 'decision_required') {
-    if (state.atc.status === 'requested') return 'Diversion requested. Holding while ATC prepares the clearance.'
-    if (state.atc.status === 'cleared') return `ATC clearance ${state.atc.clearance?.id ?? ''} is awaiting readback.`
-    return 'Assessing the emergency before requesting a diversion clearance.'
-  }
-  if (state.mission.routeStatus === 'stalled') return 'ATC issued fresh vectors. Following the updated next fix.'
-  if (state.flightMode === 'human' && state.route.plan === 'return_kstl') {
-    const waypoint = state.route.waypoints[state.route.activeWaypointIndex]
-    return waypoint
-      ? `You are flying. Follow the active route to ${waypoint.name}.`
-      : 'You are flying the emergency return to KSTL runway 30L.'
-  }
-  if (state.flightMode === 'agent' && !state.autopilot.engaged) {
-    return 'Reading the emergency context and comparing the available routes.'
-  }
-  if (!state.procedure.compliant) return state.procedure.instruction
-  if (state.flightMode === 'agent') return 'The agent is selecting its next flight input.'
-  return 'Monitoring the aircraft and emergency conditions while you fly.'
-}
-
-function deriveHeadline(state: FlightState): string {
-  if (state.mission.phase === 'preflight') return state.route.plan === 'unassigned' ? 'Preflight route required' : 'Ready for takeoff'
-  if (state.mission.phase === 'takeoff') return 'Departing Lambert runway 12R'
-  if (state.mission.goAroundRequired) return 'Go around'
-  if (state.checkride.status === 'armed') return 'Normal departure'
-  if (state.checkride.status === 'decision_required') {
-    if (state.atc.status === 'requested') return 'Waiting for ATC clearance'
-    if (state.atc.status === 'cleared') return 'ATC clearance received'
-    return 'Diversion decision required'
-  }
-  if (state.flightMode === 'agent' && !state.autopilot.engaged) return 'Assessing the emergency'
-  if (state.flightMode === 'agent') {
-    return state.route.destination ? `Flying to ${state.route.destination}` : 'Managing the flight'
-  }
-  return state.scenario.engine.health === 'normal' ? 'Ready when you are' : 'Emergency in progress'
-}
-
-function deriveDebrief(state: FlightState): CopilotDebrief | null {
-  if (state.debrief.status === 'in_progress') return null
-
-  const landing = state.debrief.landing
-  const landingSummary = landing
-    ? landing.onRunway
-      ? `${landing.safe ? 'Stable' : 'Unsafe'} touchdown on runway ${landing.runway} at ${Math.abs(Math.round(landing.sinkRateFpm))} fpm${landing.bounces ? ` after ${landing.bounces} ${landing.bounces === 1 ? 'bounce' : 'bounces'}` : ''}, ${Math.round(landing.centerlineErrorFt)} ft from centerline.`
-      : `The aircraft hit the ground outside ${landing.runway} at ${Math.abs(Math.round(landing.sinkRateFpm))} fpm and ${Math.round(landing.airspeedKt)} kt.`
-    : state.debrief.decisionReason ?? 'The flight ended before a landing result was recorded.'
-
-  return {
-    title: state.debrief.status === 'landed' ? 'Safely on the ground' : 'The flight did not finish safely',
-    outcome: state.debrief.status === 'landed' ? 'Landed' : 'Failed',
-    elapsed: formatElapsed(state.debrief.elapsedSeconds / state.checkride.simulationRate),
-    score: `${state.checkride.score.total}/100`,
-    decision: routePlanLabels[state.debrief.decision],
-    summary: landingSummary,
-    events: state.debrief.events.slice(-4).map((event) => event.summary),
-    deductions: state.checkride.score.deductions.map((deduction) => ({
-      elapsed: formatElapsed(deduction.elapsedSeconds / state.checkride.simulationRate),
-      label: deductionLabel(deduction.id),
-      points: deduction.points,
-      reason: deduction.reason,
-    })),
-  }
-}
-
 function InstrumentStat({
   label,
   value,
@@ -274,11 +56,11 @@ function InstrumentStat({
   readonly unit: string
 }) {
   return (
-    <div className="instrument-stat">
-      <span>{label}</span>
-      <div className="instrument-value">
-        <strong>{value}</strong>
-        <small>{unit}</small>
+    <div className="min-w-0 border-r border-[#f4efde]/10 px-3 py-2 last:border-r-0 max-[760px]:[&:nth-child(n+5)]:hidden">
+      <span className="font-mono text-[7px] font-semibold uppercase tracking-[0.12em] text-[#b9b3a3]">{label}</span>
+      <div className="mt-0.5 flex items-baseline gap-1">
+        <strong className="font-mono text-lg font-medium tabular-nums text-[#f4efde]">{value}</strong>
+        <small className="font-mono text-[7px] uppercase text-[#b9b3a3]">{unit}</small>
       </div>
     </div>
   )
@@ -308,11 +90,6 @@ export default function App() {
     message: 'Loading the flight world.',
   })
   useEffect(() => {
-    const url = new URL(window.location.href)
-    if (url.searchParams.has('mode')) {
-      url.searchParams.delete('mode')
-      window.history.replaceState(null, '', url)
-    }
     flightSimulator.start()
     flightAudio.start()
     return () => {
@@ -522,34 +299,34 @@ export default function App() {
         : null
 
   return (
-    <main className="app-shell">
-      <Suspense fallback={<div className="flight-world world-loading" />}>
+    <main className="fixed inset-0 isolate min-w-[320px] overflow-hidden bg-[#151710] font-['Atkinson_Hyperlegible_Next_Variable',sans-serif] text-[#f4efde] antialiased">
+      <Suspense fallback={<div className="absolute inset-0 -z-30 bg-[radial-gradient(circle_at_50%_35%,rgb(74_85_62/35%),transparent_32%),linear-gradient(#2d3428,#171a14)]" />}>
         <FlightWorld cameraMode={cameraMode} compassRef={compassRef} onStatusChange={setWorldStatus} />
       </Suspense>
-      <div className="scene-shade" />
+      <div className="pointer-events-none absolute inset-0 -z-20 bg-[linear-gradient(180deg,rgb(10_12_9/62%)_0%,transparent_22%,transparent_60%,rgb(8_9_7/52%)_100%),linear-gradient(90deg,rgb(8_10_7/22%)_0%,transparent_28%,transparent_62%,rgb(8_10_7/38%)_100%)]" />
 
       {showTakeoffBrief && state.mission.phase === 'preflight' ? (
         <section
-          className="takeoff-briefing"
+          className="absolute inset-0 z-20 grid place-items-center overflow-y-auto bg-[#080a08]/65 p-6 backdrop-blur-[7px] max-[480px]:p-3"
           role="dialog"
           aria-modal="true"
           aria-labelledby="takeoff-briefing-title"
           aria-describedby="takeoff-briefing-copy"
         >
-          <div className="takeoff-briefing-card">
-            <p>Flight briefing</p>
-            <h1 id="takeoff-briefing-title">Choose who flies this run.</h1>
-            <p id="takeoff-briefing-copy">
+          <div className={cn(flightPanel, 'max-h-[calc(100dvh-48px)] w-full max-w-[520px] overflow-y-auto rounded-[18px] bg-[#171815]/96 p-7 shadow-[0_28px_90px_rgb(0_0_0/46%)] max-[480px]:max-h-[calc(100dvh-24px)] max-[480px]:p-[21px_18px]')}>
+            <p className={eyebrow}>Flight briefing</p>
+            <h1 className="my-2 text-[clamp(24px,4vw,34px)] font-semibold tracking-[-0.045em]" id="takeoff-briefing-title">Choose who flies this run.</h1>
+            <p className="text-xs leading-relaxed text-[#b9b3a3]" id="takeoff-briefing-copy">
               The aircraft is lined up on St. Louis Lambert runway 12R for Chicago Midway runway 31C. The selected pilot keeps control until the run ends.
             </p>
-            <ol>
+            <ol className="my-5 grid list-none gap-2 p-0 text-xs leading-relaxed text-[#d7d1c0] [&_li]:grid [&_li]:grid-cols-[28px_1fr] [&_li]:items-start [&_li]:gap-3 [&_kbd]:grid [&_kbd]:h-7 [&_kbd]:min-w-7 [&_kbd]:place-items-center [&_kbd]:rounded-md [&_kbd]:border [&_kbd]:border-[#f4efde]/15 [&_kbd]:bg-[#f4efde]/5 [&_kbd]:font-mono [&_kbd]:text-[9px] [&_kbd]:font-bold [&_kbd]:text-[#f4efde]">
               <li><kbd>↑</kbd><span>Advance both engines to takeoff thrust; flaps 10° are already set.</span></li>
               <li><kbd>W</kbd><span>At {WIDE_BODY_TWINJET_ENVELOPE.rotateSpeedKt} knots, rotate at about {WIDE_BODY_TWINJET_ENVELOPE.rotationRateDegPerSecond}°/s toward {WIDE_BODY_TWINJET_ENVELOPE.initialClimbPitchDeg}°. Rotation is guidance; the aircraft lifts off only when its aerodynamic lift exceeds its weight.</span></li>
-              <li><kbd>G</kbd><span>Retract gear after positive rate. Use <kbd>F</kbd> to retract flaps on schedule and <kbd>X</kbd> to level.</span></li>
+              <li><kbd>G</kbd><span>Retract gear after positive rate. Use <kbd className="inline-grid! h-5! min-w-5!">F</kbd> to retract flaps on schedule and <kbd className="inline-grid! h-5! min-w-5!">X</kbd> to level.</span></li>
             </ol>
-            <div className="takeoff-briefing-actions">
-              <span>{webMcpStatus === 'ready' ? 'Choose once for this run. Reset the flight to change pilots.' : 'WebMCP is unavailable here, but manual flight still works.'}</span>
-              <div>
+            <div className="flex items-center justify-between gap-4 border-t border-[#f4efde]/10 pt-4 max-sm:flex-col max-sm:items-stretch">
+              <span className="text-[10px] leading-normal text-[#b9b3a3]">{webMcpStatus === 'ready' ? 'Choose once for this run. Reset the flight to change pilots.' : 'WebMCP is unavailable here, but manual flight still works.'}</span>
+              <div className="flex shrink-0 gap-2 max-sm:[&>button]:flex-1">
                 <Button variant="outline" disabled={webMcpStatus !== 'ready'} onClick={startAgentFlight}>Use agent</Button>
                 <Button autoFocus onClick={startManualFlight}>Fly manually</Button>
               </div>
@@ -558,64 +335,56 @@ export default function App() {
         </section>
       ) : null}
 
-      <header className="flight-header">
-        <div className="flight-brand">
-          <span className="flight-brand-mark" aria-hidden="true"><Plane /></span>
-          <div>
-            <strong>Can an Agent Be a Pilot?</strong>
-            <span>N90FD · Wide-body twinjet</span>
-          </div>
-        </div>
-
-        <div className="route-summary" aria-label={`Route ${destination}, ${routeDetail}`}>
-          <MapPin aria-hidden="true" />
-          <strong>{destination}</strong>
-          <span>{routeDetail}</span>
-          <i className="route-divider" aria-hidden="true" />
-          <span>{formatLabel(state.mission.phase)}</span>
+      <header className="pointer-events-none absolute right-5 top-4 z-10 flex min-h-11 items-center gap-2 max-[760px]:right-3 max-[760px]:top-3">
+        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-[#f4efde]/12 bg-[#171815]/80 px-3 py-2 text-[9px] backdrop-blur-xl max-sm:hidden" aria-label={`Route ${destination}, ${routeDetail}`}>
+          <MapPin className="size-3.5 shrink-0 text-[#8bc49b]" aria-hidden="true" />
+          <strong className="truncate font-semibold text-[#f4efde]">{destination}</strong>
+          <span className="max-w-48 truncate text-[#b9b3a3] max-xl:hidden">{routeDetail}</span>
+          <i className="h-4 w-px bg-[#f4efde]/12" aria-hidden="true" />
+          <span className="font-mono uppercase tracking-[0.1em] text-[#b9b3a3]">{formatLabel(state.mission.phase)}</span>
         </div>
 
         <FlightModeBadge mode={state.flightMode} />
       </header>
 
-      <div className="flight-status-strip">
-        <div className="flight-clock" data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(missionElapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
-          <Timer aria-hidden="true" />
-          <span>Elapsed</span>
-          <strong>{formatElapsed(missionElapsedSeconds)}</strong>
-          <i aria-hidden="true" />
-          <span>{missionOvertime ? 'Overtime' : 'Remaining'}</span>
-          <strong>{formatElapsed(Math.abs(missionSecondsRemaining))}</strong>
+      <div className="absolute left-5 top-4 z-10 flex items-stretch gap-2 max-[760px]:left-3 max-[760px]:top-28 max-[760px]:max-w-[calc(100vw-24px)]">
+        <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3] data-[urgent=true]:border-[#e78068]/45 data-[urgent=true]:text-[#e78068]')} data-urgent={missionSecondsRemaining <= 30} role="timer" aria-label={`${formatElapsed(missionElapsedSeconds)} elapsed, ${formatElapsed(Math.abs(missionSecondsRemaining))} ${missionOvertime ? 'overtime' : 'remaining'}`}>
+          <Timer className="size-3.5 text-[#8bc49b]" aria-hidden="true" />
+          <span className="max-sm:hidden">Elapsed</span>
+          <strong className="text-[11px] tabular-nums text-[#f4efde]">{formatElapsed(missionElapsedSeconds)}</strong>
+          <i className="h-4 w-px bg-[#f4efde]/12" aria-hidden="true" />
+          <span className="max-sm:hidden">{missionOvertime ? 'Overtime' : 'Remaining'}</span>
+          <strong className="text-[11px] tabular-nums text-[#f4efde]">{formatElapsed(Math.abs(missionSecondsRemaining))}</strong>
         </div>
-        <div className="score-meter" title={lastDeduction ? `Last deduction: −${lastDeduction.points} · ${lastDeduction.reason}` : 'No deductions'}>
-          <Trophy aria-hidden="true" />
-          <span>Score</span>
-          <strong>{state.checkride.score.total}</strong>
-          {lastDeduction ? <small>−{lastDeduction.points} {deductionLabel(lastDeduction.id)}</small> : null}
+        <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2')} title={lastDeduction ? `Last deduction: −${lastDeduction.points} · ${lastDeduction.reason}` : 'No deductions'}>
+          <Trophy className="size-3.5 text-[#e2b76f]" aria-hidden="true" />
+          <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3] max-sm:hidden">Score</span>
+          <strong className="font-mono text-sm tabular-nums">{state.checkride.score.total}</strong>
+          {lastDeduction ? <small className="font-mono text-[7px] uppercase text-[#e78068] max-xl:hidden">−{lastDeduction.points} {deductionLabel(lastDeduction.id)}</small> : null}
         </div>
-        <div className="wind-meter" title={windTitle} aria-label={windTitle} data-turbulence={state.motion.turbulenceLevel}>
-          <Wind aria-hidden="true" />
-          <span>Wind</span>
-          <strong>{windDirection}° / {state.scenario.weather.windSpeedKt} kt</strong>
-          {state.motion.turbulenceLevel !== 'none' ? <small>{state.motion.turbulenceLevel}</small> : null}
+        <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg px-3 py-2 max-xl:hidden data-[turbulence=moderate]:border-[#e2b76f]/45')} title={windTitle} aria-label={windTitle} data-turbulence={state.motion.turbulenceLevel}>
+          <Wind className="size-3.5 text-sky-300" aria-hidden="true" />
+          <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3]">Wind</span>
+          <strong className="font-mono text-[10px] tabular-nums">{windDirection}° / {state.scenario.weather.windSpeedKt} kt</strong>
+          {state.motion.turbulenceLevel !== 'none' ? <small className="font-mono text-[7px] uppercase text-[#e2b76f]">{state.motion.turbulenceLevel}</small> : null}
         </div>
         {state.checkride.decisionSecondsRemaining !== null ? (
-          <div className="emergency-timer" data-urgent={state.checkride.decisionSecondsRemaining <= 30} role="timer" aria-live="polite">
-            <Timer aria-hidden="true" />
-            <span>Route decision</span>
-            <strong>{formatElapsed(Math.ceil(state.checkride.decisionSecondsRemaining))}</strong>
+          <div className={cn(flightPanel, 'flex items-center gap-2 rounded-lg border-[#e78068]/35 px-3 py-2 text-[#e78068] data-[urgent=true]:animate-pulse motion-reduce:animate-none')} data-urgent={state.checkride.decisionSecondsRemaining <= 30} role="timer" aria-live="polite">
+            <Timer className="size-3.5" aria-hidden="true" />
+            <span className="font-mono text-[8px] uppercase tracking-[0.1em] max-xl:hidden">Route decision</span>
+            <strong className="font-mono text-xs tabular-nums">{formatElapsed(Math.ceil(state.checkride.decisionSecondsRemaining))}</strong>
           </div>
         ) : null}
       </div>
 
       <FlightMinimap state={state} />
       <FlightCompass ref={compassRef} />
-      <nav className="camera-switcher" aria-label="Camera view">
+      <nav className={cn(flightPanel, 'absolute bottom-[112px] left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-lg p-1 max-[760px]:bottom-auto max-[760px]:left-auto max-[760px]:right-3 max-[760px]:top-[66px] max-[760px]:translate-x-0')} aria-label="Camera view">
         {cameraOptions.map(({ mode, label, icon: Icon }) => (
           <button
             key={mode}
             type="button"
-            className="camera-button"
+            className={iconButton}
             aria-label={label}
             aria-pressed={cameraMode === mode}
             title={label}
@@ -624,10 +393,10 @@ export default function App() {
             <Icon aria-hidden="true" />
           </button>
         ))}
-        <span className="camera-divider" aria-hidden="true" />
+        <span className="mx-1 h-5 w-px bg-[#f4efde]/12 max-[760px]:hidden" aria-hidden="true" />
         <button
           type="button"
-          className="camera-button"
+          className={iconButton}
           aria-label={audioMuted ? 'Turn flight audio on' : 'Mute flight audio'}
           aria-pressed={audioMuted}
           title={audioMuted ? 'Flight audio off' : 'Mute flight audio'}
@@ -637,8 +406,8 @@ export default function App() {
         </button>
       </nav>
 
-      <section className="instrument-console" aria-label="Flight instruments and controls">
-        <div className="instrument-readings">
+      <section className={cn(flightPanel, 'absolute bottom-5 left-5 right-[380px] z-[7] flex min-h-[76px] overflow-hidden rounded-xl max-xl:right-[350px] max-[760px]:bottom-auto max-[760px]:left-3 max-[760px]:right-auto max-[760px]:top-[66px] max-[760px]:min-h-[78px] max-[760px]:w-[min(520px,calc(100%-172px))] max-[480px]:w-[calc(100%-72px)]')} aria-label="Flight instruments and controls">
+        <div className="grid min-w-0 flex-1 grid-cols-6 max-lg:grid-cols-3 max-[760px]:grid-cols-2">
           <InstrumentStat label="Airspeed" value={Math.round(state.airspeedKt).toString()} unit="KT" />
           <InstrumentStat label="Altitude" value={Math.round(state.altitudeFt).toLocaleString()} unit="FT" />
           <InstrumentStat label="Pitch" value={formatAngleMagnitude(state.pitchDeg)} unit={pitchDirection(state.pitchDeg)} />
@@ -647,7 +416,7 @@ export default function App() {
           <InstrumentStat label="Heading" value={Math.round(state.headingDeg).toString().padStart(3, '0')} unit="MAG" />
         </div>
 
-        <div className="manual-controls">
+        <div className="grid w-[260px] shrink-0 grid-cols-2 gap-2 border-l border-[#f4efde]/10 p-3 max-xl:w-[190px] max-[760px]:w-[150px] max-[760px]:p-[9px] max-[480px]:hidden">
           <Button
             variant="outline"
             size="sm"
@@ -655,8 +424,8 @@ export default function App() {
             aria-keyshortcuts="G"
             onClick={() => flightSimulator.setGear(!state.gearDown, 'human', 'Cockpit gear control')}
           >
-            <span className="control-label">Gear <kbd className="control-shortcut">(G)</kbd></span>
-            <span className="control-value">{state.gearDown ? 'Down' : 'Up'}</span>
+            <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3]">Gear <kbd className="text-[#8bc49b]">(G)</kbd></span>
+            <span className="font-mono text-[9px] uppercase text-[#f4efde]">{state.gearDown ? 'Down' : 'Up'}</span>
           </Button>
           <Button
             variant="outline"
@@ -668,10 +437,10 @@ export default function App() {
               flightSimulator.setFlaps(flapSettings[(index + 1) % flapSettings.length], 'human', 'Cockpit flap control')
             }}
           >
-            <span className="control-label">Flaps <kbd className="control-shortcut">(F)</kbd></span>
-            <span className="control-value">{state.flapsDeg}°</span>
+            <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3]">Flaps <kbd className="text-[#8bc49b]">(F)</kbd></span>
+            <span className="font-mono text-[9px] uppercase text-[#f4efde]">{state.flapsDeg}°</span>
           </Button>
-          <label className="throttle-control">
+          <label className="col-span-2 grid grid-cols-[42px_1fr_32px] items-center gap-2 font-mono text-[8px] uppercase tracking-[0.1em] text-[#b9b3a3] max-[760px]:hidden">
             <span>Power</span>
             <Slider
               aria-label="Engine power"
@@ -688,7 +457,7 @@ export default function App() {
                 )
               }
             />
-            <strong>{Math.round(state.throttle * 100)}%</strong>
+            <strong className="text-right text-[9px] tabular-nums text-[#f4efde]">{Math.round(state.throttle * 100)}%</strong>
           </label>
         </div>
       </section>

@@ -4,7 +4,7 @@ import { flightEventValues, flightToolDefinitions } from '../src/shared/flightTo
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor } from '../src/sim/aerodynamics.ts'
 import { WIDE_BODY_TWINJET_ENVELOPE, staticThrustAccelerationKtPerSecond } from '../src/sim/aircraftEnvelope.ts'
 import { KMDW_RUNWAY_31C, KSTL_DEPARTURE_START, KSTL_RUNWAY_12R, KSTL_RUNWAY_30L } from '../src/sim/airfields.ts'
-import { checkpointCaptureRadiusNm } from '../src/sim/checkpoints.ts'
+import { checkpointCaptureRadiusNm, isCheckpointHit } from '../src/sim/checkpoints.ts'
 import { approachAssessmentFor, arrivalLegProgressed, deepensUnsafeBank, distanceNm, flightCommandTargetsFor, flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg, routeFor } from '../src/sim/flightSimulator.ts'
 import { CHECKRIDE_SEEDS, MISSION_PROFILE, randomCheckrideSeed } from '../src/sim/missionProfiles.ts'
 import { reviewFlightPlan } from '../src/sim/flightPlanReview.ts'
@@ -43,6 +43,12 @@ const gate: RouteWaypoint = {
   altitudeFt: 1_500, airspeedKt: 190, captureRadiusNm: 0.08,
 }
 assert.equal(checkpointCaptureRadiusNm(gate), 0.16)
+for (const kind of ['departure', 'enroute', 'base', 'final', 'touchdown'] as const) {
+  const checkpoint = { ...gate, kind }
+  const radius = checkpointCaptureRadiusNm(checkpoint)
+  assert.equal(isCheckpointHit(radius, checkpoint), true, `${kind} checkpoint must register anywhere on its boundary`)
+  assert.equal(isCheckpointHit(radius + 0.001, checkpoint), false, `${kind} checkpoint must not register outside its boundary`)
+}
 
 const toolNames = flightToolDefinitions.map(({ name }) => name)
 assert.deepEqual(toolNames, ['read_pilot_manual', 'start_flight', 'program_flight_plan', 'request_diversion', 'accept_clearance', 'wait_for_flight_event'])
@@ -61,7 +67,10 @@ const returnRoute = routeFor('return_kstl', returnOrigin)
 const [outboundEntry, courseReversal, finalEntry] = returnRoute.waypoints
 assert.ok(Math.abs(((navigationBearingDeg(returnOrigin, outboundEntry) - returnOrigin.headingDeg + 540) % 360) - 180) < 5, 'Outbound leg must begin on the aircraft current heading')
 assert.equal(courseReversal.captureHeadingDeg, 304, 'Course-reversal gate must publish the inbound runway heading')
-assert.ok(courseReversal.captureRadiusNm >= 6, 'Course-reversal heading gate must contain the full coordinated turn')
+assert.ok(
+  distanceNm(outboundEntry, courseReversal) > checkpointCaptureRadiusNm(outboundEntry) + checkpointCaptureRadiusNm(courseReversal),
+  'Sequential course-reversal checkpoints must not overlap',
+)
 assert.equal(courseReversal.altitudeFt, outboundEntry.altitudeFt, 'Course reversal must remain level before final intercept')
 assert.ok(distanceNm(courseReversal, finalEntry) >= 2.5, 'Course reversal must leave room to intercept final')
 
@@ -420,6 +429,7 @@ const unsafeProgram: FlightPlanProgram = {
 assert.equal(flightSimulator.programFlightPlan(unsafeProgram, 'Deliberately unsafe no-rotation program.', 'agent').accepted, true)
 flightSimulator.advanceForTesting(180)
 assert.notEqual(flightSimulator.getState().mission.outcome, 'landed', 'The simulator must not rescue an unsafe command program')
+assert.ok(flightSimulator.getState().route.completedWaypointIds.includes('KSTL_CLIMB'), 'A checkpoint hit must register without altitude, heading, or climb-rate constraints')
 assert.equal(flightSimulator.getState().autopilot.activeCommandIndex, 0)
 
 console.log('simulation diagnostics passed')

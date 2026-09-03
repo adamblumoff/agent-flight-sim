@@ -7,3 +7,7 @@ export const checkpointCaptureRadiusNm = (waypoint: RouteWaypoint) => Math.max(
   waypoint.captureRadiusNm,
   waypoint.kind === 'touchdown' ? TOUCHDOWN_RADIUS_FLOOR_NM : CHECKPOINT_RADIUS_FLOOR_NM,
 )
+
+export const isCheckpointHit = (distanceNm: number, waypoint: RouteWaypoint) => (
+  distanceNm <= checkpointCaptureRadiusNm(waypoint)
+)

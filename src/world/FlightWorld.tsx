@@ -378,7 +378,7 @@ export function FlightWorld({ cameraMode = 'chase', compassRef, onStatusChange }
   }, [])
 
   return (
-    <div className="flight-world relative min-h-0 overflow-hidden bg-[#637a72]">
+    <div className="absolute inset-0 -z-30 min-h-0 overflow-hidden bg-[#637a72] [&>canvas]:absolute [&>canvas]:inset-0 [&>canvas]:size-full">
       <div className="absolute inset-0" ref={containerRef} />
       {status.kind === 'error' ? (
         <div className="absolute inset-0 z-10 grid place-items-center bg-black/80 px-6" role="alert">

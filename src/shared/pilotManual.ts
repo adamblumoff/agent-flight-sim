@@ -12,6 +12,7 @@ export const PILOT_MANUAL = Object.freeze({
   controlContract: Object.freeze([
     'You choose every exact command. The simulator applies the active command continuously at 60 Hz while you think or wait.',
     'Commands execute in order and persist until the next trigger. Use track_fix with each published checkpoint target.',
+    'A checkpoint completes as soon as the aircraft enters its published horizontal capture radius. Altitude, speed, heading, and vertical rate do not affect checkpoint capture.',
     'You may replace the active program after ATC accepts the route. Route progress is preserved.',
   ]),
   takeoff: Object.freeze({

@@ -123,21 +123,6 @@ export function groundMotionFor(
   })
 }
 
-/** Heading required to hold a desired ground track through the current wind. */
-export function windCorrectedHeadingDeg(
-  desiredTrackDeg: number,
-  airspeedKt: number,
-  weather: ScenarioConditions['weather'],
-  elapsedSeconds: number,
-  seed: CheckrideSeed,
-) {
-  const trackRad = radians(desiredTrackDeg)
-  const wind = windVectorFor(weather, elapsedSeconds, seed)
-  const windAcrossTrackKt = -wind.northKt * Math.sin(trackRad) + wind.eastKt * Math.cos(trackRad)
-  const correctionDeg = degrees(Math.asin(clamp(-windAcrossTrackKt / Math.max(airspeedKt, 1), -0.95, 0.95)))
-  return normalizeHeading(desiredTrackDeg + correctionDeg)
-}
-
 /** Simplified terminal-area drag expressed as knots-per-second of deceleration. */
 export function airborneDragKtPerSecond(airspeedKt: number, gearDown: boolean, bankDeg: number, flapsDeg = 0) {
   const speedRatio = Math.max(airspeedKt, 35) / 235
