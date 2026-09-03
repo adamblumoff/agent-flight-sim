@@ -66,6 +66,7 @@ export async function persistEvaluationEvidence(run: FlightRunExport): Promise<E
   }
 
   try { await archiveInBrowser(run, staleRunIds) } catch { /* The downloadable terminal export remains available. */ }
+  if (!import.meta.env.DEV) return { serverPath: null }
 
   try {
     const response = await fetch('/__agent-flight/evidence', {

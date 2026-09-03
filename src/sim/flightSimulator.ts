@@ -357,7 +357,7 @@ const routeEstimatedMinutes = (
   return airborneMinutes + trafficDelayMinutes + 1.2
 }
 
-export const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
+const SHARED_AUTONOMY_MISSION: MissionBrief = Object.freeze({
   id: 'SHARED-AUTONOMY-EMERGENCY-01',
   name: 'Rough running over St. Louis',
   objective: 'Depart St. Louis Lambert for Chicago Midway, assess the surprise emergency, and return safely to Lambert within eight minutes of the event.',
@@ -557,7 +557,7 @@ export interface FlightCommandTargets {
   readonly flapsDeg: 0 | 10 | 20 | 30
 }
 
-export const flightCommandTriggerSatisfied = (state: FlightState, trigger: FlightCommandTrigger) => {
+const flightCommandTriggerSatisfied = (state: FlightState, trigger: FlightCommandTrigger) => {
   if (trigger.type === 'immediate') return true
   if (trigger.type === 'airspeed_at_least') return state.airspeedKt >= trigger.value
   if (trigger.type === 'altitude_at_least') return state.altitudeFt >= trigger.value
@@ -757,7 +757,6 @@ class FlightSimulator {
   getSnapshot = () => this.snapshot
   getTrace = () => this.trace
   getEventRevision = () => this.eventRevision
-  getEventsSince = (revision: number) => this.events.filter((event) => event.revision > revision)
   getMissionBrief = () => {
     const brief = missionBriefFor(this.emergencyTriggered)
     return Object.freeze({ ...brief, deadlineSeconds: MISSION_PROFILE.wallClockDeadlineSeconds })
