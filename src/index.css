@@ -1,1 +1,5 @@
 @import "tailwindcss";
+
+@theme inline {
+  --font-mono: "Kode Mono Variable", monospace;
+}
