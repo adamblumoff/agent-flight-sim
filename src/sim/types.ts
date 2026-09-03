@@ -36,6 +36,7 @@ export interface FlightCommandStep {
 export interface FlightPlanProgram {
   readonly plan: DiversionPlan
   readonly commands: readonly FlightCommandStep[]
+  readonly goAroundCommands?: readonly FlightCommandStep[]
   readonly restartRoute?: boolean
 }
 export interface AutopilotState {
@@ -127,6 +128,13 @@ export interface ScoreState {
   readonly deductions: readonly ScoreDeduction[]
 }
 
+export interface FlightPlanWarning {
+  readonly code: 'premature_departure_tracking' | 'missing_flare' | 'flare_timing' | 'flare_sink_rate' | 'flare_lateral_guidance' | 'unstable_final_pitch' | 'missing_rollout' | 'unsafe_rollout' | 'missing_go_around'
+  readonly commandId: string | null
+  readonly message: string
+}
+export interface FlightPlanReview { readonly status: 'ready' | 'warning'; readonly warnings: readonly FlightPlanWarning[] }
+
 export interface LandingResult { readonly runway: string; readonly sinkRateFpm: number; readonly airspeedKt: number; readonly centerlineErrorFt: number; readonly touchdownDistanceFt: number; readonly bounces: number; readonly onRunway: boolean; readonly safe: boolean }
 export interface DebriefEvent { readonly elapsedSeconds: number; readonly actor: TraceActor; readonly summary: string }
 export interface DebriefState { readonly status: 'in_progress' | 'landed' | 'failed'; readonly elapsedSeconds: number; readonly decision: RoutePlan; readonly decisionReason: string | null; readonly events: readonly DebriefEvent[]; readonly landing: LandingResult | null }
@@ -216,5 +224,5 @@ export interface EmergencyDecisionContext { readonly evidence: readonly FlightEv
 export interface AircraftConfigurationInput { readonly gearDown?: boolean; readonly flapsDeg?: 0 | 10 | 20 | 30; readonly reason?: string }
 export interface FlightEventWaitInput { readonly afterRevision: number; readonly events: readonly FlightEventType[]; readonly timeoutMs: number }
 export interface FlightEventWaitResult { readonly revision: number; readonly event: FlightEventType | 'timeout'; readonly message: string; readonly state: FlightState }
-export interface ActionReceipt { readonly accepted: boolean; readonly summary: string; readonly eventRevision: number; readonly state: FlightState }
+export interface ActionReceipt { readonly accepted: boolean; readonly summary: string; readonly eventRevision: number; readonly state: FlightState; readonly planReview?: FlightPlanReview }
 export type FlightStateListener = () => void

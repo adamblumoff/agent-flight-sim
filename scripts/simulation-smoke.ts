@@ -6,7 +6,9 @@ import { WIDE_BODY_TWINJET_ENVELOPE, staticThrustAccelerationKtPerSecond } from 
 import { KMDW_RUNWAY_31C, KSTL_DEPARTURE_START, KSTL_RUNWAY_12R, KSTL_RUNWAY_30L } from '../src/sim/airfields.ts'
 import { checkpointCaptureRadiusNm } from '../src/sim/checkpoints.ts'
 import { approachAssessmentFor, arrivalLegProgressed, deepensUnsafeBank, distanceNm, flightCommandTargetsFor, flightSimulator, landingRollAccelerationKtPerSecond, navigationBearingDeg, routeFor } from '../src/sim/flightSimulator.ts'
-import { CHECKRIDE_SEEDS, randomCheckrideSeed } from '../src/sim/missionProfiles.ts'
+import { CHECKRIDE_SEEDS, MISSION_PROFILE, randomCheckrideSeed } from '../src/sim/missionProfiles.ts'
+import { reviewFlightPlan } from '../src/sim/flightPlanReview.ts'
+import { finalVerticalSpeedFpm, PILOT_OPERATING_LIMITS } from '../src/sim/pilotOperatingLimits.ts'
 import type { FlightCommandStep, FlightMode, FlightPlanProgram, RouteCommandPoint, RouteWaypoint, TraceActor } from '../src/sim/types.ts'
 
 const weather = {
@@ -43,7 +45,7 @@ const gate: RouteWaypoint = {
 assert.equal(checkpointCaptureRadiusNm(gate), 0.16)
 
 const toolNames = flightToolDefinitions.map(({ name }) => name)
-assert.deepEqual(toolNames, ['start_flight', 'program_flight_plan', 'request_diversion', 'accept_clearance', 'wait_for_flight_event'])
+assert.deepEqual(toolNames, ['read_pilot_manual', 'start_flight', 'program_flight_plan', 'request_diversion', 'accept_clearance', 'wait_for_flight_event'])
 assert.ok(flightEventValues.includes('stall_warning'))
 assert.ok(!toolNames.includes('begin_takeoff' as never))
 assert.ok(!toolNames.includes('set_autopilot_targets' as never))
@@ -83,10 +85,10 @@ const falseStableApproach = approachAssessmentFor({
 assert.equal(falseStableApproach.stable, false)
 assert.equal(falseStableApproach.goAroundRequired, true)
 
-const stableApproach = approachAssessmentFor({
+const stableApproachInput = {
   phase: 'approach',
   returnArrival: true,
-  activeKind: 'touchdown',
+  activeKind: 'touchdown' as const,
   frameAlongNm: -2.5,
   centerlineErrorNm: 0.005,
   glidepathErrorFt: 40,
@@ -99,9 +101,15 @@ const stableApproach = approachAssessmentFor({
   airspeedKt: 145,
   gearDown: true,
   flapsDeg: 20,
-})
+} as const
+const stableApproach = approachAssessmentFor(stableApproachInput)
 assert.equal(stableApproach.stable, true)
 assert.equal(stableApproach.goAroundRequired, false)
+const stableThreeDegreeFinal = approachAssessmentFor({ ...stableApproachInput, activeKind: 'final', verticalSpeedFpm: -768 })
+assert.equal(stableThreeDegreeFinal.stable, true, 'The published 3-degree path must count as stable before flare')
+assert.equal(approachAssessmentFor({ ...stableApproachInput, activeKind: 'final', verticalSpeedFpm: -1_100 }).goAroundRequired, true, 'An unstable final sink must trigger recovery before touchdown')
+assert.ok(finalVerticalSpeedFpm(145, 3) < -1_200)
+assert.ok(finalVerticalSpeedFpm(145, PILOT_OPERATING_LIMITS.approach.nominalFlarePitchDeg) > -600)
 
 const unsafeBase = approachAssessmentFor({
   phase: 'enroute',
@@ -182,6 +190,10 @@ assert.equal(flightSimulator.setThrottle(1, 'agent', 'Blocked cross-mode input')
 assert.equal(flightSimulator.setThrottle(1, 'human', 'Allowed manual input').accepted, true)
 flightSimulator.reset(17)
 assert.equal(flightSimulator.getState().flightMode, 'unselected', 'Reset must restore mode selection')
+const pilotManual = await executeFlightTool('read_pilot_manual', {})
+assert.equal(pilotManual.details.manual.flare.pitchDeg.nominal, PILOT_OPERATING_LIMITS.approach.nominalFlarePitchDeg)
+assert.equal(pilotManual.details.manual.touchdown.maximumSinkRateFpm, PILOT_OPERATING_LIMITS.approach.maxTouchdownSinkFpm)
+assert.deepEqual(pilotManual.guidance.availableActions, ['read_pilot_manual', 'start_flight'])
 const started = await executeFlightTool('start_flight', {})
 assert.equal(started.ok, true)
 assert.equal(started.details.state.flightMode, 'agent')
@@ -235,6 +247,23 @@ const emergency = await executeFlightTool('wait_for_flight_event', {
 assert.equal(emergency.event, 'emergency_detected')
 assert.ok(emergency.decisionContext)
 assert.equal(emergency.state.checkride.decisionContextRead, true)
+const realDateNow = Date.now
+const deadlineTestStart = realDateNow()
+Date.now = () => deadlineTestStart + (MISSION_PROFILE.wallClockDeadlineSeconds + 1) * 1_000
+flightSimulator.advanceForTesting(1)
+Date.now = realDateNow
+assert.equal(flightSimulator.getState().mission.outcome, 'in_progress', 'The mission clock must score lateness without stopping the aircraft')
+assert.ok(flightSimulator.getState().checkride.score.deductions.some(({ id }) => id === 'mission-timeout'))
+
+const commandForCheckpoint = (checkpoint: RouteCommandPoint, index: number): FlightCommandStep => Object.freeze({
+  id: `cross-${checkpoint.id.toLowerCase()}`,
+  when: index === 0 ? Object.freeze({ type: 'immediate' as const }) : Object.freeze({ type: 'active_waypoint' as const, value: checkpoint.id }),
+  lateral: Object.freeze({ mode: 'track_fix' as const, waypointId: checkpoint.id }),
+  vertical: Object.freeze({ mode: 'altitude' as const, altitudeFt: checkpoint.altitudeFt }),
+  energy: Object.freeze({ mode: 'airspeed' as const, airspeedKt: checkpoint.airspeedKt }),
+  gearDown: checkpoint.gearDown,
+  flapsDeg: checkpoint.flapsDeg,
+})
 
 for (const seed of [17, 42, 81] as const) {
   flightSimulator.reset(seed)
@@ -260,17 +289,6 @@ for (const seed of [17, 42, 81] as const) {
     `${clearance.destination} runway ${clearance.runway}, altitude ${clearance.altitudeFt}, heading ${Math.round(clearance.headingDeg)}`,
     'agent',
   ).accepted, true)
-  const commandForCheckpoint = (checkpoint: RouteCommandPoint, index: number): FlightCommandStep => {
-    return Object.freeze({
-      id: `cross-${checkpoint.id.toLowerCase()}`,
-      when: index === 0 ? Object.freeze({ type: 'immediate' as const }) : Object.freeze({ type: 'active_waypoint' as const, value: checkpoint.id }),
-      lateral: Object.freeze({ mode: 'track_fix' as const, waypointId: checkpoint.id }),
-      vertical: Object.freeze({ mode: 'altitude' as const, altitudeFt: checkpoint.altitudeFt }),
-      energy: Object.freeze({ mode: 'airspeed' as const, airspeedKt: checkpoint.airspeedKt }),
-      gearDown: checkpoint.gearDown,
-      flapsDeg: checkpoint.flapsDeg,
-    })
-  }
   const returnProgram: FlightPlanProgram = {
     plan: 'return_kstl',
     commands: [
@@ -279,8 +297,14 @@ for (const seed of [17, 42, 81] as const) {
       { id: 'decrab', when: { type: 'distance_to_runway_at_most', value: 0.05 }, lateral: { mode: 'heading', headingDeg: 299 }, vertical: { mode: 'pitch', pitchDeg: 7.2 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
       { id: 'rollout', when: { type: 'aircraft_phase', value: 'landing_roll' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 0 }, gearDown: true, flapsDeg: 30 },
     ],
+    goAroundCommands: [
+      { id: 'go-around-climb', when: { type: 'immediate' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 7 }, energy: { mode: 'throttle', throttle: 1 }, gearDown: false, flapsDeg: 10 },
+      { id: 'go-around-level', when: { type: 'altitude_at_least', value: 2_200 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_GO_AROUND' }, vertical: { mode: 'altitude', altitudeFt: 2_200 }, energy: { mode: 'airspeed', airspeedKt: 180 }, gearDown: false, flapsDeg: 10 },
+    ],
   }
-  assert.equal(flightSimulator.programFlightPlan(returnProgram, 'Program the cleared emergency return.', 'agent').accepted, true)
+  const programmedReturn = flightSimulator.programFlightPlan(returnProgram, 'Program the cleared emergency return.', 'agent')
+  assert.equal(programmedReturn.accepted, true)
+  assert.equal(programmedReturn.planReview?.status, 'ready')
   if (seed === 17) {
     while (flightSimulator.getState().route.activeWaypointIndex === 0 && flightSimulator.getState().mission.outcome === 'in_progress') {
       flightSimulator.advanceForTesting(1)
@@ -303,6 +327,86 @@ for (const seed of [17, 42, 81] as const) {
   const terminal = flightSimulator.getState()
   assert.equal(terminal.mission.outcome, 'landed', `Seed ${seed} autopilot ended as ${terminal.mission.outcome}`)
 }
+
+const unsafeFlareProgram: FlightPlanProgram = {
+  plan: 'return_kstl',
+  commands: [
+    { id: 'unsafe-final', when: { type: 'immediate' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'altitude', altitudeFt: 1_000 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+    { id: 'unsafe-touchdown-path', when: { type: 'active_waypoint', value: 'KSTL_TOUCHDOWN' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 3 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+    { id: 'unsafe-flare', when: { type: 'distance_to_runway_at_most', value: 0.35 }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 3 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+    { id: 'unsafe-rollout', when: { type: 'aircraft_phase', value: 'landing_roll' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 0 }, gearDown: true, flapsDeg: 30 },
+  ],
+}
+const unsafeReview = reviewFlightPlan(unsafeFlareProgram)
+assert.equal(unsafeReview.status, 'warning')
+assert.ok(unsafeReview.warnings.some(({ code, message }) => code === 'flare_sink_rate' && message.includes('-1280')))
+assert.ok(unsafeReview.warnings.some(({ code, message }) => code === 'flare_lateral_guidance' && message.includes('crosswind drift')))
+assert.ok(unsafeReview.warnings.some(({ code, message }) => code === 'unstable_final_pitch' && message.includes('Use altitude mode')))
+assert.ok(unsafeReview.warnings.some(({ code }) => code === 'missing_go_around'))
+
+const prematureDepartureReview = reviewFlightPlan({
+  plan: 'continue_kmdw',
+  commands: [
+    { id: 'takeoff-roll', when: { type: 'immediate' }, lateral: { mode: 'heading', headingDeg: 124 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 1 }, gearDown: true, flapsDeg: 10 },
+    { id: 'early-track', when: { type: 'airspeed_at_least', value: 165 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_CLIMB' }, vertical: { mode: 'pitch', pitchDeg: 10 }, energy: { mode: 'throttle', throttle: 1 }, gearDown: false, flapsDeg: 10 },
+  ],
+})
+assert.ok(prematureDepartureReview.warnings.some(({ code, message }) => code === 'premature_departure_tracking' && message.includes('before liftoff')))
+
+flightSimulator.reset(17)
+assert.ok(flightSimulator.startFlight('agent'))
+assert.equal(flightSimulator.programFlightPlan(program, 'Program departure for contingency test.', 'agent').accepted, true)
+while (flightSimulator.getState().checkride.status !== 'decision_required') flightSimulator.advanceForTesting(1)
+flightSimulator.getDecisionContext('agent')
+assert.equal(flightSimulator.requestDiversion('return_kstl', 'Return for contingency test.', 'agent').accepted, true)
+flightSimulator.advanceForTesting(5)
+const contingencyClearance = flightSimulator.getState().atc.clearance
+assert.ok(contingencyClearance)
+assert.equal(flightSimulator.acceptAtcClearance(
+  contingencyClearance.id,
+  `${contingencyClearance.destination} runway ${contingencyClearance.runway}, altitude ${contingencyClearance.altitudeFt}, heading ${Math.round(contingencyClearance.headingDeg)}`,
+  'agent',
+).accepted, true)
+const contingencyProgram: FlightPlanProgram = {
+  plan: 'return_kstl',
+  commands: [
+    ...contingencyClearance.commandPoints.map(commandForCheckpoint),
+    { id: 'bad-flare', when: { type: 'distance_to_runway_at_most', value: 0.35 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_TOUCHDOWN' }, vertical: { mode: 'pitch', pitchDeg: 3 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+    { id: 'bad-rollout', when: { type: 'aircraft_phase', value: 'landing_roll' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 0 }, gearDown: true, flapsDeg: 30 },
+  ],
+  goAroundCommands: [
+    { id: 'armed-go-around', when: { type: 'immediate' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 7 }, energy: { mode: 'throttle', throttle: 1 }, gearDown: false, flapsDeg: 10 },
+    { id: 'armed-level', when: { type: 'altitude_at_least', value: 2_200 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_GO_AROUND' }, vertical: { mode: 'altitude', altitudeFt: 2_200 }, energy: { mode: 'airspeed', airspeedKt: 180 }, gearDown: false, flapsDeg: 10 },
+    ...contingencyClearance.commandPoints.map((checkpoint, index) => Object.freeze({
+      ...commandForCheckpoint(checkpoint, index + 1),
+      id: `retry-${checkpoint.id.toLowerCase()}`,
+    })),
+    { id: 'retry-flare', when: { type: 'distance_to_runway_at_most', value: 0.35 }, lateral: { mode: 'track_fix', waypointId: 'KSTL_TOUCHDOWN' }, vertical: { mode: 'pitch', pitchDeg: 7.2 }, energy: { mode: 'airspeed', airspeedKt: 145 }, gearDown: true, flapsDeg: 30 },
+    { id: 'retry-rollout', when: { type: 'aircraft_phase', value: 'landing_roll' }, lateral: { mode: 'heading', headingDeg: 304 }, vertical: { mode: 'pitch', pitchDeg: 0 }, energy: { mode: 'throttle', throttle: 0 }, gearDown: true, flapsDeg: 30 },
+  ],
+}
+const armedProgram = flightSimulator.programFlightPlan(contingencyProgram, 'Test pre-armed go-around.', 'agent')
+assert.equal(armedProgram.accepted, true)
+assert.equal(armedProgram.planReview?.status, 'warning')
+while (!flightSimulator.getTrace().some(({ action }) => action === 'go_around_initiated')
+  && flightSimulator.getState().mission.outcome === 'in_progress'
+  && flightSimulator.getState().elapsedSeconds < 1_200) {
+  flightSimulator.advanceForTesting(1)
+}
+assert.equal(flightSimulator.getState().mission.outcome, 'in_progress', 'Pre-armed go-around must prevent the unsafe touchdown')
+assert.ok(flightSimulator.getTrace().some(({ action }) => action === 'go_around_initiated'))
+assert.equal(flightSimulator.getState().autopilot.program?.commands[0]?.id, 'armed-go-around')
+assert.equal(flightSimulator.getState().autopilot.program?.goAroundCommands?.[0]?.id, 'armed-go-around')
+while (!flightSimulator.getState().route.completedWaypointIds.includes('KSTL_GO_AROUND')
+  && flightSimulator.getState().mission.outcome === 'in_progress'
+  && flightSimulator.getState().elapsedSeconds < 1_500) {
+  flightSimulator.advanceForTesting(1)
+}
+assert.ok(flightSimulator.getState().route.completedWaypointIds.includes('KSTL_GO_AROUND'), 'The missed-approach fix must be capturable at level-off')
+while (flightSimulator.getState().mission.outcome === 'in_progress' && flightSimulator.getState().elapsedSeconds < 2_500) {
+  flightSimulator.advanceForTesting(1)
+}
+assert.equal(flightSimulator.getState().mission.outcome, 'landed', 'The pre-armed missed-approach route must remain flyable through a second landing')
 
 flightSimulator.reset(17)
 assert.ok(flightSimulator.startFlight('agent'))
