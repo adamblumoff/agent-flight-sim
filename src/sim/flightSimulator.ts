@@ -7,7 +7,7 @@ import type {
   TraceEvent,
 } from './types'
 import type { FlightControlInput } from './flightCommands.ts'
-import { checkpointCaptureRadiusNm } from './checkpoints.ts'
+import { checkpointCaptureRadiusNm, isCheckpointHit } from './checkpoints.ts'
 import { WIDE_BODY_TWINJET_ENVELOPE, staticThrustAccelerationKtPerSecond, type AircraftEnvelope } from './aircraftEnvelope.ts'
 import { airborneDragKtPerSecond, groundMotionFor, stallResponseFor, turbulenceFor } from './aerodynamics.ts'
 import { BUILD_ID } from '../buildInfo.ts'
@@ -1830,33 +1830,13 @@ class FlightSimulator {
     }
   }
 
-  private advanceRoute(position: { lat: number; lon: number }, altitudeFt: number, _headingDeg: number): { route: RouteState; phase: MissionPhase; reached: RouteWaypoint | null; next: RouteWaypoint | null; stalled: boolean } {
+  private advanceRoute(position: { lat: number; lon: number }, altitudeFt: number, headingDeg: number): { route: RouteState; phase: MissionPhase; reached: RouteWaypoint | null; next: RouteWaypoint | null; stalled: boolean } {
     const route = this.state.route
     const active = route.waypoints[route.activeWaypointIndex]
     if (!active) return { route, phase: this.state.mission.phase, reached: null, next: null, stalled: false }
     const horizontalDistanceNm = distanceNm(position, active)
-    const captureRadiusNm = checkpointCaptureRadiusNm(active)
-    const runwayAlignedFinal = active.kind === 'final' && route.destination === 'KSTL'
-      ? horizontalDistanceNm <= captureRadiusNm
-        && Math.abs(headingError(KSTL_RUNWAY_30L.headingDeg, _headingDeg)) <= 45
-      : false
-    const captureHeadingToleranceDeg = active.id === 'KSTL_COURSE_REVERSAL' ? 25 : 45
-    const headingConstraintSatisfied = active.captureHeadingDeg === undefined
-      || Math.abs(headingError(active.captureHeadingDeg, _headingDeg)) <= captureHeadingToleranceDeg
-    const departureCaptureSatisfied = active.kind !== 'departure' || (
-      altitudeFt >= KSTL_RUNWAY_12R.elevationFt + LIFTOFF_CONFIRM_AGL_FT
-      && altitudeFt >= active.altitudeFt - 700
-      && altitudeFt <= active.altitudeFt + 700
-      && this.state.verticalSpeedFpm > 100
-    )
-    const goAroundCaptureSatisfied = active.id !== 'KSTL_GO_AROUND' || (
-      altitudeFt >= active.altitudeFt - 300
-      && this.state.verticalSpeedFpm > -1_000
-    )
     const reached = !route.completedWaypointIds.includes(active.id)
-      && (active.kind === 'final' && route.destination === 'KSTL'
-        ? runwayAlignedFinal
-        : horizontalDistanceNm <= captureRadiusNm && headingConstraintSatisfied && departureCaptureSatisfied && goAroundCaptureSatisfied)
+      && isCheckpointHit(horizontalDistanceNm, active)
     const completedWaypointIds = reached
       ? Object.freeze([...route.completedWaypointIds, active.id])
       : route.completedWaypointIds
@@ -1872,7 +1852,7 @@ class FlightSimulator {
     const routeBearingDeg = next.captureHeadingDeg !== undefined && distanceNm(position, next) <= checkpointCaptureRadiusNm(next)
       ? next.captureHeadingDeg
       : directRouteBearingDeg
-    const routeHeadingErrorDeg = Math.abs(headingError(routeBearingDeg, _headingDeg))
+    const routeHeadingErrorDeg = Math.abs(headingError(routeBearingDeg, headingDeg))
     if (this.routeProgress.waypointId !== next.id || reached) {
       this.routeProgress = { waypointId: next.id, bestDistanceNm: distanceNm(position, next), bestHeadingErrorDeg: routeHeadingErrorDeg, secondsWithoutProgress: 0, eventSent: false }
     } else if (arrivalLegProgressed(horizontalDistanceNm, this.routeProgress.bestDistanceNm, routeHeadingErrorDeg, this.routeProgress.bestHeadingErrorDeg)) {
