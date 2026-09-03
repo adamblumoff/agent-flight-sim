@@ -6,12 +6,13 @@ import {
   type ToolReceiptTone,
 } from './flightTools.ts'
 import { randomCheckrideSeed } from '../sim/missionProfiles.ts'
+import { PILOT_MANUAL } from './pilotManual.ts'
 
 const routeSet = new Set<string>(routePlans)
 const eventSet = new Set<string>(flightEventValues)
 
 const agentState = (state: FlightState): AgentFlightState => {
-  const { seed: _privateSeed, ...checkride } = state.checkride
+  const { seed: _privateSeed, wallClockDeadlineSeconds: _deadline, wallClockSecondsRemaining: _remaining, ...checkride } = state.checkride
   return { ...state, checkride }
 }
 
@@ -32,17 +33,17 @@ const hazardsFor = (state: FlightState): readonly string[] => {
 }
 
 const availableActionsFor = (state: FlightState): readonly FlightToolName[] => {
-  if (state.mission.outcome !== 'in_progress' || state.flightMode !== 'agent') return Object.freeze([])
-  const actions: FlightToolName[] = ['wait_for_flight_event']
+  if (state.mission.outcome !== 'in_progress') return Object.freeze([])
+  if (state.flightMode === 'unselected') return Object.freeze(['read_pilot_manual', 'start_flight'])
+  if (state.flightMode !== 'agent') return Object.freeze([])
+  const actions: FlightToolName[] = ['read_pilot_manual', 'wait_for_flight_event']
   if (state.checkride.status === 'decision_required') {
     if (state.atc.status === 'none') actions.push('request_diversion')
     else if (state.atc.status === 'cleared') actions.push('accept_clearance')
     else if (state.atc.status === 'accepted') actions.push('program_flight_plan')
     return Object.freeze(actions)
   }
-  if (!state.autopilot.engaged && state.motion.stalled) actions.push('program_flight_plan')
-  if (state.mission.goAroundRequired) actions.push('program_flight_plan')
-  if (state.mission.phase === 'preflight') actions.push('program_flight_plan')
+  if (state.mission.phase === 'preflight' || state.atc.status === 'accepted') actions.push('program_flight_plan')
   return Object.freeze(actions)
 }
 
@@ -72,7 +73,6 @@ const controlCueFor = (state: FlightState) => {
 }
 
 const guidanceFor = (state = flightSimulator.getState()): FlightToolGuidance => {
-  const missionWallSecondsRemaining = state.checkride.wallClockSecondsRemaining ?? state.checkride.wallClockDeadlineSeconds
   return {
     phase: state.mission.phase,
     objective: objectiveFor(state),
@@ -82,7 +82,6 @@ const guidanceFor = (state = flightSimulator.getState()): FlightToolGuidance => 
     availableActions: availableActionsFor(state),
     eventRevision: state.mission.eventRevision,
     decisionSecondsRemaining: state.checkride.decisionSecondsRemaining,
-    missionWallSecondsRemaining,
   }
 }
 
@@ -112,13 +111,13 @@ const requiredProgramString = (value: unknown, name: string) => {
   return value.trim()
 }
 
-const flightPlanProgram = (input: FlightToolArguments['program_flight_plan']): FlightPlanProgram => {
-  if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_kmdw or return_kstl')
-  if (input.restart_route !== undefined && typeof input.restart_route !== 'boolean') throw new TypeError('restart_route must be a boolean')
-  if (!Array.isArray(input.commands) || input.commands.length < 2 || input.commands.length > 16) throw new RangeError('commands must contain 2 to 16 entries')
+type ProgramCommandInput = FlightToolArguments['program_flight_plan']['commands'][number]
+
+const flightCommands = (input: readonly ProgramCommandInput[], field: string) => {
+  if (!Array.isArray(input) || input.length < 2 || input.length > 16) throw new RangeError(`${field} must contain 2 to 16 entries`)
   const aircraftPhases = new Set<AircraftPhase>(['takeoff_roll', 'airborne', 'landing_roll', 'stopped', 'crash_slide'])
-  const commands = input.commands.map((raw, index): FlightCommandStep => {
-    const prefix = `commands[${index}]`
+  return Object.freeze(input.map((raw, index): FlightCommandStep => {
+    const prefix = `${field}[${index}]`
     const id = requiredProgramString(raw.id, `${prefix}.id`)
     let when: FlightCommandStep['when']
     if (raw.when.type === 'immediate') when = Object.freeze({ type: 'immediate' })
@@ -147,15 +146,28 @@ const flightPlanProgram = (input: FlightToolArguments['program_flight_plan']): F
     if (typeof raw.gear_down !== 'boolean') throw new TypeError(`${prefix}.gear_down must be a boolean`)
     if (![0, 10, 20, 30].includes(raw.flaps_deg)) throw new RangeError(`${prefix}.flaps_deg must be 0, 10, 20, or 30`)
     return Object.freeze({ id, when, lateral, vertical, energy, gearDown: raw.gear_down, flapsDeg: raw.flaps_deg })
-  })
+  }))
+}
+
+const flightPlanProgram = (input: FlightToolArguments['program_flight_plan']): FlightPlanProgram => {
+  if (!routeSet.has(input.plan)) throw new TypeError('plan must be continue_kmdw or return_kstl')
+  if (input.restart_route !== undefined && typeof input.restart_route !== 'boolean') throw new TypeError('restart_route must be a boolean')
+  if (input.go_around !== undefined && (typeof input.go_around !== 'object' || input.go_around === null)) throw new TypeError('go_around must be an object')
+  const commands = flightCommands(input.commands, 'commands')
+  const goAroundCommands = input.go_around ? flightCommands(input.go_around.commands, 'go_around.commands') : undefined
   return Object.freeze({
     plan: input.plan,
-    commands: Object.freeze(commands),
+    commands,
+    ...(goAroundCommands ? { goAroundCommands } : {}),
     restartRoute: input.restart_route ?? false,
   })
 }
 
 const executors: { readonly [Name in FlightToolName]: (input: FlightToolArguments[Name]) => Promise<FlightToolResults[Name]> } = {
+  read_pilot_manual: async (input) => {
+    if (Object.keys(input).length > 0) throw new TypeError('read_pilot_manual takes no arguments')
+    return receipt('Pilot operating limits loaded. Use them to choose the exact command program.', 'neutral', { manual: PILOT_MANUAL })
+  },
   start_flight: async (input) => {
     if (Object.keys(input).length > 0) throw new TypeError('start_flight takes no arguments; the scenario is selected by the environment')
     const current = flightSimulator.getState()

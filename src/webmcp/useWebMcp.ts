@@ -3,7 +3,7 @@ import { executeFlightToolFromUnknown } from '../shared/executeFlightTool'
 import { flightSimulator } from '../sim/flightSimulator'
 import type { FlightState } from '../sim/types'
 import { buildRadioCue, type RadioCue } from '../audio/radioCues'
-import { persistEvaluationEvidence } from './evaluationArchive'
+import { queueEvaluationEvidence } from './evaluationArchive'
 import { createFlightRunExport } from './runExport'
 import {
   flightToolDefinitions,
@@ -42,10 +42,9 @@ export interface WebMcpActivity {
 interface BeginActivityOptions {
   readonly observation?: FlightState
   readonly startedAt?: number
-  readonly resetSequence?: boolean
 }
 type BeginActivity = (activity: Pick<WebMcpActivity, 'tool' | 'title' | 'arguments'>, options?: BeginActivityOptions) => number
-type CompleteActivity = (id: number, result: WebMcpRecordedResult, failed?: boolean) => Promise<void>
+type CompleteActivity = (id: number, result: WebMcpRecordedResult, failed?: boolean) => void
 
 function createFlightTools(definitions: readonly FlightToolDefinition[], beginActivity: BeginActivity, completeActivity: CompleteActivity): WebMCP.ModelContextTool[] {
   return definitions.map((definition) => ({
@@ -63,14 +62,13 @@ function createFlightTools(definitions: readonly FlightToolDefinition[], beginAc
         activityId ??= beginActivity(activity, {
           observation: flightSimulator.getState(),
           startedAt,
-          resetSequence: true,
         })
-        await completeActivity(activityId, result, !result.ok)
+        completeActivity(activityId, result, !result.ok)
         return result
       } catch (error) {
         activityId ??= beginActivity(activity, { startedAt })
         const message = error instanceof Error ? error.message : 'Tool call failed'
-        await completeActivity(activityId, {
+        completeActivity(activityId, {
           ok: false,
           summary: message,
           error: { name: error instanceof Error ? error.name : 'Error', message },
@@ -100,7 +98,6 @@ export function useWebMcp() {
     const modelContext = document.modelContext
     const controller = new AbortController()
     const beginActivity: BeginActivity = (activity, options = {}) => {
-      if (options.resetSequence) nextActivityId.current = 1
       const observation = options.observation ?? flightSimulator.getState()
       const id = nextActivityId.current++
       const event = {
@@ -120,12 +117,12 @@ export function useWebMcp() {
         radioCues: Object.freeze([]),
         traceStartId: activity.tool === 'start_flight' ? 0 : (flightSimulator.getTrace().at(-1)?.id ?? 0),
       }
-      const nextActivities = activity.tool === 'start_flight' ? [event] : [...activitiesRef.current, event]
+      const nextActivities = [...activitiesRef.current, event]
       activitiesRef.current = nextActivities
       setActivities(nextActivities)
       return id
     }
-    const completeActivity: CompleteActivity = async (id, result, failed = false) => {
+    const completeActivity: CompleteActivity = (id, result, failed = false) => {
       const nextObservation = flightSimulator.getState()
       const completedAt = Date.now()
       const nextActivities: readonly WebMcpActivity[] = activitiesRef.current.map((activity) => {
@@ -149,7 +146,7 @@ export function useWebMcp() {
       })
       activitiesRef.current = nextActivities
       setActivities(nextActivities)
-      await persistEvaluationEvidence(createFlightRunExport(
+      void queueEvaluationEvidence(createFlightRunExport(
         nextActivities,
         nextObservation,
         flightSimulator.getMissionBrief(),

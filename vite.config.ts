@@ -1,11 +1,21 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { mkdir, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 
 const MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
+
+const gitHead = () => {
+  try { return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() } catch { return '' }
+}
+
+const railwayBuild = Boolean(process.env.RAILWAY_ENVIRONMENT_ID || process.env.RAILWAY_PROJECT_ID)
+const sourceRevision = process.env.RAILWAY_GIT_COMMIT_SHA?.trim()
+  || (railwayBuild ? gitHead() : process.env.VITE_BUILD_SHA?.trim())
+  || ''
 
 function evidenceArchive(): Plugin {
   return {
@@ -61,6 +71,7 @@ function evidenceArchive(): Plugin {
 
 export default defineConfig({
   plugins: [evidenceArchive(), tailwindcss(), react()],
+  define: { 'import.meta.env.VITE_BUILD_SHA': JSON.stringify(sourceRevision) },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
